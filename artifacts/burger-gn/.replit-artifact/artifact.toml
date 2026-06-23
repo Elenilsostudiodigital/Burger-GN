@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "The Burger GN"
+version = "1.0.0"
+id = "artifacts/burger-gn"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 25983
+
+[services.development]
+run = "pnpm --filter @workspace/burger-gn run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/burger-gn", "run", "build" ]
+publicDir = "artifacts/burger-gn/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "25983"
+BASE_PATH = "/"
