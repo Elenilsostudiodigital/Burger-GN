@@ -1,7 +1,9 @@
-import { Switch, Route, Router as WouterRouter } from "wouter";
+import { Switch, Route, Router as WouterRouter, Redirect, useLocation } from "wouter";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { CartProvider } from "./context/CartContext";
+import { AdminProvider, useAdmin } from "./context/AdminContext";
 import NotFound from "@/pages/not-found";
 
 import Home from "./pages/Home";
@@ -9,15 +11,49 @@ import Menu from "./pages/Menu";
 import Cart from "./pages/Cart";
 import Checkout from "./pages/Checkout";
 import Confirmation from "./pages/Confirmation";
+import OrderTracking from "./pages/OrderTracking";
+import AdminLogin from "./pages/admin/Login";
+import AdminDashboard from "./pages/admin/Dashboard";
+import AdminMenuAdmin from "./pages/admin/MenuAdmin";
+
+const queryClient = new QueryClient();
+
+function ProtectedAdminRoute({ component: Component }: { component: React.ComponentType }) {
+  const { isAdmin, loading } = useAdmin();
+  const [, setLocation] = useLocation();
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-[#0a0a0a] flex items-center justify-center">
+        <div className="w-8 h-8 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (!isAdmin) {
+    setLocation("/admin/login");
+    return null;
+  }
+
+  return <Component />;
+}
 
 function Router() {
   return (
     <Switch>
+      {/* Customer routes */}
       <Route path="/" component={Home} />
       <Route path="/cardapio" component={Menu} />
       <Route path="/carrinho" component={Cart} />
       <Route path="/checkout" component={Checkout} />
       <Route path="/confirmacao" component={Confirmation} />
+      <Route path="/pedido/:trackingId" component={OrderTracking} />
+
+      {/* Admin routes */}
+      <Route path="/admin/login" component={AdminLogin} />
+      <Route path="/admin" component={() => <ProtectedAdminRoute component={AdminDashboard} />} />
+      <Route path="/admin/cardapio" component={() => <ProtectedAdminRoute component={AdminMenuAdmin} />} />
+
       <Route component={NotFound} />
     </Switch>
   );
@@ -25,14 +61,18 @@ function Router() {
 
 function App() {
   return (
-    <TooltipProvider>
-      <CartProvider>
-        <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
-          <Router />
-        </WouterRouter>
-        <Toaster />
-      </CartProvider>
-    </TooltipProvider>
+    <QueryClientProvider client={queryClient}>
+      <TooltipProvider>
+        <AdminProvider>
+          <CartProvider>
+            <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
+              <Router />
+            </WouterRouter>
+            <Toaster />
+          </CartProvider>
+        </AdminProvider>
+      </TooltipProvider>
+    </QueryClientProvider>
   );
 }
 

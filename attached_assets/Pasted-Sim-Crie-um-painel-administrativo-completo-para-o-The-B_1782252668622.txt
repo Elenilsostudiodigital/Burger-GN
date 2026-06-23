@@ -1,0 +1,127 @@
+Sim. Crie um painel administrativo completo para o The Burger GN, parecido com um sistema de pedidos tipo Anota Aí.
+
+Quero que o app tenha:
+
+1. Painel administrativo com login e senha
+
+- Tela de login para administrador
+- Dashboard com pedidos do dia
+- Total de vendas
+- Quantidade de pedidos
+- Pedidos pendentes, em preparo, saiu para entrega e finalizados
+
+2. Gerenciamento de cardápio
+
+- Cadastrar produtos
+- Editar produtos
+- Excluir produtos
+- Ativar ou desativar produtos
+- Alterar preços
+- Alterar fotos
+- Criar categorias:
+  - Hambúrgueres
+  - Combos
+  - Bebidas
+  - Adicionais
+  - Promoções
+
+3. Sistema de pedidos completo
+   O cliente deve acessar o link do app, escolher os produtos, adicionar ao carrinho e finalizar o pedido.
+
+Na finalização, o cliente deve informar:
+
+- Nome
+- Telefone
+- Endereço
+- Bairro
+- Referência
+- Tipo de pedido:
+  - Delivery
+  - Retirada no balcão
+  - Comer no local
+- Forma de pagamento:
+  - Pix
+  - Dinheiro
+  - Cartão
+- Observação do pedido
+
+4. Notificação de novo pedido
+   Quando um pedido novo chegar, o painel administrativo deve:
+
+- Tocar um som de alerta
+- Mostrar aviso visual de novo pedido
+- Atualizar automaticamente a lista de pedidos
+- Destacar o novo pedido na tela
+
+5. WhatsApp
+   Quando o cliente finalizar o pedido, gerar uma mensagem automática para o WhatsApp da hamburgueria com:
+
+- Nome do cliente
+- Telefone
+- Itens do pedido
+- Quantidades
+- Total
+- Tipo de entrega
+- Forma de pagamento
+- Endereço
+- Observações
+
+Também gerar uma mensagem de confirmação para o cliente com o resumo do pedido.
+
+6. Acompanhamento do pedido
+   Criar uma página para o cliente acompanhar o status do pedido:
+
+- Pedido recebido
+- Em preparo
+- Saiu para entrega
+- Finalizado
+
+O cliente deve conseguir acessar o acompanhamento pelo link do pedido.
+
+7. Impressão
+   Preparar uma área no painel para imprimir o pedido em impressora térmica ou impressora comum.
+   Criar botão “Imprimir pedido”.
+   O comprovante deve mostrar:
+
+- Número do pedido
+- Nome do cliente
+- Telefone
+- Itens
+- Quantidades
+- Total
+- Forma de pagamento
+- Tipo de entrega
+- Endereço
+- Observações
+
+8. Organização dos pedidos
+   No painel, separar os pedidos por status:
+
+- Novos pedidos
+- Em preparo
+- Saiu para entrega
+- Finalizados
+- Cancelados
+
+9. Banco de dados
+   Salvar:
+
+- Produtos
+- Categorias
+- Pedidos
+- Clientes
+- Status dos pedidos
+- Histórico de pedidos
+
+10. Design
+    Manter o visual premium, preto, amarelo mostarda e branco.
+    O painel deve ser fácil de usar no celular, tablet e computador.
+
+11. Importante
+    Faça primeiro funcionando com banco de dados local ou simples.
+    Depois deixe preparado para futuramente integrar:
+
+- WhatsApp Business API
+- Mercado Pago Pix automático
+- Impressora térmica
+- Notificações em tempo real

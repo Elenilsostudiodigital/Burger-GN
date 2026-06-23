@@ -1,73 +1,60 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Link, useLocation } from 'wouter';
+import { Link } from 'wouter';
 import { motion } from 'framer-motion';
-import { CheckCircle2, MessageCircle, Home } from 'lucide-react';
+import { CheckCircle2, MessageCircle, Home, ExternalLink } from 'lucide-react';
 import { PageTransition } from '../components/PageTransition';
 import { useCart } from '../context/CartContext';
-import { WHATSAPP_NUMBER } from '../data/menu';
+import { WHATSAPP_NUMBER, ORDER_TYPE_LABELS, PAYMENT_METHOD_LABELS } from '../lib/api';
 import { Button } from '@/components/ui/button';
 
-interface StoredCheckoutData {
-  nome: string;
-  telefone: string;
-  endereco: string;
-  bairro: string;
-  referencia: string;
-  troco: string;
-  orderType: 'delivery' | 'retirada' | 'local';
-  paymentMethod: 'pix' | 'dinheiro' | 'cartao';
-  total: number;
-  deliveryFee: number;
+interface StoredOrder {
+  trackingId: string;
+  orderNumber: number;
+  customerName: string;
+  phone: string;
+  orderType: 'delivery' | 'pickup' | 'local';
+  paymentMethod: 'pix' | 'cash' | 'card';
+  changeFor: string | null;
+  address: string;
+  neighborhood: string;
+  reference: string;
+  notes: string;
   items: Array<{ name: string; quantity: number; price: number; subtotal: number }>;
+  subtotal: number;
+  deliveryFee: number;
+  total: number;
 }
 
-function buildWhatsAppMessage(data: StoredCheckoutData): string {
-  const itemsText = data.items
-    .map(i => `• ${i.quantity}x ${i.name} - R$ ${i.subtotal.toFixed(2).replace('.', ',')}`)
-    .join('\n');
+function buildWhatsAppMessage(order: StoredOrder): string {
+  const itemsText = order.items.map(i =>
+    `• ${i.quantity}x ${i.name} - R$ ${i.subtotal.toFixed(2).replace('.', ',')}`
+  ).join('\n');
 
-  const orderTypeLabels = {
-    delivery: '🛵 Delivery',
-    retirada: '🏃 Retirada no local',
-    local: '🍽️ Comer no local',
-  };
-
-  const paymentLabels = {
-    pix: 'Pix',
-    dinheiro: 'Dinheiro',
-    cartao: 'Cartão',
-  };
-
-  let deliveryText = orderTypeLabels[data.orderType];
-  if (data.orderType === 'delivery') {
-    deliveryText += `\n📍 *Endereço:* ${data.endereco} - ${data.bairro}`;
-    if (data.referencia) deliveryText += `\n📌 *Referência:* ${data.referencia}`;
+  let deliveryText = ORDER_TYPE_LABELS[order.orderType];
+  if (order.orderType === 'delivery') {
+    deliveryText += `\n📍 *Endereço:* ${order.address}, ${order.neighborhood}`;
+    if (order.reference) deliveryText += `\n📌 *Ref.:* ${order.reference}`;
   }
 
-  let paymentText = paymentLabels[data.paymentMethod];
-  if (data.paymentMethod === 'dinheiro' && data.troco) {
-    paymentText += ` (troco para R$ ${data.troco})`;
+  let paymentText = PAYMENT_METHOD_LABELS[order.paymentMethod];
+  if (order.paymentMethod === 'cash' && order.changeFor) {
+    paymentText += ` (troco p/ R$ ${order.changeFor})`;
   }
 
-  const subtotal = data.total - data.deliveryFee;
-  const deliveryLine =
-    data.deliveryFee > 0
-      ? `🚴 *Entrega:* R$ ${data.deliveryFee.toFixed(2).replace('.', ',')}`
-      : `🚴 *Entrega:* Grátis`;
+  return `🍔 *NOVO PEDIDO #${order.orderNumber} - The Burger GN*
 
-  return `🍔 *NOVO PEDIDO - The Burger GN*
-
-👤 *Cliente:* ${data.nome}
-📱 *Telefone:* ${data.telefone}
+👤 *Cliente:* ${order.customerName}
+📱 *Telefone:* ${order.phone}
 
 📦 *Tipo:* ${deliveryText}
+${order.notes ? `📝 *Obs.:* ${order.notes}` : ''}
 
-🛒 *Itens do Pedido:*
+🛒 *Itens:*
 ${itemsText}
 
-💰 *Subtotal:* R$ ${subtotal.toFixed(2).replace('.', ',')}
-${deliveryLine}
-💵 *TOTAL: R$ ${data.total.toFixed(2).replace('.', ',')}*
+💰 *Subtotal:* R$ ${order.subtotal.toFixed(2).replace('.', ',')}
+🚴 *Entrega:* ${order.deliveryFee > 0 ? `R$ ${order.deliveryFee.toFixed(2).replace('.', ',')}` : 'Grátis'}
+💵 *TOTAL: R$ ${order.total.toFixed(2).replace('.', ',')}*
 
 💳 *Pagamento:* ${paymentText}
 
@@ -75,63 +62,39 @@ Obrigado! 🙏`;
 }
 
 export default function Confirmation() {
-  const [, setLocation] = useLocation();
-  const { cartItems, clearCart } = useCart();
-
-  // Capture order data into a ref on mount so it survives clearCart()
-  const orderDataRef = useRef<StoredCheckoutData | null>(null);
+  const { clearCart } = useCart();
+  const [order, setOrder] = useState<StoredOrder | null>(null);
   const [whatsappUrl, setWhatsappUrl] = useState('');
-  const [ready, setReady] = useState(false);
   const didInit = useRef(false);
 
   useEffect(() => {
     if (didInit.current) return;
     didInit.current = true;
 
-    const raw = sessionStorage.getItem('checkoutData');
-    if (!raw || cartItems.length === 0) {
-      setLocation('/');
-      return;
-    }
+    const raw = sessionStorage.getItem('lastOrder');
+    if (!raw) return;
 
-    const base = JSON.parse(raw) as Omit<StoredCheckoutData, 'items'>;
+    const stored = JSON.parse(raw) as StoredOrder;
+    setOrder(stored);
 
-    // Snapshot cart items NOW before any clearCart call
-    const items = cartItems.map(ci => ({
-      name: ci.item.name,
-      quantity: ci.quantity,
-      price: ci.item.price,
-      subtotal: ci.item.price * ci.quantity,
-    }));
-
-    const fullData: StoredCheckoutData = { ...base, items };
-    orderDataRef.current = fullData;
-
-    const message = buildWhatsAppMessage(fullData);
-    const encoded = encodeURIComponent(message);
-    const url = `https://wa.me/${WHATSAPP_NUMBER}?text=${encoded}`;
+    const message = buildWhatsAppMessage(stored);
+    const url = `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(message)}`;
     setWhatsappUrl(url);
-    setReady(true);
 
-    // Clear cart and session data after a short delay so the page can render first
-    const timer = setTimeout(() => {
-      clearCart();
-      sessionStorage.removeItem('checkoutData');
-      // Auto-open WhatsApp
-      window.open(url, '_blank');
-    }, 1800);
+    clearCart();
+    sessionStorage.removeItem('lastOrder');
 
-    return () => clearTimeout(timer);
+    setTimeout(() => { window.open(url, '_blank'); }, 1500);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
     <PageTransition className="bg-[#0a0a0a] min-h-screen flex flex-col items-center justify-center p-6 text-center">
-      {/* Animated checkmark */}
+      {/* Check animation */}
       <motion.div
         initial={{ scale: 0, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
-        transition={{ type: 'spring', stiffness: 200, damping: 18, delay: 0.1 }}
+        transition={{ type: 'spring', stiffness: 200, damping: 18 }}
         className="relative w-36 h-36 flex items-center justify-center mb-8"
       >
         <div className="absolute inset-0 rounded-full bg-amber-500/10 animate-ping" style={{ animationDuration: '2.5s' }} />
@@ -141,73 +104,52 @@ export default function Confirmation() {
       </motion.div>
 
       <motion.h1
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.35 }}
-        className="text-4xl font-black text-white uppercase tracking-tighter mb-3"
+        initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}
+        className="text-4xl font-black text-white uppercase tracking-tighter mb-2"
       >
         Pedido Enviado!
       </motion.h1>
 
-      <motion.p
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.45 }}
-        className="text-zinc-400 text-base mb-2 max-w-[300px] leading-relaxed"
-      >
-        Abrindo o WhatsApp para confirmar seu pedido com a gente...
-      </motion.p>
-
-      {orderDataRef.current && (
+      {order && (
         <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.55 }}
-          className="text-zinc-500 text-sm mb-10"
+          initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }}
+          className="mb-2"
         >
-          {orderDataRef.current.items.length} {orderDataRef.current.items.length === 1 ? 'item' : 'itens'} •{' '}
-          <span className="text-amber-500 font-bold">
-            R$ {orderDataRef.current.total.toFixed(2).replace('.', ',')}
-          </span>
+          <p className="text-amber-500 font-black text-2xl">#{order.orderNumber}</p>
         </motion.div>
       )}
 
-      {!orderDataRef.current && !ready && (
-        <p className="text-zinc-500 text-sm mb-10">Preparando seu pedido...</p>
-      )}
+      <motion.p
+        initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.5 }}
+        className="text-zinc-400 text-base mb-10 max-w-[300px] leading-relaxed"
+      >
+        Abrindo o WhatsApp para confirmar seu pedido...
+      </motion.p>
 
       <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.7 }}
+        initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.7 }}
         className="w-full max-w-sm space-y-3"
       >
-        {/* Manual WhatsApp button */}
-        <a
-          href={whatsappUrl || undefined}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="block w-full"
-          aria-disabled={!whatsappUrl}
-        >
-          <Button
-            size="lg"
-            disabled={!whatsappUrl}
-            className="w-full min-h-[60px] text-base font-bold tracking-wider rounded-2xl bg-[#25D366] hover:bg-[#20bd5a] text-white flex items-center justify-center gap-2 shadow-lg shadow-green-900/30"
-          >
-            <MessageCircle size={22} />
-            ENVIAR PELO WHATSAPP
+        <a href={whatsappUrl || undefined} target="_blank" rel="noopener noreferrer" className="block w-full">
+          <Button size="lg" disabled={!whatsappUrl}
+            className="w-full min-h-[60px] text-base font-bold tracking-wider rounded-2xl bg-[#25D366] hover:bg-[#20bd5a] text-white flex items-center justify-center gap-2">
+            <MessageCircle size={22} /> ENVIAR PELO WHATSAPP
           </Button>
         </a>
 
+        {order && (
+          <Link href={`/pedido/${order.trackingId}`} className="block w-full">
+            <Button variant="outline" size="lg"
+              className="w-full min-h-[56px] font-bold tracking-wider rounded-2xl border-zinc-700 bg-transparent text-zinc-300 hover:bg-zinc-900 flex items-center justify-center gap-2">
+              <ExternalLink size={18} /> ACOMPANHAR PEDIDO
+            </Button>
+          </Link>
+        )}
+
         <Link href="/" className="block w-full">
-          <Button
-            variant="outline"
-            size="lg"
-            className="w-full min-h-[56px] font-bold tracking-wider rounded-2xl border-2 border-zinc-800 bg-transparent text-zinc-300 hover:bg-zinc-900 flex items-center justify-center gap-2"
-          >
-            <Home size={18} />
-            VOLTAR AO INÍCIO
+          <Button variant="ghost" size="lg"
+            className="w-full min-h-[52px] font-bold tracking-wider rounded-2xl text-zinc-500 hover:text-white flex items-center justify-center gap-2">
+            <Home size={18} /> Voltar ao início
           </Button>
         </Link>
       </motion.div>
