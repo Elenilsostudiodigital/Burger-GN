@@ -1,9 +1,10 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { ordersTable, orderItemsTable } from "@workspace/db";
+import { ordersTable, orderItemsTable, couponsTable } from "@workspace/db";
 import { eq, desc, sql } from "drizzle-orm";
 import { requireAdmin } from "../middlewares/auth";
 import { addSSEClient, removeSSEClient, broadcastSSE } from "../lib/sse";
+import { calcDiscount } from "./coupons";
 import crypto from "node:crypto";
 
 const router = Router();
@@ -44,6 +45,7 @@ router.post("/orders", async (req, res) => {
       orderType: "delivery" | "pickup" | "local";
       paymentMethod: "pix" | "cash" | "card";
       changeFor?: number;
+      couponCode?: string;
       items: Array<{ productId?: number; productName: string; productPrice: number; quantity: number }>;
     };
 
@@ -55,44 +57,88 @@ router.post("/orders", async (req, res) => {
     const trackingId = crypto.randomUUID();
     const subtotal = body.items.reduce((acc, i) => acc + i.productPrice * i.quantity, 0);
     const deliveryFee = body.orderType === "delivery" ? DELIVERY_FEE : 0;
-    const total = subtotal + deliveryFee;
+
+    // Coupon validation
+    let discountAmount = 0;
+    let validatedCouponCode: string | null = null;
+
+    if (body.couponCode) {
+      const [coupon] = await db
+        .select()
+        .from(couponsTable)
+        .where(sql`LOWER(code) = LOWER(${body.couponCode})`);
+
+      if (
+        coupon &&
+        coupon.active &&
+        (!coupon.expiresAt || new Date(coupon.expiresAt) >= new Date()) &&
+        (coupon.maxUses === null || coupon.usedCount < coupon.maxUses) &&
+        subtotal >= parseFloat(coupon.minOrderValue)
+      ) {
+        discountAmount = calcDiscount(coupon.discountType, parseFloat(coupon.discountValue), subtotal);
+        validatedCouponCode = coupon.code;
+      }
+    }
+
+    const total = Math.max(0, subtotal + deliveryFee - discountAmount);
 
     // Get next order number
     const [{ maxNum }] = await db.select({ maxNum: sql<number>`COALESCE(MAX(order_number), 0)` }).from(ordersTable);
     const orderNumber = (Number(maxNum) || 0) + 1;
 
-    const [order] = await db.insert(ordersTable).values({
-      orderNumber,
-      trackingId,
-      customerName: body.customerName,
-      phone: body.phone,
-      address: body.address ?? "",
-      neighborhood: body.neighborhood ?? "",
-      reference: body.reference ?? "",
-      notes: body.notes ?? "",
-      orderType: body.orderType,
-      paymentMethod: body.paymentMethod,
-      changeFor: body.changeFor ? String(body.changeFor) : null,
-      subtotal: String(subtotal.toFixed(2)),
-      deliveryFee: String(deliveryFee.toFixed(2)),
-      total: String(total.toFixed(2)),
-    }).returning();
+    // Create order + increment coupon usage atomically
+    const result = await db.transaction(async (tx) => {
+      const [order] = await tx.insert(ordersTable).values({
+        orderNumber,
+        trackingId,
+        customerName: body.customerName,
+        phone: body.phone,
+        address: body.address ?? "",
+        neighborhood: body.neighborhood ?? "",
+        reference: body.reference ?? "",
+        notes: body.notes ?? "",
+        orderType: body.orderType,
+        paymentMethod: body.paymentMethod,
+        changeFor: body.changeFor ? String(body.changeFor) : null,
+        subtotal: String(subtotal.toFixed(2)),
+        deliveryFee: String(deliveryFee.toFixed(2)),
+        discountAmount: String(discountAmount.toFixed(2)),
+        couponCode: validatedCouponCode,
+        total: String(total.toFixed(2)),
+      }).returning();
 
-    await db.insert(orderItemsTable).values(
-      body.items.map(i => ({
-        orderId: order.id,
-        productId: i.productId ?? null,
-        productName: i.productName,
-        productPrice: String(i.productPrice.toFixed(2)),
-        quantity: i.quantity,
-        subtotal: String((i.productPrice * i.quantity).toFixed(2)),
-      }))
-    );
+      await tx.insert(orderItemsTable).values(
+        body.items.map(i => ({
+          orderId: order.id,
+          productId: i.productId ?? null,
+          productName: i.productName,
+          productPrice: String(i.productPrice.toFixed(2)),
+          quantity: i.quantity,
+          subtotal: String((i.productPrice * i.quantity).toFixed(2)),
+        }))
+      );
 
-    const fullOrder = await getOrderWithItems(order.id);
+      if (validatedCouponCode) {
+        await tx
+          .update(couponsTable)
+          .set({ usedCount: sql`used_count + 1` })
+          .where(sql`LOWER(code) = LOWER(${validatedCouponCode})`);
+      }
+
+      return order;
+    });
+
+    const fullOrder = await getOrderWithItems(result.id);
     broadcastSSE("new_order", fullOrder);
 
-    res.status(201).json({ ok: true, trackingId, orderNumber, orderId: order.id });
+    res.status(201).json({
+      ok: true,
+      trackingId,
+      orderNumber,
+      orderId: result.id,
+      discountAmount,
+      couponCode: validatedCouponCode,
+    });
   } catch (err) {
     req.log.error({ err }, "Failed to create order");
     res.status(500).json({ error: "Internal server error" });

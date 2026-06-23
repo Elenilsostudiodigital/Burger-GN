@@ -86,6 +86,8 @@ export interface Order {
   changeFor: string | null;
   subtotal: string;
   deliveryFee: string;
+  discountAmount: string;
+  couponCode: string | null;
   total: string;
   status: OrderStatus;
   createdAt: string;
@@ -102,6 +104,7 @@ export interface CreateOrderPayload {
   orderType: OrderType;
   paymentMethod: PaymentMethod;
   changeFor?: number;
+  couponCode?: string;
   items: Array<{
     productId?: number;
     productName: string;
@@ -111,12 +114,54 @@ export interface CreateOrderPayload {
 }
 
 export const createOrder = (data: CreateOrderPayload) =>
-  api.post("/orders", data) as Promise<{ ok: boolean; trackingId: string; orderNumber: number; orderId: number }>;
+  api.post("/orders", data) as Promise<{
+    ok: boolean;
+    trackingId: string;
+    orderNumber: number;
+    orderId: number;
+    discountAmount: number;
+    couponCode: string | null;
+  }>;
 
 export const getOrders = () => api.get("/orders") as Promise<Order[]>;
 export const trackOrder = (trackingId: string) => api.get(`/orders/track/${trackingId}`) as Promise<Order>;
 export const updateOrderStatus = (id: number, status: OrderStatus) =>
   api.patch(`/orders/${id}/status`, { status }) as Promise<Order>;
+
+// ── Coupons ───────────────────────────────────────────────────────────────────
+export type DiscountType = "percentage" | "fixed";
+
+export interface Coupon {
+  id: number;
+  code: string;
+  discountType: DiscountType;
+  discountValue: string;
+  minOrderValue: string;
+  maxUses: number | null;
+  usedCount: number;
+  active: boolean;
+  expiresAt: string | null;
+  createdAt: string;
+}
+
+export interface ValidateCouponResult {
+  valid: boolean;
+  message?: string;
+  code?: string;
+  discountType?: DiscountType;
+  discountValue?: number;
+  discountAmount?: number;
+}
+
+export const validateCoupon = (code: string, subtotal: number) =>
+  api.post("/coupons/validate", { code, subtotal }) as Promise<ValidateCouponResult>;
+
+export const getAdminCoupons = () => api.get("/admin/coupons") as Promise<Coupon[]>;
+export const getCouponStats = () =>
+  api.get("/admin/coupons/stats") as Promise<{ active: number; totalDiscount: number; totalUses: number }>;
+export const createCoupon = (data: Partial<Coupon>) => api.post("/admin/coupons", data) as Promise<Coupon>;
+export const updateCoupon = (id: number, data: Partial<Coupon>) => api.put(`/admin/coupons/${id}`, data) as Promise<Coupon>;
+export const deleteCoupon = (id: number) => api.delete(`/admin/coupons/${id}`);
 
 // ── Admin Auth ────────────────────────────────────────────────────────────────
 export const adminLogin = (password: string) => api.post("/admin/login", { password });

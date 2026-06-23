@@ -19,9 +19,12 @@ interface StoredOrder {
   neighborhood: string;
   reference: string;
   notes: string;
+  couponCode: string | null;
+  discountAmount: number;
   items: Array<{ name: string; quantity: number; price: number; subtotal: number }>;
   subtotal: number;
   deliveryFee: number;
+  discount: number;
   total: number;
 }
 
@@ -41,6 +44,10 @@ function buildWhatsAppMessage(order: StoredOrder): string {
     paymentText += ` (troco p/ R$ ${order.changeFor})`;
   }
 
+  const discountLine = order.discount > 0 && order.couponCode
+    ? `\n🏷️ *Cupom ${order.couponCode}:* -R$ ${order.discount.toFixed(2).replace('.', ',')}`
+    : '';
+
   return `🍔 *NOVO PEDIDO #${order.orderNumber} - The Burger GN*
 
 👤 *Cliente:* ${order.customerName}
@@ -53,7 +60,7 @@ ${order.notes ? `📝 *Obs.:* ${order.notes}` : ''}
 ${itemsText}
 
 💰 *Subtotal:* R$ ${order.subtotal.toFixed(2).replace('.', ',')}
-🚴 *Entrega:* ${order.deliveryFee > 0 ? `R$ ${order.deliveryFee.toFixed(2).replace('.', ',')}` : 'Grátis'}
+🚴 *Entrega:* ${order.deliveryFee > 0 ? `R$ ${order.deliveryFee.toFixed(2).replace('.', ',')}` : 'Grátis'}${discountLine}
 💵 *TOTAL: R$ ${order.total.toFixed(2).replace('.', ',')}*
 
 💳 *Pagamento:* ${paymentText}
@@ -90,7 +97,6 @@ export default function Confirmation() {
 
   return (
     <PageTransition className="bg-[#0a0a0a] min-h-screen flex flex-col items-center justify-center p-6 text-center">
-      {/* Check animation */}
       <motion.div
         initial={{ scale: 0, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
@@ -113,9 +119,14 @@ export default function Confirmation() {
       {order && (
         <motion.div
           initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }}
-          className="mb-2"
+          className="mb-2 space-y-1"
         >
           <p className="text-amber-500 font-black text-2xl">#{order.orderNumber}</p>
+          {order.discount > 0 && order.couponCode && (
+            <p className="text-green-400 text-sm font-bold">
+              🏷️ Desconto de R$ {order.discount.toFixed(2).replace('.', ',')} aplicado!
+            </p>
+          )}
         </motion.div>
       )}
 

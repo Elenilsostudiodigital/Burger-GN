@@ -2,3 +2,4 @@ export * from "./categories";
 export * from "./products";
 export * from "./orders";
 export * from "./order_items";
+export * from "./coupons";

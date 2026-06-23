@@ -37,6 +37,8 @@ export const ordersTable = pgTable("orders", {
   changeFor: numeric("change_for", { precision: 10, scale: 2 }),
   subtotal: numeric("subtotal", { precision: 10, scale: 2 }).notNull(),
   deliveryFee: numeric("delivery_fee", { precision: 10, scale: 2 }).notNull().default("0"),
+  discountAmount: numeric("discount_amount", { precision: 10, scale: 2 }).notNull().default("0"),
+  couponCode: text("coupon_code"),
   total: numeric("total", { precision: 10, scale: 2 }).notNull(),
   status: orderStatusEnum("status").notNull().default("new"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
