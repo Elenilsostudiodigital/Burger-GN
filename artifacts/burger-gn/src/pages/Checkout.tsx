@@ -27,7 +27,7 @@ export default function Checkout() {
   const [orderType, setOrderType] = useState<OrderType>('delivery');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('pix');
   
-  const { register, handleSubmit, watch, formState: { errors } } = useForm<CheckoutFormData>();
+  const { register, handleSubmit, formState: { errors } } = useForm<CheckoutFormData>();
 
   const isDelivery = orderType === 'delivery';
   const currentDeliveryFee = isDelivery ? DELIVERY_FEE : 0;

@@ -108,23 +108,27 @@ export default function Cart() {
               <h3 className="text-white font-bold uppercase tracking-wider mb-4">Resumo do Pedido</h3>
               
               <div className="flex justify-between text-zinc-400">
-                <span>Subtotal ({totalItems} itens)</span>
+                <span>Subtotal ({totalItems} {totalItems === 1 ? 'item' : 'itens'})</span>
                 <span>R$ {subtotal.toFixed(2).replace('.', ',')}</span>
               </div>
               
               <div className="flex justify-between text-zinc-400">
                 <span>Taxa de Entrega</span>
-                <span>R$ {DELIVERY_FEE.toFixed(2).replace('.', ',')}</span>
+                <span className="text-zinc-500 text-sm italic">A calcular no checkout</span>
               </div>
               
               <div className="h-px w-full bg-zinc-800 my-2" />
               
               <div className="flex justify-between items-center">
-                <span className="text-white font-bold uppercase tracking-wider text-lg">Total</span>
+                <span className="text-white font-bold uppercase tracking-wider text-lg">Subtotal</span>
                 <span className="text-primary font-black text-2xl">
-                  R$ {(subtotal + DELIVERY_FEE).toFixed(2).replace('.', ',')}
+                  R$ {subtotal.toFixed(2).replace('.', ',')}
                 </span>
               </div>
+
+              <p className="text-zinc-600 text-xs text-center">
+                Entrega grátis para Retirada e Comer no local
+              </p>
             </div>
 
             <Link href="/checkout" className="block">
