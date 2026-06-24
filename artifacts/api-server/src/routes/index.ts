@@ -5,6 +5,7 @@ import categoriesRouter from "./categories";
 import productsRouter from "./products";
 import couponsRouter from "./coupons";
 import deliveryZonesRouter from "./delivery_zones";
+import kmDeliveryRouter from "./km_delivery";
 import ordersRouter from "./orders";
 
 const router: IRouter = Router();
@@ -15,6 +16,7 @@ router.use(categoriesRouter);
 router.use(productsRouter);
 router.use(couponsRouter);
 router.use(deliveryZonesRouter);
+router.use(kmDeliveryRouter);
 router.use(ordersRouter);
 
 export default router;

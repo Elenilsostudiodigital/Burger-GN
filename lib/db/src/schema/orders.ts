@@ -3,24 +3,10 @@ import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
 export const orderStatusEnum = pgEnum("order_status", [
-  "new",
-  "preparing",
-  "delivery",
-  "done",
-  "cancelled",
+  "new", "preparing", "delivery", "done", "cancelled",
 ]);
-
-export const orderTypeEnum = pgEnum("order_type", [
-  "delivery",
-  "pickup",
-  "local",
-]);
-
-export const paymentMethodEnum = pgEnum("payment_method", [
-  "pix",
-  "cash",
-  "card",
-]);
+export const orderTypeEnum = pgEnum("order_type", ["delivery", "pickup", "local"]);
+export const paymentMethodEnum = pgEnum("payment_method", ["pix", "cash", "card"]);
 
 export const ordersTable = pgTable("orders", {
   id: serial("id").primaryKey(),
@@ -34,6 +20,9 @@ export const ordersTable = pgTable("orders", {
   neighborhood: text("neighborhood").notNull().default(""),
   reference: text("reference").notNull().default(""),
   notes: text("notes").notNull().default(""),
+  customerLat: numeric("customer_lat", { precision: 12, scale: 8 }),
+  customerLng: numeric("customer_lng", { precision: 12, scale: 8 }),
+  distanceKm: numeric("distance_km", { precision: 10, scale: 2 }),
   orderType: orderTypeEnum("order_type").notNull(),
   paymentMethod: paymentMethodEnum("payment_method").notNull(),
   changeFor: numeric("change_for", { precision: 10, scale: 2 }),
@@ -48,11 +37,7 @@ export const ordersTable = pgTable("orders", {
 });
 
 export const insertOrderSchema = createInsertSchema(ordersTable).omit({
-  id: true,
-  orderNumber: true,
-  createdAt: true,
-  updatedAt: true,
-  status: true,
+  id: true, orderNumber: true, createdAt: true, updatedAt: true, status: true,
 });
 export type InsertOrder = z.infer<typeof insertOrderSchema>;
 export type Order = typeof ordersTable.$inferSelect;

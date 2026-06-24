@@ -22,59 +22,93 @@ const api = {
   delete: (path: string) => request("DELETE", path),
 };
 
-// ── Categories ───────────────────────────────────────────────────────────────
-export interface Category {
-  id: number; name: string; slug: string; displayOrder: number; active: boolean;
+// ── Haversine (client-side distance) ─────────────────────────────────────────
+export function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371;
+  const toRad = (x: number) => x * Math.PI / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
+
+export function findKmTier(
+  distanceKm: number,
+  tiers: Array<{ fromKm: string; toKm: string | null; fee: string | null }>
+): { fee: number | null; consult: boolean } {
+  const sorted = [...tiers].sort((a, b) => parseFloat(a.fromKm) - parseFloat(b.fromKm));
+  for (const tier of sorted) {
+    const from = parseFloat(tier.fromKm);
+    const to = tier.toKm !== null ? parseFloat(tier.toKm) : Infinity;
+    if (distanceKm >= from && distanceKm <= to) {
+      return { fee: tier.fee !== null ? parseFloat(tier.fee) : null, consult: tier.fee === null };
+    }
+  }
+  return { fee: null, consult: true };
+}
+
+// ── Categories ────────────────────────────────────────────────────────────────
+export interface Category { id: number; name: string; slug: string; displayOrder: number; active: boolean; }
 export const getCategories = () => api.get("/categories") as Promise<Category[]>;
 export const getAdminCategories = () => api.get("/admin/categories") as Promise<Category[]>;
-export const createCategory = (data: Partial<Category>) => api.post("/admin/categories", data) as Promise<Category>;
-export const updateCategory = (id: number, data: Partial<Category>) => api.put(`/admin/categories/${id}`, data) as Promise<Category>;
+export const createCategory = (d: Partial<Category>) => api.post("/admin/categories", d) as Promise<Category>;
+export const updateCategory = (id: number, d: Partial<Category>) => api.put(`/admin/categories/${id}`, d) as Promise<Category>;
 export const deleteCategory = (id: number) => api.delete(`/admin/categories/${id}`);
 
-// ── Products ─────────────────────────────────────────────────────────────────
-export interface Product {
-  id: number; name: string; description: string; price: string;
-  categoryId: number | null; image: string; available: boolean;
-  displayOrder: number; categorySlug: string | null; categoryName: string | null;
-}
+// ── Products ──────────────────────────────────────────────────────────────────
+export interface Product { id: number; name: string; description: string; price: string; categoryId: number | null; image: string; available: boolean; displayOrder: number; categorySlug: string | null; categoryName: string | null; }
 export const getProducts = () => api.get("/products") as Promise<Product[]>;
 export const getAdminProducts = () => api.get("/admin/products") as Promise<Product[]>;
-export const createProduct = (data: Partial<Product>) => api.post("/admin/products", data) as Promise<Product>;
-export const updateProduct = (id: number, data: Partial<Product>) => api.put(`/admin/products/${id}`, data) as Promise<Product>;
+export const createProduct = (d: Partial<Product>) => api.post("/admin/products", d) as Promise<Product>;
+export const updateProduct = (id: number, d: Partial<Product>) => api.put(`/admin/products/${id}`, d) as Promise<Product>;
 export const deleteProduct = (id: number) => api.delete(`/admin/products/${id}`);
 
-// ── Delivery Zones ────────────────────────────────────────────────────────────
-export interface DeliveryZone {
-  id: number; neighborhood: string; fee: string; active: boolean; createdAt: string;
-}
-export interface DeliveryFeeResult {
-  found: boolean; neighborhood: string; fee: number | null; message?: string; zoneId?: number;
-}
+// ── Delivery Zones (neighborhood) ─────────────────────────────────────────────
+export interface DeliveryZone { id: number; neighborhood: string; fee: string; active: boolean; createdAt: string; }
+export interface DeliveryFeeResult { found: boolean; neighborhood: string; fee: number | null; message?: string; zoneId?: number; }
 export const getDeliveryZones = () => api.get("/delivery-zones") as Promise<DeliveryZone[]>;
-export const getDeliveryFee = (neighborhood: string) =>
-  api.get(`/delivery-zones/fee?neighborhood=${encodeURIComponent(neighborhood)}`) as Promise<DeliveryFeeResult>;
+export const getDeliveryFee = (neighborhood: string) => api.get(`/delivery-zones/fee?neighborhood=${encodeURIComponent(neighborhood)}`) as Promise<DeliveryFeeResult>;
 export const getAdminDeliveryZones = () => api.get("/admin/delivery-zones") as Promise<DeliveryZone[]>;
-export const createDeliveryZone = (data: { neighborhood: string; fee: string; active?: boolean }) =>
-  api.post("/admin/delivery-zones", data) as Promise<DeliveryZone>;
-export const updateDeliveryZone = (id: number, data: Partial<DeliveryZone>) =>
-  api.put(`/admin/delivery-zones/${id}`, data) as Promise<DeliveryZone>;
+export const createDeliveryZone = (d: { neighborhood: string; fee: string; active?: boolean }) => api.post("/admin/delivery-zones", d) as Promise<DeliveryZone>;
+export const updateDeliveryZone = (id: number, d: Partial<DeliveryZone>) => api.put(`/admin/delivery-zones/${id}`, d) as Promise<DeliveryZone>;
 export const deleteDeliveryZone = (id: number) => api.delete(`/admin/delivery-zones/${id}`);
 
-// ── Orders ───────────────────────────────────────────────────────────────────
+// ── KM Delivery ───────────────────────────────────────────────────────────────
+export interface KmDeliveryTier { id: number; fromKm: string; toKm: string | null; fee: string | null; displayOrder: number; createdAt: string; }
+export interface KmDeliveryConfig { id: number; enabled: boolean; baseAddress: string; baseLat: string; baseLng: string; minFee: string; feePerKm: string; maxDistanceKm: string; updatedAt: string; tiers: KmDeliveryTier[]; }
+export interface KmFeeResult { enabled: boolean; distanceKm?: number; fee: number | null; consult?: boolean; message?: string; }
+
+export const getKmDeliveryConfig = () => api.get("/delivery/km-config") as Promise<KmDeliveryConfig>;
+export const calculateKmFee = (lat: number, lng: number) => api.post("/delivery/calculate-fee", { lat, lng }) as Promise<KmFeeResult>;
+export const getAdminKmDelivery = () => api.get("/admin/km-delivery") as Promise<{ config: KmDeliveryConfig | null; tiers: KmDeliveryTier[] }>;
+export const updateKmDeliveryConfig = (d: Partial<KmDeliveryConfig>) => api.put("/admin/km-delivery", d) as Promise<KmDeliveryConfig>;
+export const createKmTier = (d: { fromKm: string; toKm?: string | null; fee?: string | null; displayOrder?: number }) => api.post("/admin/km-delivery/tiers", d) as Promise<KmDeliveryTier>;
+export const updateKmTier = (id: number, d: Partial<KmDeliveryTier>) => api.put(`/admin/km-delivery/tiers/${id}`, d) as Promise<KmDeliveryTier>;
+export const deleteKmTier = (id: number) => api.delete(`/admin/km-delivery/tiers/${id}`);
+
+// Nominatim geocoding (free, no API key needed)
+export async function geocodeAddress(address: string): Promise<{ lat: number; lng: number } | null> {
+  try {
+    const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}&limit=1&countrycodes=br`;
+    const res = await fetch(url, { headers: { "Accept-Language": "pt-BR", "User-Agent": "TheBurgerGN/1.0" } });
+    const data = await res.json() as Array<{ lat: string; lon: string }>;
+    if (!data[0]) return null;
+    return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
+  } catch { return null; }
+}
+
+// ── Orders ────────────────────────────────────────────────────────────────────
 export type OrderStatus = "new" | "preparing" | "delivery" | "done" | "cancelled";
 export type OrderType = "delivery" | "pickup" | "local";
 export type PaymentMethod = "pix" | "cash" | "card";
 
-export interface OrderItem {
-  id: number; orderId: number; productName: string;
-  productPrice: string; quantity: number; subtotal: string;
-}
+export interface OrderItem { id: number; orderId: number; productName: string; productPrice: string; quantity: number; subtotal: string; }
 export interface Order {
   id: number; orderNumber: number; trackingId: string;
   customerName: string; phone: string;
   address: string; addressNumber: string; addressComplement: string;
   neighborhood: string; reference: string; notes: string;
+  customerLat: string | null; customerLng: string | null; distanceKm: string | null;
   orderType: OrderType; paymentMethod: PaymentMethod; changeFor: string | null;
   subtotal: string; deliveryFee: string; discountAmount: string; couponCode: string | null;
   total: string; status: OrderStatus; createdAt: string; items: OrderItem[];
@@ -83,38 +117,28 @@ export interface CreateOrderPayload {
   customerName: string; phone: string;
   address?: string; addressNumber?: string; addressComplement?: string;
   neighborhood?: string; reference?: string; notes?: string;
+  customerLat?: number; customerLng?: number;
   orderType: OrderType; paymentMethod: PaymentMethod; changeFor?: number;
   couponCode?: string;
   items: Array<{ productId?: number; productName: string; productPrice: number; quantity: number }>;
 }
-export const createOrder = (data: CreateOrderPayload) =>
-  api.post("/orders", data) as Promise<{
-    ok: boolean; trackingId: string; orderNumber: number; orderId: number;
-    deliveryFee: number; discountAmount: number; couponCode: string | null;
-  }>;
+export const createOrder = (d: CreateOrderPayload) => api.post("/orders", d) as Promise<{
+  ok: boolean; trackingId: string; orderNumber: number; orderId: number;
+  deliveryFee: number; distanceKm: number | null; discountAmount: number; couponCode: string | null;
+}>;
 export const getOrders = () => api.get("/orders") as Promise<Order[]>;
 export const trackOrder = (trackingId: string) => api.get(`/orders/track/${trackingId}`) as Promise<Order>;
-export const updateOrderStatus = (id: number, status: OrderStatus) =>
-  api.patch(`/orders/${id}/status`, { status }) as Promise<Order>;
+export const updateOrderStatus = (id: number, status: OrderStatus) => api.patch(`/orders/${id}/status`, { status }) as Promise<Order>;
 
 // ── Coupons ───────────────────────────────────────────────────────────────────
 export type DiscountType = "percentage" | "fixed";
-export interface Coupon {
-  id: number; code: string; discountType: DiscountType; discountValue: string;
-  minOrderValue: string; maxUses: number | null; usedCount: number;
-  active: boolean; expiresAt: string | null; createdAt: string;
-}
-export interface ValidateCouponResult {
-  valid: boolean; message?: string; code?: string;
-  discountType?: DiscountType; discountValue?: number; discountAmount?: number;
-}
-export const validateCoupon = (code: string, subtotal: number) =>
-  api.post("/coupons/validate", { code, subtotal }) as Promise<ValidateCouponResult>;
+export interface Coupon { id: number; code: string; discountType: DiscountType; discountValue: string; minOrderValue: string; maxUses: number | null; usedCount: number; active: boolean; expiresAt: string | null; createdAt: string; }
+export interface ValidateCouponResult { valid: boolean; message?: string; code?: string; discountType?: DiscountType; discountValue?: number; discountAmount?: number; }
+export const validateCoupon = (code: string, subtotal: number) => api.post("/coupons/validate", { code, subtotal }) as Promise<ValidateCouponResult>;
 export const getAdminCoupons = () => api.get("/admin/coupons") as Promise<Coupon[]>;
-export const getCouponStats = () =>
-  api.get("/admin/coupons/stats") as Promise<{ active: number; totalDiscount: number; totalUses: number }>;
-export const createCoupon = (data: Partial<Coupon>) => api.post("/admin/coupons", data) as Promise<Coupon>;
-export const updateCoupon = (id: number, data: Partial<Coupon>) => api.put(`/admin/coupons/${id}`, data) as Promise<Coupon>;
+export const getCouponStats = () => api.get("/admin/coupons/stats") as Promise<{ active: number; totalDiscount: number; totalUses: number }>;
+export const createCoupon = (d: Partial<Coupon>) => api.post("/admin/coupons", d) as Promise<Coupon>;
+export const updateCoupon = (id: number, d: Partial<Coupon>) => api.put(`/admin/coupons/${id}`, d) as Promise<Coupon>;
 export const deleteCoupon = (id: number) => api.delete(`/admin/coupons/${id}`);
 
 // ── Admin Auth ────────────────────────────────────────────────────────────────
@@ -125,13 +149,6 @@ export const adminMe = () => api.get("/admin/me") as Promise<{ authenticated: bo
 // ── Config ────────────────────────────────────────────────────────────────────
 export const WHATSAPP_NUMBER = "5571996981707";
 
-export const ORDER_TYPE_LABELS: Record<OrderType, string> = {
-  delivery: "Delivery", pickup: "Retirada no balcão", local: "Comer no local",
-};
-export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
-  pix: "Pix", cash: "Dinheiro", card: "Cartão",
-};
-export const STATUS_LABELS: Record<OrderStatus, string> = {
-  new: "Novo Pedido", preparing: "Em Preparo",
-  delivery: "Saiu p/ Entrega", done: "Finalizado", cancelled: "Cancelado",
-};
+export const ORDER_TYPE_LABELS: Record<OrderType, string> = { delivery: "Delivery", pickup: "Retirada no balcão", local: "Comer no local" };
+export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = { pix: "Pix", cash: "Dinheiro", card: "Cartão" };
+export const STATUS_LABELS: Record<OrderStatus, string> = { new: "Novo Pedido", preparing: "Em Preparo", delivery: "Saiu p/ Entrega", done: "Finalizado", cancelled: "Cancelado" };

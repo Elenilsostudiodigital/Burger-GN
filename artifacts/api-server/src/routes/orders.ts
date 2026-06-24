@@ -1,10 +1,11 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { ordersTable, orderItemsTable, couponsTable, deliveryZonesTable } from "@workspace/db";
-import { eq, desc, sql } from "drizzle-orm";
+import { ordersTable, orderItemsTable, couponsTable, deliveryZonesTable, kmDeliveryConfigTable, kmDeliveryTiersTable } from "@workspace/db";
+import { eq, desc, sql, asc } from "drizzle-orm";
 import { requireAdmin } from "../middlewares/auth";
 import { addSSEClient, removeSSEClient, broadcastSSE } from "../lib/sse";
 import { calcDiscount } from "./coupons";
+import { haversineKm, findKmTier } from "./km_delivery";
 import crypto from "node:crypto";
 
 const router = Router();
@@ -28,36 +29,54 @@ router.get("/orders/stream", requireAdmin, (req, res) => {
 router.post("/orders", async (req, res) => {
   try {
     const body = req.body as {
-      customerName: string;
-      phone: string;
-      address?: string;
-      addressNumber?: string;
-      addressComplement?: string;
-      neighborhood?: string;
-      reference?: string;
-      notes?: string;
+      customerName: string; phone: string;
+      address?: string; addressNumber?: string; addressComplement?: string;
+      neighborhood?: string; reference?: string; notes?: string;
+      customerLat?: number; customerLng?: number;
       orderType: "delivery" | "pickup" | "local";
       paymentMethod: "pix" | "cash" | "card";
-      changeFor?: number;
-      couponCode?: string;
+      changeFor?: number; couponCode?: string;
       items: Array<{ productId?: number; productName: string; productPrice: number; quantity: number }>;
     };
 
     if (!body.customerName || !body.phone || !body.orderType || !body.paymentMethod || !body.items?.length) {
-      res.status(400).json({ error: "Missing required fields" });
-      return;
+      res.status(400).json({ error: "Missing required fields" }); return;
     }
 
     const subtotal = body.items.reduce((acc, i) => acc + i.productPrice * i.quantity, 0);
 
-    // Dynamic delivery fee from zones
+    // Delivery fee calculation (KM-based first, neighborhood fallback)
     let deliveryFee = 0;
-    if (body.orderType === "delivery" && body.neighborhood) {
-      const [zone] = await db
-        .select()
-        .from(deliveryZonesTable)
-        .where(sql`LOWER(neighborhood) = LOWER(${body.neighborhood}) AND active = true`);
-      if (zone) deliveryFee = parseFloat(zone.fee);
+    let customerDistanceKm: number | null = null;
+
+    if (body.orderType === "delivery") {
+      // 1) KM-based (if lat/lng provided and KM mode enabled)
+      if (body.customerLat && body.customerLng) {
+        const [kmConfig] = await db.select().from(kmDeliveryConfigTable).limit(1);
+        if (kmConfig && kmConfig.enabled) {
+          const baseLat = parseFloat(kmConfig.baseLat);
+          const baseLng = parseFloat(kmConfig.baseLng);
+          if (baseLat !== 0 || baseLng !== 0) {
+            const distKm = haversineKm(baseLat, baseLng, body.customerLat, body.customerLng);
+            customerDistanceKm = parseFloat(distKm.toFixed(2));
+            const maxDist = parseFloat(kmConfig.maxDistanceKm);
+            if (distKm <= maxDist) {
+              const tiers = await db.select().from(kmDeliveryTiersTable).orderBy(asc(kmDeliveryTiersTable.displayOrder));
+              const { fee } = findKmTier(distKm, tiers);
+              if (fee !== null) deliveryFee = fee;
+            }
+          }
+        }
+      }
+
+      // 2) Neighborhood-based fallback
+      if (deliveryFee === 0 && !customerDistanceKm && body.neighborhood) {
+        const [zone] = await db
+          .select()
+          .from(deliveryZonesTable)
+          .where(sql`LOWER(neighborhood) = LOWER(${body.neighborhood}) AND active = true`);
+        if (zone) deliveryFee = parseFloat(zone.fee);
+      }
     }
 
     // Coupon validation
@@ -87,18 +106,16 @@ router.post("/orders", async (req, res) => {
 
     const result = await db.transaction(async (tx) => {
       const [order] = await tx.insert(ordersTable).values({
-        orderNumber,
-        trackingId,
-        customerName: body.customerName,
-        phone: body.phone,
-        address: body.address ?? "",
-        addressNumber: body.addressNumber ?? "",
+        orderNumber, trackingId,
+        customerName: body.customerName, phone: body.phone,
+        address: body.address ?? "", addressNumber: body.addressNumber ?? "",
         addressComplement: body.addressComplement ?? "",
-        neighborhood: body.neighborhood ?? "",
-        reference: body.reference ?? "",
+        neighborhood: body.neighborhood ?? "", reference: body.reference ?? "",
         notes: body.notes ?? "",
-        orderType: body.orderType,
-        paymentMethod: body.paymentMethod,
+        customerLat: body.customerLat ? String(body.customerLat) : null,
+        customerLng: body.customerLng ? String(body.customerLng) : null,
+        distanceKm: customerDistanceKm !== null ? String(customerDistanceKm) : null,
+        orderType: body.orderType, paymentMethod: body.paymentMethod,
         changeFor: body.changeFor ? String(body.changeFor) : null,
         subtotal: String(subtotal.toFixed(2)),
         deliveryFee: String(deliveryFee.toFixed(2)),
@@ -109,12 +126,9 @@ router.post("/orders", async (req, res) => {
 
       await tx.insert(orderItemsTable).values(
         body.items.map(i => ({
-          orderId: order.id,
-          productId: i.productId ?? null,
-          productName: i.productName,
-          productPrice: String(i.productPrice.toFixed(2)),
-          quantity: i.quantity,
-          subtotal: String((i.productPrice * i.quantity).toFixed(2)),
+          orderId: order.id, productId: i.productId ?? null,
+          productName: i.productName, productPrice: String(i.productPrice.toFixed(2)),
+          quantity: i.quantity, subtotal: String((i.productPrice * i.quantity).toFixed(2)),
         }))
       );
 
@@ -132,7 +146,7 @@ router.post("/orders", async (req, res) => {
 
     res.status(201).json({
       ok: true, trackingId, orderNumber, orderId: result.id,
-      deliveryFee, discountAmount, couponCode: validatedCouponCode,
+      deliveryFee, distanceKm: customerDistanceKm, discountAmount, couponCode: validatedCouponCode,
     });
   } catch (err) {
     req.log.error({ err }, "Failed to create order");
