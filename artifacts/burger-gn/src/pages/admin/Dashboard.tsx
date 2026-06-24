@@ -10,7 +10,7 @@ import {
 import {
   LayoutDashboard, UtensilsCrossed, LogOut, Bell,
   Printer, ChevronDown, ChevronUp, Clock, CheckCircle2,
-  Bike, ChefHat, XCircle, Package,
+  Bike, ChefHat, XCircle, Tag, MapPin,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
@@ -373,7 +373,7 @@ export default function AdminDashboard() {
           </div>
         ) : filtered.length === 0 ? (
           <div className="text-center py-16">
-            <Package size={48} className="text-zinc-800 mx-auto mb-4" />
+            <Bell size={48} className="text-zinc-800 mx-auto mb-4" />
             <p className="text-zinc-600 font-medium">Nenhum pedido aqui.</p>
           </div>
         ) : (
@@ -407,10 +407,16 @@ export default function AdminDashboard() {
               <span className="text-[10px] font-bold uppercase">Cardápio</span>
             </div>
           </Link>
-          <Link href="/" className="flex-1">
+          <Link href="/admin/cupons" className="flex-1">
             <div className="flex flex-col items-center gap-1 py-3 text-zinc-500 hover:text-white transition-colors">
-              <Package size={20} />
-              <span className="text-[10px] font-bold uppercase">Site</span>
+              <Tag size={20} />
+              <span className="text-[10px] font-bold uppercase">Cupons</span>
+            </div>
+          </Link>
+          <Link href="/admin/taxas" className="flex-1">
+            <div className="flex flex-col items-center gap-1 py-3 text-zinc-500 hover:text-white transition-colors">
+              <MapPin size={20} />
+              <span className="text-[10px] font-bold uppercase">Taxas</span>
             </div>
           </Link>
         </div>

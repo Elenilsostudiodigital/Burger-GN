@@ -1,12 +1,12 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useLocation } from 'wouter';
 import { useForm } from 'react-hook-form';
 import { useCart } from '../context/CartContext';
 import { PageTransition } from '../components/PageTransition';
-import { createOrder, validateCoupon, DELIVERY_FEE, ValidateCouponResult } from '../lib/api';
+import { createOrder, validateCoupon, getDeliveryZones, getDeliveryFee, WHATSAPP_NUMBER, ValidateCouponResult, DeliveryZone } from '../lib/api';
 import {
   ArrowLeft, Bike, Store, Utensils, CreditCard, Banknote, QrCode,
-  Loader2, Tag, X, CheckCircle2,
+  Loader2, Tag, X, CheckCircle2, MapPin, AlertCircle, ChevronDown,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -17,13 +17,10 @@ type OrderType = 'delivery' | 'pickup' | 'local';
 type PaymentMethod = 'pix' | 'cash' | 'card';
 
 interface CheckoutFormData {
-  nome: string;
-  telefone: string;
-  endereco: string;
-  bairro: string;
-  referencia: string;
-  observacoes: string;
-  troco: string;
+  nome: string; telefone: string;
+  endereco: string; numero: string; complemento: string;
+  bairro: string; referencia: string;
+  observacoes: string; troco: string;
 }
 
 export default function Checkout() {
@@ -34,107 +31,125 @@ export default function Checkout() {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
 
-  // Coupon state
+  // Delivery zones
+  const [zones, setZones] = useState<DeliveryZone[]>([]);
+  const [deliveryFee, setDeliveryFee] = useState<number>(0);
+  const [feeLoading, setFeeLoading] = useState(false);
+  const [feeMessage, setFeeMessage] = useState('');
+  const [feeFound, setFeeFound] = useState<boolean | null>(null);
+  const feeDebounce = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  // Coupon
   const [couponInput, setCouponInput] = useState('');
   const [appliedCoupon, setAppliedCoupon] = useState<ValidateCouponResult | null>(null);
   const [couponLoading, setCouponLoading] = useState(false);
   const [couponError, setCouponError] = useState('');
 
-  const { register, handleSubmit, formState: { errors } } = useForm<CheckoutFormData>();
+  const { register, handleSubmit, watch, setValue, formState: { errors } } = useForm<CheckoutFormData>();
+  const bairroValue = watch('bairro');
+
+  useEffect(() => { getDeliveryZones().then(setZones).catch(() => {}); }, []);
+
+  useEffect(() => {
+    if (orderType !== 'delivery' || !bairroValue?.trim()) {
+      setDeliveryFee(0); setFeeMessage(''); setFeeFound(null); return;
+    }
+    clearTimeout(feeDebounce.current);
+    feeDebounce.current = setTimeout(async () => {
+      setFeeLoading(true);
+      try {
+        const result = await getDeliveryFee(bairroValue.trim());
+        if (result.found && result.fee !== null) {
+          setDeliveryFee(result.fee);
+          setFeeMessage('');
+          setFeeFound(true);
+        } else {
+          setDeliveryFee(0);
+          setFeeMessage(result.message ?? 'Consulte a taxa de entrega pelo WhatsApp.');
+          setFeeFound(false);
+        }
+      } catch {
+        setFeeFound(null);
+      } finally {
+        setFeeLoading(false);
+      }
+    }, 500);
+    return () => clearTimeout(feeDebounce.current);
+  }, [bairroValue, orderType]);
 
   const isDelivery = orderType === 'delivery';
-  const currentDeliveryFee = isDelivery ? DELIVERY_FEE : 0;
   const discount = appliedCoupon?.discountAmount ?? 0;
-  const total = Math.max(0, subtotal + currentDeliveryFee - discount);
-
+  const total = Math.max(0, subtotal + (isDelivery ? deliveryFee : 0) - discount);
   const fmt = (v: number) => `R$ ${v.toFixed(2).replace('.', ',')}`;
 
-  const formatPhone = (value: string) => {
-    const numbers = value.replace(/\D/g, '');
-    if (numbers.length <= 11) return numbers.replace(/(\d{2})(\d{5})(\d{4})/, '($1) $2-$3');
-    return value;
+  const formatPhone = (v: string) => {
+    const n = v.replace(/\D/g, '');
+    if (n.length <= 11) return n.replace(/(\d{2})(\d{5})(\d{4})/, '($1) $2-$3');
+    return v;
   };
 
   const handleApplyCoupon = async () => {
     const code = couponInput.trim();
     if (!code) return;
-    setCouponLoading(true);
-    setCouponError('');
+    setCouponLoading(true); setCouponError('');
     try {
       const result = await validateCoupon(code, subtotal);
-      if (result.valid) {
-        setAppliedCoupon(result);
-        setCouponInput('');
-      } else {
-        setCouponError(result.message ?? 'Cupom inválido');
-      }
-    } catch {
-      setCouponError('Erro ao validar cupom');
-    } finally {
-      setCouponLoading(false);
-    }
-  };
-
-  const handleRemoveCoupon = () => {
-    setAppliedCoupon(null);
-    setCouponError('');
+      if (result.valid) { setAppliedCoupon(result); setCouponInput(''); }
+      else setCouponError(result.message ?? 'Cupom inválido');
+    } catch { setCouponError('Erro ao validar cupom'); }
+    finally { setCouponLoading(false); }
   };
 
   const onSubmit = async (data: CheckoutFormData) => {
     if (cartItems.length === 0) { setLocation('/cardapio'); return; }
-    setSubmitting(true);
-    setSubmitError('');
+    setSubmitting(true); setSubmitError('');
     try {
       const result = await createOrder({
-        customerName: data.nome,
-        phone: data.telefone,
+        customerName: data.nome, phone: data.telefone,
         address: isDelivery ? data.endereco : '',
+        addressNumber: isDelivery ? data.numero : '',
+        addressComplement: isDelivery ? data.complemento : '',
         neighborhood: isDelivery ? data.bairro : '',
         reference: isDelivery ? data.referencia : '',
         notes: data.observacoes,
-        orderType,
-        paymentMethod,
+        orderType, paymentMethod,
         changeFor: data.troco ? parseFloat(data.troco) : undefined,
         couponCode: appliedCoupon?.code,
         items: cartItems.map(ci => ({
-          productId: ci.item.id,
-          productName: ci.item.name,
-          productPrice: ci.item.price,
-          quantity: ci.quantity,
+          productId: ci.item.id, productName: ci.item.name,
+          productPrice: ci.item.price, quantity: ci.quantity,
         })),
       });
       sessionStorage.setItem('lastOrder', JSON.stringify({
         trackingId: result.trackingId,
         orderNumber: result.orderNumber,
-        customerName: data.nome,
-        phone: data.telefone,
-        orderType,
-        paymentMethod,
+        customerName: data.nome, phone: data.telefone,
+        orderType, paymentMethod,
         changeFor: data.troco || null,
-        address: data.endereco,
-        neighborhood: data.bairro,
-        reference: data.referencia,
+        address: data.endereco, numero: data.numero,
+        complemento: data.complemento,
+        neighborhood: data.bairro, reference: data.referencia,
         notes: data.observacoes,
         couponCode: appliedCoupon?.code ?? null,
         discountAmount: result.discountAmount ?? 0,
         items: cartItems.map(ci => ({ name: ci.item.name, quantity: ci.quantity, price: ci.item.price, subtotal: ci.item.price * ci.quantity })),
         subtotal,
-        deliveryFee: currentDeliveryFee,
+        deliveryFee: result.deliveryFee ?? 0,
         discount,
-        total,
+        total: result.deliveryFee !== undefined
+          ? parseFloat((subtotal + result.deliveryFee - (result.discountAmount ?? 0)).toFixed(2))
+          : total,
       }));
       setLocation('/confirmacao');
     } catch {
       setSubmitError('Erro ao enviar pedido. Verifique a conexão e tente novamente.');
-    } finally {
-      setSubmitting(false);
-    }
+    } finally { setSubmitting(false); }
   };
 
   if (cartItems.length === 0) { setLocation('/cardapio'); return null; }
 
   const stepNum = (n: number) => (
-    <span className="w-6 h-6 rounded-full bg-amber-500/20 text-amber-500 flex items-center justify-center text-xs font-black">{n}</span>
+    <span className="w-6 h-6 rounded-full bg-amber-500/20 text-amber-500 flex items-center justify-center text-xs font-black flex-shrink-0">{n}</span>
   );
 
   return (
@@ -151,7 +166,7 @@ export default function Checkout() {
       <main className="max-w-md mx-auto px-4 py-6 pb-12">
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-8">
 
-          {/* Order Type */}
+          {/* 1 – Tipo */}
           <section className="space-y-3">
             <h2 className="text-white font-bold uppercase tracking-wider text-sm flex items-center gap-2">
               {stepNum(1)} Como você quer receber?
@@ -159,8 +174,8 @@ export default function Checkout() {
             <div className="grid grid-cols-3 gap-2">
               {([
                 { key: 'delivery', icon: <Bike size={22} />, label: 'Delivery' },
-                { key: 'pickup', icon: <Store size={22} />, label: 'Retirar\nno balcão' },
-                { key: 'local', icon: <Utensils size={22} />, label: 'Comer\nno local' },
+                { key: 'pickup',   icon: <Store size={22} />, label: 'Retirar\nno balcão' },
+                { key: 'local',    icon: <Utensils size={22} />, label: 'Comer\nno local' },
               ] as const).map(opt => (
                 <button key={opt.key} type="button" onClick={() => setOrderType(opt.key)}
                   className={`p-3 rounded-xl border flex flex-col items-center gap-2 transition-all ${orderType === opt.key ? 'border-amber-500 bg-amber-500/10 text-amber-500' : 'border-zinc-800 bg-zinc-900 text-zinc-400'}`}>
@@ -171,7 +186,7 @@ export default function Checkout() {
             </div>
           </section>
 
-          {/* Personal Info */}
+          {/* 2 – Dados */}
           <section className="space-y-4">
             <h2 className="text-white font-bold uppercase tracking-wider text-sm flex items-center gap-2">
               {stepNum(2)} Seus Dados
@@ -186,53 +201,132 @@ export default function Checkout() {
               <div className="space-y-1.5">
                 <Label className="text-zinc-400 text-sm">Telefone (WhatsApp) *</Label>
                 <Input placeholder="(00) 00000-0000" className="bg-zinc-900 border-zinc-800 h-12 text-white focus:border-amber-500"
-                  {...register('telefone', { required: 'Telefone é obrigatório', onChange: (e) => { e.target.value = formatPhone(e.target.value); } })} />
+                  {...register('telefone', { required: 'Telefone é obrigatório', onChange: e => { e.target.value = formatPhone(e.target.value); } })} />
                 {errors.telefone && <span className="text-red-400 text-xs">{errors.telefone.message}</span>}
               </div>
             </div>
           </section>
 
-          {/* Address */}
+          {/* 3 – Endereço (delivery only) */}
           {isDelivery && (
             <section className="space-y-4">
               <h2 className="text-white font-bold uppercase tracking-wider text-sm flex items-center gap-2">
-                {stepNum(3)} Endereço de Entrega
+                {stepNum(3)} <MapPin size={16} className="text-amber-500" /> Endereço de Entrega
               </h2>
               <div className="space-y-3 bg-zinc-900 p-4 rounded-xl border border-zinc-800">
-                <div className="space-y-1.5">
-                  <Label className="text-zinc-400 text-sm">Rua e Número *</Label>
-                  <Input placeholder="Ex: Rua das Flores, 123" className="bg-zinc-950 border-zinc-800 h-12 text-white focus:border-amber-500"
-                    {...register('endereco', { required: isDelivery ? 'Endereço é obrigatório' : false })} />
-                  {errors.endereco && <span className="text-red-400 text-xs">{errors.endereco.message}</span>}
+                {/* Street + Number in one row */}
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="col-span-2 space-y-1.5">
+                    <Label className="text-zinc-400 text-xs">Rua / Logradouro *</Label>
+                    <Input placeholder="Ex: Rua das Flores" className="bg-zinc-950 border-zinc-800 h-11 text-white text-sm focus:border-amber-500"
+                      {...register('endereco', { required: 'Endereço é obrigatório' })} />
+                    {errors.endereco && <span className="text-red-400 text-xs">{errors.endereco.message}</span>}
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-zinc-400 text-xs">Número *</Label>
+                    <Input placeholder="123" className="bg-zinc-950 border-zinc-800 h-11 text-white text-sm focus:border-amber-500"
+                      {...register('numero', { required: 'Número obrigatório' })} />
+                    {errors.numero && <span className="text-red-400 text-xs">{errors.numero.message}</span>}
+                  </div>
                 </div>
+
+                {/* Complement */}
                 <div className="space-y-1.5">
-                  <Label className="text-zinc-400 text-sm">Bairro *</Label>
-                  <Input placeholder="Ex: Centro" className="bg-zinc-950 border-zinc-800 h-12 text-white focus:border-amber-500"
-                    {...register('bairro', { required: isDelivery ? 'Bairro é obrigatório' : false })} />
+                  <Label className="text-zinc-400 text-xs">Complemento</Label>
+                  <Input placeholder="Ex: Apto 12, Bloco B, Casa dos fundos" className="bg-zinc-950 border-zinc-800 h-11 text-white text-sm focus:border-amber-500"
+                    {...register('complemento')} />
+                </div>
+
+                {/* Neighborhood with zone select */}
+                <div className="space-y-1.5">
+                  <Label className="text-zinc-400 text-xs">Bairro *</Label>
+                  {zones.length > 0 ? (
+                    <div className="relative">
+                      <select
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 h-11 text-white text-sm focus:border-amber-500 focus:outline-none appearance-none pr-8"
+                        {...register('bairro', { required: 'Bairro é obrigatório' })}
+                        defaultValue=""
+                      >
+                        <option value="" disabled>Selecione seu bairro</option>
+                        {zones.map(z => (
+                          <option key={z.id} value={z.neighborhood}>{z.neighborhood}</option>
+                        ))}
+                        <option value="__outro__">Outro bairro</option>
+                      </select>
+                      <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" />
+                    </div>
+                  ) : (
+                    <Input placeholder="Ex: Centro" className="bg-zinc-950 border-zinc-800 h-11 text-white text-sm focus:border-amber-500"
+                      {...register('bairro', { required: 'Bairro é obrigatório' })} />
+                  )}
                   {errors.bairro && <span className="text-red-400 text-xs">{errors.bairro.message}</span>}
                 </div>
+
+                {/* Fee indicator */}
+                <AnimatePresence>
+                  {bairroValue && bairroValue !== '__outro__' && (
+                    <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
+                      {feeLoading ? (
+                        <div className="flex items-center gap-2 text-zinc-500 text-sm">
+                          <Loader2 size={14} className="animate-spin" /> Consultando taxa...
+                        </div>
+                      ) : feeFound === true ? (
+                        <div className="flex items-center justify-between bg-green-900/20 border border-green-800/40 rounded-xl px-4 py-2.5">
+                          <div className="flex items-center gap-2 text-green-400">
+                            <CheckCircle2 size={16} />
+                            <span className="text-sm font-bold">Taxa de entrega para {bairroValue}</span>
+                          </div>
+                          <span className="text-green-400 font-black">{fmt(deliveryFee)}</span>
+                        </div>
+                      ) : feeFound === false ? (
+                        <div className="flex items-start gap-2 bg-orange-900/20 border border-orange-800/40 rounded-xl px-4 py-2.5">
+                          <AlertCircle size={16} className="text-orange-400 mt-0.5 shrink-0" />
+                          <p className="text-orange-400 text-sm">
+                            {feeMessage}{' '}
+                            <a href={`https://wa.me/${WHATSAPP_NUMBER}`} target="_blank" rel="noopener noreferrer" className="underline font-bold">
+                              Chamar no WhatsApp
+                            </a>
+                          </p>
+                        </div>
+                      ) : null}
+                    </motion.div>
+                  )}
+                  {bairroValue === '__outro__' && (
+                    <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
+                      <div className="flex items-start gap-2 bg-orange-900/20 border border-orange-800/40 rounded-xl px-4 py-2.5">
+                        <AlertCircle size={16} className="text-orange-400 mt-0.5 shrink-0" />
+                        <p className="text-orange-400 text-sm">
+                          Consulte a taxa de entrega pelo{' '}
+                          <a href={`https://wa.me/${WHATSAPP_NUMBER}`} target="_blank" rel="noopener noreferrer" className="underline font-bold">
+                            WhatsApp
+                          </a>
+                        </p>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
+                {/* Reference */}
                 <div className="space-y-1.5">
-                  <Label className="text-zinc-400 text-sm">Ponto de Referência</Label>
-                  <Input placeholder="Ex: Próximo ao mercado" className="bg-zinc-950 border-zinc-800 h-12 text-white focus:border-amber-500"
+                  <Label className="text-zinc-400 text-xs">Ponto de Referência</Label>
+                  <Input placeholder="Ex: Próximo ao mercado" className="bg-zinc-950 border-zinc-800 h-11 text-white text-sm focus:border-amber-500"
                     {...register('referencia')} />
                 </div>
               </div>
             </section>
           )}
 
-          {/* Observations */}
+          {/* 4 – Observações */}
           <section className="space-y-3">
             <h2 className="text-white font-bold uppercase tracking-wider text-sm flex items-center gap-2">
               {stepNum(isDelivery ? 4 : 3)} Observações do Pedido
             </h2>
-            <textarea
-              placeholder="Ex: Sem cebola, ponto da carne bem passado..."
+            <textarea placeholder="Ex: Sem cebola, ponto bem passado..."
               className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 text-white text-sm resize-none focus:border-amber-500 focus:outline-none h-20 placeholder:text-zinc-600"
-              {...register('observacoes')}
-            />
+              {...register('observacoes')} />
           </section>
 
-          {/* Payment */}
+          {/* 5 – Pagamento */}
           <section className="space-y-4">
             <h2 className="text-white font-bold uppercase tracking-wider text-sm flex items-center gap-2">
               {stepNum(isDelivery ? 5 : 4)} Forma de Pagamento
@@ -260,54 +354,40 @@ export default function Checkout() {
             )}
           </section>
 
-          {/* Coupon */}
+          {/* 6 – Cupom */}
           <section className="space-y-3">
             <h2 className="text-white font-bold uppercase tracking-wider text-sm flex items-center gap-2">
               {stepNum(isDelivery ? 6 : 5)} Cupom de Desconto
             </h2>
-
             <AnimatePresence mode="wait">
               {appliedCoupon ? (
-                <motion.div
-                  key="applied"
-                  initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
-                  className="flex items-center justify-between bg-green-900/20 border border-green-800/50 rounded-xl px-4 py-3"
-                >
+                <motion.div key="applied" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
+                  className="flex items-center justify-between bg-green-900/20 border border-green-800/50 rounded-xl px-4 py-3">
                   <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-full bg-green-900/40 flex items-center justify-center">
-                      <CheckCircle2 size={18} className="text-green-400" />
-                    </div>
+                    <CheckCircle2 size={18} className="text-green-400 shrink-0" />
                     <div>
-                      <p className="text-green-400 font-black text-sm uppercase tracking-wider">{appliedCoupon.code}</p>
+                      <p className="text-green-400 font-black text-sm uppercase">{appliedCoupon.code}</p>
                       <p className="text-green-600 text-xs">
-                        {appliedCoupon.discountType === 'percentage'
-                          ? `${appliedCoupon.discountValue}% de desconto`
-                          : `${fmt(appliedCoupon.discountValue ?? 0)} de desconto`}
+                        {appliedCoupon.discountType === 'percentage' ? `${appliedCoupon.discountValue}%` : fmt(appliedCoupon.discountValue ?? 0)} de desconto
                         {' — '}<span className="font-bold text-green-400">-{fmt(appliedCoupon.discountAmount ?? 0)}</span>
                       </p>
                     </div>
                   </div>
-                  <button type="button" onClick={handleRemoveCoupon}
+                  <button type="button" onClick={() => { setAppliedCoupon(null); setCouponError(''); }}
                     className="p-1.5 text-zinc-500 hover:text-red-400 transition-colors rounded-lg hover:bg-red-900/20">
                     <X size={18} />
                   </button>
                 </motion.div>
               ) : (
-                <motion.div
-                  key="input"
-                  initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                  className="space-y-2"
-                >
+                <motion.div key="input" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-2">
                   <div className="flex gap-2">
                     <div className="relative flex-1">
                       <Tag size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
-                      <Input
-                        value={couponInput}
+                      <Input value={couponInput}
                         onChange={e => { setCouponInput(e.target.value.toUpperCase()); setCouponError(''); }}
                         onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), handleApplyCoupon())}
                         placeholder="CÓDIGO DO CUPOM"
-                        className="bg-zinc-900 border-zinc-800 h-12 pl-9 text-white font-mono tracking-wider focus:border-amber-500 placeholder:normal-case placeholder:tracking-normal placeholder:font-sans"
-                      />
+                        className="bg-zinc-900 border-zinc-800 h-12 pl-9 text-white font-mono tracking-wider focus:border-amber-500 placeholder:normal-case placeholder:tracking-normal placeholder:font-sans" />
                     </div>
                     <Button type="button" onClick={handleApplyCoupon} disabled={couponLoading || !couponInput.trim()}
                       className="h-12 px-5 bg-zinc-800 hover:bg-amber-500 hover:text-zinc-950 text-zinc-300 font-bold rounded-xl transition-all">
@@ -325,25 +405,24 @@ export default function Checkout() {
             </AnimatePresence>
           </section>
 
-          {/* Error */}
           {submitError && (
-            <div className="bg-red-900/30 border border-red-800 rounded-xl p-4 text-red-400 text-sm text-center">
-              {submitError}
-            </div>
+            <div className="bg-red-900/30 border border-red-800 rounded-xl p-4 text-red-400 text-sm text-center">{submitError}</div>
           )}
 
-          {/* Summary + Submit */}
+          {/* Sticky summary */}
           <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 sticky bottom-4 z-10 shadow-2xl">
             <div className="space-y-1.5 mb-4 text-sm">
               {cartItems.map(ci => (
                 <div key={ci.item.id} className="flex justify-between text-zinc-400">
-                  <span>{ci.quantity}x {ci.item.name}</span>
-                  <span>{fmt(ci.item.price * ci.quantity)}</span>
+                  <span>{ci.quantity}x {ci.item.name}</span><span>{fmt(ci.item.price * ci.quantity)}</span>
                 </div>
               ))}
               {isDelivery && (
                 <div className="flex justify-between text-zinc-500 text-xs">
-                  <span>Taxa de entrega</span><span>{fmt(DELIVERY_FEE)}</span>
+                  <span>Taxa de entrega</span>
+                  <span className={feeFound === true ? 'text-zinc-300' : 'text-orange-400'}>
+                    {feeFound === true ? fmt(deliveryFee) : feeFound === false ? 'A consultar' : 'A calcular'}
+                  </span>
                 </div>
               )}
               {discount > 0 && (

@@ -1,5 +1,5 @@
 import { db } from "@workspace/db";
-import { categoriesTable, productsTable } from "@workspace/db";
+import { categoriesTable, productsTable, deliveryZonesTable } from "@workspace/db";
 import { count } from "drizzle-orm";
 import { logger } from "./logger";
 
@@ -54,6 +54,14 @@ const DEFAULT_PRODUCTS = [
   },
 ];
 
+const DEFAULT_DELIVERY_ZONES = [
+  { neighborhood: "Itinga", fee: "5.00" },
+  { neighborhood: "Vida Nova", fee: "9.00" },
+  { neighborhood: "Caji", fee: "8.00" },
+  { neighborhood: "Areia Branca", fee: "10.00" },
+  { neighborhood: "Centro de Lauro de Freitas", fee: "12.00" },
+];
+
 export async function runSeed() {
   try {
     const [{ value: catCount }] = await db.select({ value: count() }).from(categoriesTable);
@@ -78,6 +86,13 @@ export async function runSeed() {
         }))
       );
     }
+
+    const [{ value: zoneCount }] = await db.select({ value: count() }).from(deliveryZonesTable);
+    if (Number(zoneCount) === 0) {
+      logger.info("Seeding default delivery zones...");
+      await db.insert(deliveryZonesTable).values(DEFAULT_DELIVERY_ZONES);
+    }
+
     logger.info("Seed complete.");
   } catch (err) {
     logger.error({ err }, "Seed failed (non-fatal)");

@@ -8,35 +8,34 @@ import { WHATSAPP_NUMBER, ORDER_TYPE_LABELS, PAYMENT_METHOD_LABELS } from '../li
 import { Button } from '@/components/ui/button';
 
 interface StoredOrder {
-  trackingId: string;
-  orderNumber: number;
-  customerName: string;
-  phone: string;
+  trackingId: string; orderNumber: number;
+  customerName: string; phone: string;
   orderType: 'delivery' | 'pickup' | 'local';
   paymentMethod: 'pix' | 'cash' | 'card';
   changeFor: string | null;
-  address: string;
-  neighborhood: string;
-  reference: string;
-  notes: string;
-  couponCode: string | null;
-  discountAmount: number;
+  address: string; numero: string; complemento: string;
+  neighborhood: string; reference: string; notes: string;
+  couponCode: string | null; discountAmount: number;
   items: Array<{ name: string; quantity: number; price: number; subtotal: number }>;
-  subtotal: number;
-  deliveryFee: number;
-  discount: number;
-  total: number;
+  subtotal: number; deliveryFee: number; discount: number; total: number;
+}
+
+function fullAddress(order: StoredOrder): string {
+  let addr = `${order.address}, ${order.numero}`;
+  if (order.complemento) addr += `, ${order.complemento}`;
+  return addr;
 }
 
 function buildWhatsAppMessage(order: StoredOrder): string {
   const itemsText = order.items.map(i =>
-    `• ${i.quantity}x ${i.name} - R$ ${i.subtotal.toFixed(2).replace('.', ',')}`
+    `• ${i.quantity}x ${i.name} — R$ ${i.subtotal.toFixed(2).replace('.', ',')}`
   ).join('\n');
 
   let deliveryText = ORDER_TYPE_LABELS[order.orderType];
   if (order.orderType === 'delivery') {
-    deliveryText += `\n📍 *Endereço:* ${order.address}, ${order.neighborhood}`;
-    if (order.reference) deliveryText += `\n📌 *Ref.:* ${order.reference}`;
+    deliveryText += `\n📍 *Endereço:* ${fullAddress(order)}`;
+    deliveryText += `\n🏘️ *Bairro:* ${order.neighborhood}`;
+    if (order.reference) deliveryText += `\n📌 *Referência:* ${order.reference}`;
   }
 
   let paymentText = PAYMENT_METHOD_LABELS[order.paymentMethod];
@@ -44,28 +43,32 @@ function buildWhatsAppMessage(order: StoredOrder): string {
     paymentText += ` (troco p/ R$ ${order.changeFor})`;
   }
 
+  const feeText = order.deliveryFee > 0
+    ? `R$ ${order.deliveryFee.toFixed(2).replace('.', ',')}`
+    : order.orderType === 'delivery' ? 'A consultar' : 'Grátis';
+
   const discountLine = order.discount > 0 && order.couponCode
     ? `\n🏷️ *Cupom ${order.couponCode}:* -R$ ${order.discount.toFixed(2).replace('.', ',')}`
     : '';
 
-  return `🍔 *NOVO PEDIDO #${order.orderNumber} - The Burger GN*
+  return `🍔 *PEDIDO #${order.orderNumber} — The Burger GN*
 
 👤 *Cliente:* ${order.customerName}
 📱 *Telefone:* ${order.phone}
 
-📦 *Tipo:* ${deliveryText}
-${order.notes ? `📝 *Obs.:* ${order.notes}` : ''}
-
+📦 *Tipo de pedido:* ${deliveryText}
+${order.notes ? `\n📝 *Observações:* ${order.notes}` : ''}
 🛒 *Itens:*
 ${itemsText}
 
+━━━━━━━━━━━━━━━━━
 💰 *Subtotal:* R$ ${order.subtotal.toFixed(2).replace('.', ',')}
-🚴 *Entrega:* ${order.deliveryFee > 0 ? `R$ ${order.deliveryFee.toFixed(2).replace('.', ',')}` : 'Grátis'}${discountLine}
+🚴 *Taxa de entrega:* ${feeText}${discountLine}
 💵 *TOTAL: R$ ${order.total.toFixed(2).replace('.', ',')}*
-
+━━━━━━━━━━━━━━━━━
 💳 *Pagamento:* ${paymentText}
 
-Obrigado! 🙏`;
+Aguardo confirmação! 🙏`;
 }
 
 export default function Confirmation() {
@@ -77,77 +80,56 @@ export default function Confirmation() {
   useEffect(() => {
     if (didInit.current) return;
     didInit.current = true;
-
     const raw = sessionStorage.getItem('lastOrder');
     if (!raw) return;
-
     const stored = JSON.parse(raw) as StoredOrder;
     setOrder(stored);
-
-    const message = buildWhatsAppMessage(stored);
-    const url = `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(message)}`;
+    const url = `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(buildWhatsAppMessage(stored))}`;
     setWhatsappUrl(url);
-
     clearCart();
     sessionStorage.removeItem('lastOrder');
-
     setTimeout(() => { window.open(url, '_blank'); }, 1500);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
     <PageTransition className="bg-[#0a0a0a] min-h-screen flex flex-col items-center justify-center p-6 text-center">
-      <motion.div
-        initial={{ scale: 0, opacity: 0 }}
-        animate={{ scale: 1, opacity: 1 }}
+      <motion.div initial={{ scale: 0, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
         transition={{ type: 'spring', stiffness: 200, damping: 18 }}
-        className="relative w-36 h-36 flex items-center justify-center mb-8"
-      >
+        className="relative w-36 h-36 flex items-center justify-center mb-8">
         <div className="absolute inset-0 rounded-full bg-amber-500/10 animate-ping" style={{ animationDuration: '2.5s' }} />
         <div className="w-36 h-36 rounded-full bg-amber-500/10 border-2 border-amber-500/30 flex items-center justify-center">
           <CheckCircle2 size={72} className="text-amber-500" />
         </div>
       </motion.div>
 
-      <motion.h1
-        initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}
-        className="text-4xl font-black text-white uppercase tracking-tighter mb-2"
-      >
+      <motion.h1 initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}
+        className="text-4xl font-black text-white uppercase tracking-tighter mb-2">
         Pedido Enviado!
       </motion.h1>
 
       {order && (
-        <motion.div
-          initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }}
-          className="mb-2 space-y-1"
-        >
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }} className="mb-2 space-y-1">
           <p className="text-amber-500 font-black text-2xl">#{order.orderNumber}</p>
           {order.discount > 0 && order.couponCode && (
-            <p className="text-green-400 text-sm font-bold">
-              🏷️ Desconto de R$ {order.discount.toFixed(2).replace('.', ',')} aplicado!
-            </p>
+            <p className="text-green-400 text-sm font-bold">🏷️ Desconto de R$ {order.discount.toFixed(2).replace('.', ',')} aplicado!</p>
           )}
         </motion.div>
       )}
 
-      <motion.p
-        initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.5 }}
-        className="text-zinc-400 text-base mb-10 max-w-[300px] leading-relaxed"
-      >
+      <motion.p initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.5 }}
+        className="text-zinc-400 text-base mb-10 max-w-[300px] leading-relaxed">
         Abrindo o WhatsApp para confirmar seu pedido...
       </motion.p>
 
-      <motion.div
-        initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.7 }}
-        className="w-full max-w-sm space-y-3"
-      >
+      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.7 }}
+        className="w-full max-w-sm space-y-3">
         <a href={whatsappUrl || undefined} target="_blank" rel="noopener noreferrer" className="block w-full">
           <Button size="lg" disabled={!whatsappUrl}
             className="w-full min-h-[60px] text-base font-bold tracking-wider rounded-2xl bg-[#25D366] hover:bg-[#20bd5a] text-white flex items-center justify-center gap-2">
             <MessageCircle size={22} /> ENVIAR PELO WHATSAPP
           </Button>
         </a>
-
         {order && (
           <Link href={`/pedido/${order.trackingId}`} className="block w-full">
             <Button variant="outline" size="lg"
@@ -156,7 +138,6 @@ export default function Confirmation() {
             </Button>
           </Link>
         )}
-
         <Link href="/" className="block w-full">
           <Button variant="ghost" size="lg"
             className="w-full min-h-[52px] font-bold tracking-wider rounded-2xl text-zinc-500 hover:text-white flex items-center justify-center gap-2">

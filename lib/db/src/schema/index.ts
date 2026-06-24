@@ -3,3 +3,4 @@ export * from "./products";
 export * from "./orders";
 export * from "./order_items";
 export * from "./coupons";
+export * from "./delivery_zones";

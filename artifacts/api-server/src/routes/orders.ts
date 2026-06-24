@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { ordersTable, orderItemsTable, couponsTable } from "@workspace/db";
+import { ordersTable, orderItemsTable, couponsTable, deliveryZonesTable } from "@workspace/db";
 import { eq, desc, sql } from "drizzle-orm";
 import { requireAdmin } from "../middlewares/auth";
 import { addSSEClient, removeSSEClient, broadcastSSE } from "../lib/sse";
@@ -8,8 +8,6 @@ import { calcDiscount } from "./coupons";
 import crypto from "node:crypto";
 
 const router = Router();
-
-const DELIVERY_FEE = 5.00;
 
 // SSE stream for admin real-time notifications
 router.get("/orders/stream", requireAdmin, (req, res) => {
@@ -19,17 +17,11 @@ router.get("/orders/stream", requireAdmin, (req, res) => {
   res.setHeader("X-Accel-Buffering", "no");
   res.flushHeaders();
   res.write("event: connected\ndata: {}\n\n");
-
   addSSEClient(res);
-
   const heartbeat = setInterval(() => {
     try { res.write(": heartbeat\n\n"); } catch { clearInterval(heartbeat); }
   }, 25000);
-
-  req.on("close", () => {
-    clearInterval(heartbeat);
-    removeSSEClient(res);
-  });
+  req.on("close", () => { clearInterval(heartbeat); removeSSEClient(res); });
 });
 
 // Create order (public)
@@ -39,6 +31,8 @@ router.post("/orders", async (req, res) => {
       customerName: string;
       phone: string;
       address?: string;
+      addressNumber?: string;
+      addressComplement?: string;
       neighborhood?: string;
       reference?: string;
       notes?: string;
@@ -54,23 +48,28 @@ router.post("/orders", async (req, res) => {
       return;
     }
 
-    const trackingId = crypto.randomUUID();
     const subtotal = body.items.reduce((acc, i) => acc + i.productPrice * i.quantity, 0);
-    const deliveryFee = body.orderType === "delivery" ? DELIVERY_FEE : 0;
+
+    // Dynamic delivery fee from zones
+    let deliveryFee = 0;
+    if (body.orderType === "delivery" && body.neighborhood) {
+      const [zone] = await db
+        .select()
+        .from(deliveryZonesTable)
+        .where(sql`LOWER(neighborhood) = LOWER(${body.neighborhood}) AND active = true`);
+      if (zone) deliveryFee = parseFloat(zone.fee);
+    }
 
     // Coupon validation
     let discountAmount = 0;
     let validatedCouponCode: string | null = null;
-
     if (body.couponCode) {
       const [coupon] = await db
         .select()
         .from(couponsTable)
         .where(sql`LOWER(code) = LOWER(${body.couponCode})`);
-
       if (
-        coupon &&
-        coupon.active &&
+        coupon && coupon.active &&
         (!coupon.expiresAt || new Date(coupon.expiresAt) >= new Date()) &&
         (coupon.maxUses === null || coupon.usedCount < coupon.maxUses) &&
         subtotal >= parseFloat(coupon.minOrderValue)
@@ -81,12 +80,11 @@ router.post("/orders", async (req, res) => {
     }
 
     const total = Math.max(0, subtotal + deliveryFee - discountAmount);
+    const trackingId = crypto.randomUUID();
 
-    // Get next order number
     const [{ maxNum }] = await db.select({ maxNum: sql<number>`COALESCE(MAX(order_number), 0)` }).from(ordersTable);
     const orderNumber = (Number(maxNum) || 0) + 1;
 
-    // Create order + increment coupon usage atomically
     const result = await db.transaction(async (tx) => {
       const [order] = await tx.insert(ordersTable).values({
         orderNumber,
@@ -94,6 +92,8 @@ router.post("/orders", async (req, res) => {
         customerName: body.customerName,
         phone: body.phone,
         address: body.address ?? "",
+        addressNumber: body.addressNumber ?? "",
+        addressComplement: body.addressComplement ?? "",
         neighborhood: body.neighborhood ?? "",
         reference: body.reference ?? "",
         notes: body.notes ?? "",
@@ -119,8 +119,7 @@ router.post("/orders", async (req, res) => {
       );
 
       if (validatedCouponCode) {
-        await tx
-          .update(couponsTable)
+        await tx.update(couponsTable)
           .set({ usedCount: sql`used_count + 1` })
           .where(sql`LOWER(code) = LOWER(${validatedCouponCode})`);
       }
@@ -132,12 +131,8 @@ router.post("/orders", async (req, res) => {
     broadcastSSE("new_order", fullOrder);
 
     res.status(201).json({
-      ok: true,
-      trackingId,
-      orderNumber,
-      orderId: result.id,
-      discountAmount,
-      couponCode: validatedCouponCode,
+      ok: true, trackingId, orderNumber, orderId: result.id,
+      deliveryFee, discountAmount, couponCode: validatedCouponCode,
     });
   } catch (err) {
     req.log.error({ err }, "Failed to create order");
@@ -152,8 +147,7 @@ router.get("/orders", requireAdmin, async (req, res) => {
     const ids = orders.map(o => o.id);
     if (ids.length === 0) { res.json([]); return; }
     const items = await db.select().from(orderItemsTable).where(sql`order_id = ANY(${ids})`);
-    const result = orders.map(o => ({ ...o, items: items.filter(i => i.orderId === o.id) }));
-    res.json(result);
+    res.json(orders.map(o => ({ ...o, items: items.filter(i => i.orderId === o.id) })));
   } catch (err) {
     req.log.error({ err }, "Failed to list orders");
     res.status(500).json({ error: "Internal server error" });

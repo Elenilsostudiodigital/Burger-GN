@@ -10,7 +10,7 @@ import { useAdmin } from '../../context/AdminContext';
 import { useLocation } from 'wouter';
 import {
   LayoutDashboard, UtensilsCrossed, Plus, Pencil, Trash2, Check, X,
-  ToggleLeft, ToggleRight, Loader2, Package, LogOut,
+  ToggleLeft, ToggleRight, Loader2, Tag, MapPin, LogOut,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -295,7 +295,7 @@ export default function MenuAdmin() {
 
               {products.length === 0 && (
                 <div className="text-center py-12">
-                  <Package size={40} className="text-zinc-800 mx-auto mb-3" />
+                  <UtensilsCrossed size={40} className="text-zinc-800 mx-auto mb-3" />
                   <p className="text-zinc-600">Nenhum produto cadastrado.</p>
                 </div>
               )}
@@ -367,10 +367,16 @@ export default function MenuAdmin() {
               <span className="text-[10px] font-bold uppercase">Cardápio</span>
             </div>
           </Link>
-          <Link href="/" className="flex-1">
+          <Link href="/admin/cupons" className="flex-1">
             <div className="flex flex-col items-center gap-1 py-3 text-zinc-500 hover:text-white transition-colors">
-              <Package size={20} />
-              <span className="text-[10px] font-bold uppercase">Site</span>
+              <Tag size={20} />
+              <span className="text-[10px] font-bold uppercase">Cupons</span>
+            </div>
+          </Link>
+          <Link href="/admin/taxas" className="flex-1">
+            <div className="flex flex-col items-center gap-1 py-3 text-zinc-500 hover:text-white transition-colors">
+              <MapPin size={20} />
+              <span className="text-[10px] font-bold uppercase">Taxas</span>
             </div>
           </Link>
         </div>

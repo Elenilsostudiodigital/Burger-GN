@@ -29,6 +29,8 @@ export const ordersTable = pgTable("orders", {
   customerName: text("customer_name").notNull(),
   phone: text("phone").notNull(),
   address: text("address").notNull().default(""),
+  addressNumber: text("address_number").notNull().default(""),
+  addressComplement: text("address_complement").notNull().default(""),
   neighborhood: text("neighborhood").notNull().default(""),
   reference: text("reference").notNull().default(""),
   notes: text("notes").notNull().default(""),

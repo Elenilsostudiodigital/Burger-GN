@@ -1,4 +1,4 @@
-import { Switch, Route, Router as WouterRouter, Redirect, useLocation } from "wouter";
+import { Switch, Route, Router as WouterRouter, useLocation } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -15,6 +15,8 @@ import OrderTracking from "./pages/OrderTracking";
 import AdminLogin from "./pages/admin/Login";
 import AdminDashboard from "./pages/admin/Dashboard";
 import AdminMenuAdmin from "./pages/admin/MenuAdmin";
+import AdminCoupons from "./pages/admin/Coupons";
+import AdminDeliveryZones from "./pages/admin/DeliveryZones";
 
 const queryClient = new QueryClient();
 
@@ -53,6 +55,8 @@ function Router() {
       <Route path="/admin/login" component={AdminLogin} />
       <Route path="/admin" component={() => <ProtectedAdminRoute component={AdminDashboard} />} />
       <Route path="/admin/cardapio" component={() => <ProtectedAdminRoute component={AdminMenuAdmin} />} />
+      <Route path="/admin/cupons" component={() => <ProtectedAdminRoute component={AdminCoupons} />} />
+      <Route path="/admin/taxas" component={() => <ProtectedAdminRoute component={AdminDeliveryZones} />} />
 
       <Route component={NotFound} />
     </Switch>
