@@ -9,6 +9,7 @@ import kmDeliveryRouter from "./km_delivery";
 import settingsRouter from "./settings";
 import ordersRouter from "./orders";
 import importRouter from "./import";
+import paymentsRouter from "./payments";
 
 const router: IRouter = Router();
 
@@ -22,5 +23,6 @@ router.use(kmDeliveryRouter);
 router.use(settingsRouter);
 router.use(ordersRouter);
 router.use(importRouter);
+router.use(paymentsRouter);
 
 export default router;

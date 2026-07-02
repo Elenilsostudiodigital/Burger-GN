@@ -34,6 +34,8 @@ export const ordersTable = pgTable("orders", {
   couponCode: text("coupon_code"),
   total: numeric("total", { precision: 10, scale: 2 }).notNull(),
   status: orderStatusEnum("status").notNull().default("new"),
+  mpPaymentId: text("mp_payment_id"),
+  mpPreferenceId: text("mp_preference_id"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

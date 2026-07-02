@@ -134,9 +134,11 @@ export interface CreateOrderPayload {
   couponCode?: string;
   items: Array<{ productId?: number; productName: string; productPrice: number; quantity: number; addons?: Addon[]; notes?: string }>;
 }
+export interface PixPaymentResult { paymentId: string; qrCode: string; qrCodeBase64: string; }
 export const createOrder = (d: CreateOrderPayload) => api.post("/orders", d) as Promise<{
   ok: boolean; trackingId: string; orderNumber: number; orderId: number;
   deliveryFee: number; distanceKm: number | null; discountAmount: number; couponCode: string | null;
+  pixPayment: PixPaymentResult | null; cardCheckoutUrl: string | null;
 }>;
 export const getOrders = () => api.get("/orders") as Promise<Order[]>;
 export const trackOrder = (trackingId: string) => api.get(`/orders/track/${trackingId}`) as Promise<Order>;
@@ -157,12 +159,15 @@ export const deleteCoupon = (id: number) => api.delete(`/admin/coupons/${id}`);
 export interface PaymentSettingsPublic { onlinePaymentEnabled: boolean; cashOnDeliveryEnabled: boolean; }
 export interface PaymentSettingsAdmin {
   id: number; onlinePaymentEnabled: boolean; gatewayProvider: string; cashOnDeliveryEnabled: boolean;
-  updatedAt: string; gatewayKeyConfigured: boolean; gatewayKeyEnvVars: string[];
+  updatedAt: string;
+  mercadoPagoConfigured: boolean; mercadoPagoAccessTokenPreview: string; mercadoPagoPublicKey: string;
 }
 export const getPaymentSettings = () => api.get("/payment-settings") as Promise<PaymentSettingsPublic>;
 export const getAdminPaymentSettings = () => api.get("/admin/payment-settings") as Promise<PaymentSettingsAdmin>;
-export const updatePaymentSettings = (d: { onlinePaymentEnabled?: boolean; gatewayProvider?: string; cashOnDeliveryEnabled?: boolean }) =>
-  api.put("/admin/payment-settings", d) as Promise<PaymentSettingsAdmin>;
+export const updatePaymentSettings = (d: {
+  onlinePaymentEnabled?: boolean; gatewayProvider?: string; cashOnDeliveryEnabled?: boolean;
+  mercadoPagoAccessToken?: string; mercadoPagoPublicKey?: string; clearMercadoPagoCredentials?: boolean;
+}) => api.put("/admin/payment-settings", d) as Promise<PaymentSettingsAdmin>;
 
 // ── External Links ────────────────────────────────────────────────────────────
 export interface ExternalLink { id: number; label: string; url: string; active: boolean; displayOrder: number; createdAt: string; }

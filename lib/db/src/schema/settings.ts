@@ -5,6 +5,8 @@ export const paymentSettingsTable = pgTable("payment_settings", {
   onlinePaymentEnabled: boolean("online_payment_enabled").notNull().default(false),
   gatewayProvider: text("gateway_provider").notNull().default(""), // 'mercadopago' | 'stripe' | ''
   cashOnDeliveryEnabled: boolean("cash_on_delivery_enabled").notNull().default(true),
+  mercadoPagoAccessToken: text("mercado_pago_access_token"),
+  mercadoPagoPublicKey: text("mercado_pago_public_key"),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 

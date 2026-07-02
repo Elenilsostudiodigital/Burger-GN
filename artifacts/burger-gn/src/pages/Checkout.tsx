@@ -239,7 +239,12 @@ export default function Checkout() {
         total: result.deliveryFee !== undefined
           ? parseFloat((subtotal + result.deliveryFee - (result.discountAmount ?? 0)).toFixed(2))
           : total,
+        pixPayment: result.pixPayment ?? null,
       }));
+      if (result.cardCheckoutUrl) {
+        window.location.href = result.cardCheckoutUrl;
+        return;
+      }
       setLocation('/confirmacao');
     } catch (err) {
       setSubmitError(err instanceof Error && err.message ? err.message : 'Erro ao enviar pedido. Verifique a conexão e tente novamente.');
@@ -545,9 +550,18 @@ export default function Checkout() {
           {/* Sticky summary */}
           <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 sticky bottom-4 z-10 shadow-2xl">
             <div className="space-y-1.5 mb-4 text-sm">
-              {cartItems.map(ci => (
-                <div key={ci.item.id} className="flex justify-between text-zinc-400">
-                  <span>{ci.quantity}x {ci.item.name}</span><span>{fmt(ci.item.price * ci.quantity)}</span>
+              {cartItems.map((ci, idx) => (
+                <div key={idx}>
+                  <div className="flex justify-between text-zinc-400">
+                    <span>{ci.quantity}x {ci.item.name}</span>
+                    <span>{fmt((ci.item.price + ci.selectedAddons.reduce((acc, a) => acc + a.price, 0)) * ci.quantity)}</span>
+                  </div>
+                  {ci.selectedAddons.length > 0 && (
+                    <p className="text-zinc-600 text-xs pl-3">+ {ci.selectedAddons.map(a => a.name).join(', ')}</p>
+                  )}
+                  {ci.notes && (
+                    <p className="text-zinc-600 text-xs pl-3 italic">Obs: {ci.notes}</p>
+                  )}
                 </div>
               ))}
               <div className="flex justify-between text-zinc-500 text-xs pt-1">

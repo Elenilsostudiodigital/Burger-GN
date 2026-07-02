@@ -6,6 +6,7 @@ import { requireAdmin } from "../middlewares/auth";
 import { addSSEClient, removeSSEClient, broadcastSSE } from "../lib/sse";
 import { calcDiscount } from "./coupons";
 import { haversineKm, findKmTier } from "./km_delivery";
+import { getMPSettings, createPixPayment, createCardPreference } from "../lib/mercadopago";
 import crypto from "node:crypto";
 
 const router = Router();
@@ -195,12 +196,47 @@ router.post("/orders", async (req, res) => {
       return order;
     });
 
+    // Mercado Pago online payment (Pix / Card) — never blocks order creation on failure.
+    let pixPayment: { paymentId: string; qrCode: string; qrCodeBase64: string } | null = null;
+    let cardCheckoutUrl: string | null = null;
+
+    if (body.paymentMethod === "pix" || body.paymentMethod === "card") {
+      const mp = await getMPSettings();
+      if (mp) {
+        const protocol = req.get("x-forwarded-proto") ?? req.protocol;
+        const host = req.get("host");
+        const baseUrl = `${protocol}://${host}`;
+        const notificationUrl = `${baseUrl}/api/payments/mercadopago/webhook`;
+
+        if (body.paymentMethod === "pix") {
+          const pix = await createPixPayment({
+            accessToken: mp.accessToken, total, trackingId,
+            customerName: body.customerName, phone: body.phone, notificationUrl,
+          });
+          if (pix) {
+            pixPayment = pix;
+            await db.update(ordersTable).set({ mpPaymentId: pix.paymentId }).where(eq(ordersTable.id, result.id));
+          }
+        } else {
+          const backUrl = `${baseUrl}/pedido/${trackingId}`;
+          const preference = await createCardPreference({
+            accessToken: mp.accessToken, total, trackingId, notificationUrl, backUrl,
+          });
+          if (preference) {
+            cardCheckoutUrl = preference.checkoutUrl;
+            await db.update(ordersTable).set({ mpPreferenceId: preference.preferenceId }).where(eq(ordersTable.id, result.id));
+          }
+        }
+      }
+    }
+
     const fullOrder = await getOrderWithItems(result.id);
     broadcastSSE("new_order", fullOrder);
 
     res.status(201).json({
       ok: true, trackingId, orderNumber, orderId: result.id,
       deliveryFee, distanceKm: customerDistanceKm, discountAmount, couponCode: validatedCouponCode,
+      pixPayment, cardCheckoutUrl,
     });
   } catch (err) {
     req.log.error({ err }, "Failed to create order");

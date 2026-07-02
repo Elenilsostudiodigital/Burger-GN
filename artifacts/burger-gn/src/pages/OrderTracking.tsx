@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useParams, Link } from "wouter";
 import { motion } from "framer-motion";
-import { trackOrder, Order, STATUS_LABELS, ORDER_TYPE_LABELS, PAYMENT_METHOD_LABELS } from "../lib/api";
+import { trackOrder, Order, STATUS_LABELS, ORDER_TYPE_LABELS, PAYMENT_METHOD_LABELS, PAYMENT_STATUS_LABELS } from "../lib/api";
 import { CheckCircle2, Clock, ChefHat, Bike, Home, Package } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -157,8 +157,15 @@ export default function OrderTracking() {
             <div className="flex justify-between">
               <span>Tipo</span><span>{ORDER_TYPE_LABELS[order.orderType]}</span>
             </div>
-            <div className="flex justify-between">
-              <span>Pagamento</span><span>{PAYMENT_METHOD_LABELS[order.paymentMethod]}</span>
+            <div className="flex justify-between items-center">
+              <span>Pagamento</span>
+              <span className="flex items-center gap-1.5">
+                {PAYMENT_METHOD_LABELS[order.paymentMethod]}
+                <span className={`text-[9px] font-black uppercase px-1.5 py-0.5 rounded ${
+                  order.paymentStatus === 'paid' ? 'bg-green-500/15 text-green-400' :
+                  order.paymentStatus === 'failed' ? 'bg-red-500/15 text-red-400' : 'bg-zinc-700/40 text-zinc-400'
+                }`}>{PAYMENT_STATUS_LABELS[order.paymentStatus]}</span>
+              </span>
             </div>
             {order.address && (
               <div className="flex justify-between">

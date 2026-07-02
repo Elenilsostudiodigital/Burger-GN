@@ -1,10 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Link } from 'wouter';
 import { motion } from 'framer-motion';
-import { CheckCircle2, MessageCircle, Home, ExternalLink } from 'lucide-react';
+import { CheckCircle2, MessageCircle, Home, ExternalLink, Copy, Check, QrCode } from 'lucide-react';
 import { PageTransition } from '../components/PageTransition';
 import { useCart } from '../context/CartContext';
-import { WHATSAPP_NUMBER, ORDER_TYPE_LABELS, PAYMENT_METHOD_LABELS } from '../lib/api';
+import { WHATSAPP_NUMBER, ORDER_TYPE_LABELS, PAYMENT_METHOD_LABELS, trackOrder, PixPaymentResult } from '../lib/api';
 import { Button } from '@/components/ui/button';
 
 interface StoredOrder {
@@ -19,6 +19,7 @@ interface StoredOrder {
   couponCode: string | null; discountAmount: number;
   items: Array<{ name: string; quantity: number; price: number; addons?: Array<{ name: string; price: number }>; notes?: string; subtotal: number }>;
   subtotal: number; deliveryFee: number; discount: number; total: number;
+  pixPayment: PixPaymentResult | null;
 }
 
 function fullAddress(order: StoredOrder): string {
@@ -84,6 +85,8 @@ export default function Confirmation() {
   const { clearCart } = useCart();
   const [order, setOrder] = useState<StoredOrder | null>(null);
   const [whatsappUrl, setWhatsappUrl] = useState('');
+  const [copied, setCopied] = useState(false);
+  const [paid, setPaid] = useState(false);
   const didInit = useRef(false);
 
   useEffect(() => {
@@ -100,6 +103,27 @@ export default function Confirmation() {
     setTimeout(() => { window.open(url, '_blank'); }, 1500);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Poll payment status while a Pix payment is pending
+  useEffect(() => {
+    if (!order?.pixPayment || paid) return;
+    const interval = setInterval(async () => {
+      try {
+        const fresh = await trackOrder(order.trackingId);
+        if (fresh.paymentStatus === 'paid') { setPaid(true); clearInterval(interval); }
+      } catch { /* ignore */ }
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [order, paid]);
+
+  const handleCopyPix = async () => {
+    if (!order?.pixPayment) return;
+    try {
+      await navigator.clipboard.writeText(order.pixPayment.qrCode);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2500);
+    } catch { /* ignore */ }
+  };
 
   return (
     <PageTransition className="bg-[#0a0a0a] min-h-screen flex flex-col items-center justify-center p-6 text-center">
@@ -127,9 +151,47 @@ export default function Confirmation() {
       )}
 
       <motion.p initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.5 }}
-        className="text-zinc-400 text-base mb-10 max-w-[300px] leading-relaxed">
+        className="text-zinc-400 text-base mb-6 max-w-[300px] leading-relaxed">
         Abrindo o WhatsApp para confirmar seu pedido...
       </motion.p>
+
+      {order?.pixPayment && (
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.55 }}
+          className="w-full max-w-sm bg-zinc-900 border border-zinc-800 rounded-2xl p-5 mb-6 text-left space-y-4">
+          <div className="flex items-center gap-2 justify-center">
+            <QrCode size={18} className="text-amber-500" />
+            <h3 className="text-white font-black uppercase tracking-wide text-sm">Pague com Pix</h3>
+          </div>
+          {paid ? (
+            <div className="flex items-center justify-center gap-2 bg-green-900/20 border border-green-800/40 rounded-xl py-4 text-green-400 font-bold">
+              <CheckCircle2 size={20} /> Pagamento confirmado!
+            </div>
+          ) : (
+            <>
+              <div className="flex justify-center">
+                <img
+                  src={`data:image/png;base64,${order.pixPayment.qrCodeBase64}`}
+                  alt="QR Code Pix"
+                  className="w-48 h-48 rounded-xl bg-white p-2"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <p className="text-zinc-500 text-xs">Ou copie o código Pix (copia e cola):</p>
+                <div className="flex gap-2">
+                  <div className="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-zinc-400 text-xs font-mono truncate">
+                    {order.pixPayment.qrCode}
+                  </div>
+                  <button type="button" onClick={handleCopyPix}
+                    className={`shrink-0 px-3 rounded-lg font-bold text-xs flex items-center gap-1.5 transition-colors ${copied ? 'bg-green-500/20 text-green-400' : 'bg-amber-500 text-zinc-950 hover:bg-amber-400'}`}>
+                    {copied ? <Check size={14} /> : <Copy size={14} />} {copied ? 'Copiado!' : 'Copiar'}
+                  </button>
+                </div>
+              </div>
+              <p className="text-zinc-600 text-xs text-center">Aguardando confirmação do pagamento...</p>
+            </>
+          )}
+        </motion.div>
+      )}
 
       <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.7 }}
         className="w-full max-w-sm space-y-3">

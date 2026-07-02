@@ -6,11 +6,10 @@ import { requireAdmin } from "../middlewares/auth";
 
 const router = Router();
 
-// Any known payment-gateway secret env vars — presence indicates a gateway is wired up.
-const GATEWAY_KEY_ENV_VARS = ["MERCADOPAGO_ACCESS_TOKEN", "STRIPE_SECRET_KEY"];
-
-function isGatewayKeyConfigured(): boolean {
-  return GATEWAY_KEY_ENV_VARS.some((key) => !!process.env[key]);
+function maskToken(token: string | null): string {
+  if (!token) return "";
+  if (token.length <= 4) return "••••";
+  return `••••${token.slice(-4)}`;
 }
 
 async function getOrCreatePaymentSettings() {
@@ -25,9 +24,9 @@ async function getOrCreatePaymentSettings() {
 router.get("/payment-settings", async (req, res) => {
   try {
     const settings = await getOrCreatePaymentSettings();
-    const gatewayKeyConfigured = isGatewayKeyConfigured();
+    const mercadoPagoConfigured = !!settings.mercadoPagoAccessToken;
     res.json({
-      onlinePaymentEnabled: settings.onlinePaymentEnabled && gatewayKeyConfigured,
+      onlinePaymentEnabled: settings.onlinePaymentEnabled && mercadoPagoConfigured,
       cashOnDeliveryEnabled: settings.cashOnDeliveryEnabled,
     });
   } catch (err) {
@@ -52,10 +51,20 @@ router.get("/external-links", async (req, res) => {
 
 // ── Admin: payment settings ──────────────────────────────────────────────────
 
+function toAdminPaymentSettings(settings: typeof paymentSettingsTable.$inferSelect) {
+  const { mercadoPagoAccessToken, mercadoPagoPublicKey, ...rest } = settings;
+  return {
+    ...rest,
+    mercadoPagoConfigured: !!mercadoPagoAccessToken,
+    mercadoPagoAccessTokenPreview: maskToken(mercadoPagoAccessToken),
+    mercadoPagoPublicKey: mercadoPagoPublicKey ?? "",
+  };
+}
+
 router.get("/admin/payment-settings", requireAdmin, async (req, res) => {
   try {
     const settings = await getOrCreatePaymentSettings();
-    res.json({ ...settings, gatewayKeyConfigured: isGatewayKeyConfigured(), gatewayKeyEnvVars: GATEWAY_KEY_ENV_VARS });
+    res.json(toAdminPaymentSettings(settings));
   } catch (err) {
     req.log.error({ err }, "Failed to get admin payment settings");
     res.status(500).json({ error: "Internal server error" });
@@ -64,13 +73,34 @@ router.get("/admin/payment-settings", requireAdmin, async (req, res) => {
 
 router.put("/admin/payment-settings", requireAdmin, async (req, res) => {
   try {
-    const body = req.body as { onlinePaymentEnabled?: boolean; gatewayProvider?: string; cashOnDeliveryEnabled?: boolean };
+    const body = req.body as {
+      onlinePaymentEnabled?: boolean; gatewayProvider?: string; cashOnDeliveryEnabled?: boolean;
+      mercadoPagoAccessToken?: string; mercadoPagoPublicKey?: string; clearMercadoPagoCredentials?: boolean;
+    };
     const settings = await getOrCreatePaymentSettings();
+    const patch: Record<string, unknown> = {
+      onlinePaymentEnabled: body.onlinePaymentEnabled,
+      gatewayProvider: body.gatewayProvider,
+      cashOnDeliveryEnabled: body.cashOnDeliveryEnabled,
+      updatedAt: new Date(),
+    };
+    Object.keys(patch).forEach((k) => patch[k] === undefined && delete patch[k]);
+
+    if (body.clearMercadoPagoCredentials) {
+      patch["mercadoPagoAccessToken"] = null;
+      patch["mercadoPagoPublicKey"] = null;
+    } else {
+      // Only overwrite the access token when a non-empty value is submitted, so the masked
+      // preview shown by the admin UI never wipes a previously-saved credential.
+      if (body.mercadoPagoAccessToken) patch["mercadoPagoAccessToken"] = body.mercadoPagoAccessToken.trim();
+      if (body.mercadoPagoPublicKey !== undefined) patch["mercadoPagoPublicKey"] = body.mercadoPagoPublicKey.trim();
+    }
+
     const [updated] = await db.update(paymentSettingsTable)
-      .set({ ...body, updatedAt: new Date() })
+      .set(patch)
       .where(eq(paymentSettingsTable.id, settings.id))
       .returning();
-    res.json({ ...updated, gatewayKeyConfigured: isGatewayKeyConfigured(), gatewayKeyEnvVars: GATEWAY_KEY_ENV_VARS });
+    res.json(toAdminPaymentSettings(updated));
   } catch (err) {
     req.log.error({ err }, "Failed to update payment settings");
     res.status(500).json({ error: "Internal server error" });

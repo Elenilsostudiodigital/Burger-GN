@@ -49,8 +49,10 @@ function PaymentTab() {
   const [saving, setSaving] = useState(false);
   const [online, setOnline] = useState(false);
   const [cashOnDelivery, setCashOnDelivery] = useState(true);
-  const [provider, setProvider] = useState('');
+  const [accessToken, setAccessToken] = useState('');
+  const [publicKey, setPublicKey] = useState('');
   const [success, setSuccess] = useState(false);
+  const [error, setError] = useState('');
 
   const load = async () => {
     setLoading(true);
@@ -58,18 +60,41 @@ function PaymentTab() {
     setSettings(s);
     setOnline(s.onlinePaymentEnabled);
     setCashOnDelivery(s.cashOnDeliveryEnabled);
-    setProvider(s.gatewayProvider);
+    setPublicKey(s.mercadoPagoPublicKey);
     setLoading(false);
   };
 
   useEffect(() => { load(); }, []);
 
   const handleSave = async () => {
-    setSaving(true); setSuccess(false);
-    const updated = await updatePaymentSettings({ onlinePaymentEnabled: online, cashOnDeliveryEnabled: cashOnDelivery, gatewayProvider: provider });
-    setSettings(updated);
-    setSaving(false); setSuccess(true);
-    setTimeout(() => setSuccess(false), 3000);
+    setSaving(true); setSuccess(false); setError('');
+    try {
+      const updated = await updatePaymentSettings({
+        onlinePaymentEnabled: online,
+        cashOnDeliveryEnabled: cashOnDelivery,
+        gatewayProvider: 'mercadopago',
+        mercadoPagoAccessToken: accessToken.trim() || undefined,
+        mercadoPagoPublicKey: publicKey.trim(),
+      });
+      setSettings(updated);
+      setAccessToken('');
+      setSaving(false); setSuccess(true);
+      setTimeout(() => setSuccess(false), 3000);
+    } catch {
+      setError('Erro ao salvar configurações');
+      setSaving(false);
+    }
+  };
+
+  const handleDisconnect = async () => {
+    if (!confirm('Remover as credenciais do Mercado Pago?')) return;
+    setSaving(true);
+    try {
+      const updated = await updatePaymentSettings({ clearMercadoPagoCredentials: true, onlinePaymentEnabled: false });
+      setSettings(updated);
+      setOnline(false);
+      setAccessToken(''); setPublicKey('');
+    } finally { setSaving(false); }
   };
 
   if (loading || !settings) {
@@ -79,53 +104,61 @@ function PaymentTab() {
   return (
     <div className="space-y-5">
       {/* Gateway status */}
-      <div className={`rounded-2xl p-5 border flex items-start gap-3 ${settings.gatewayKeyConfigured ? 'bg-green-900/10 border-green-800/40' : 'bg-orange-900/10 border-orange-800/40'}`}>
-        {settings.gatewayKeyConfigured
+      <div className={`rounded-2xl p-5 border flex items-start gap-3 ${settings.mercadoPagoConfigured ? 'bg-green-900/10 border-green-800/40' : 'bg-orange-900/10 border-orange-800/40'}`}>
+        {settings.mercadoPagoConfigured
           ? <ShieldCheck size={22} className="text-green-400 mt-0.5 shrink-0" />
           : <ShieldAlert size={22} className="text-orange-400 mt-0.5 shrink-0" />}
         <div>
-          <p className={`font-bold text-sm ${settings.gatewayKeyConfigured ? 'text-green-400' : 'text-orange-400'}`}>
-            {settings.gatewayKeyConfigured ? 'Gateway de pagamento configurado' : 'Nenhum gateway de pagamento configurado'}
+          <p className={`font-bold text-sm ${settings.mercadoPagoConfigured ? 'text-green-400' : 'text-orange-400'}`}>
+            {settings.mercadoPagoConfigured ? 'Mercado Pago conectado' : 'Mercado Pago não conectado'}
           </p>
           <p className="text-zinc-500 text-xs mt-1 leading-relaxed">
-            {settings.gatewayKeyConfigured
-              ? 'Uma chave de API de pagamento foi detectada no ambiente. O pagamento online pode ser ativado.'
-              : `Para aceitar Pix e cartão online de verdade (caindo direto na sua conta), é preciso configurar uma chave de API de um gateway (ex: Mercado Pago ou Stripe) como variável de ambiente/secret: ${settings.gatewayKeyEnvVars.join(' ou ')}. Enquanto isso, os pagamentos funcionam apenas como forma "combinada" — o cliente escolhe Pix/Cartão/Dinheiro e o pagamento é acertado na entrega ou por fora, sem processamento automático.`}
+            {settings.mercadoPagoConfigured
+              ? 'Suas credenciais estão salvas. Pix (QR code + copia-e-cola) e Cartão de crédito/débito são processados automaticamente pelo Mercado Pago.'
+              : 'Cole abaixo o Access Token da sua conta Mercado Pago para aceitar Pix e Cartão automaticamente, caindo direto na sua conta.'}
           </p>
         </div>
+      </div>
+
+      {/* Mercado Pago credentials */}
+      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-3">
+        <Label className="text-zinc-400 text-xs uppercase font-bold">Credenciais do Mercado Pago</Label>
+        <div className="space-y-1.5">
+          <Label className="text-zinc-500 text-xs">Access Token {settings.mercadoPagoConfigured && <span className="text-zinc-600">(atual: {settings.mercadoPagoAccessTokenPreview})</span>}</Label>
+          <Input type="password" value={accessToken} onChange={e => setAccessToken(e.target.value)}
+            placeholder={settings.mercadoPagoConfigured ? 'Deixe em branco para manter o token atual' : 'APP_USR-...'}
+            className="bg-zinc-950 border-zinc-800 text-white h-11 text-sm focus:border-amber-500 font-mono" />
+        </div>
+        <div className="space-y-1.5">
+          <Label className="text-zinc-500 text-xs">Public Key</Label>
+          <Input value={publicKey} onChange={e => setPublicKey(e.target.value)} placeholder="APP_USR-..."
+            className="bg-zinc-950 border-zinc-800 text-white h-11 text-sm focus:border-amber-500 font-mono" />
+        </div>
+        <p className="text-zinc-600 text-xs leading-relaxed">
+          Encontre essas chaves em: Painel do Mercado Pago → Seu negócio → Configurações → Credenciais. As notificações de pagamento (webhook) são configuradas automaticamente, não é preciso cadastrar nada no painel do Mercado Pago.
+        </p>
+        {settings.mercadoPagoConfigured && (
+          <button type="button" onClick={handleDisconnect} disabled={saving}
+            className="text-red-400 text-xs font-bold hover:underline">
+            Remover credenciais
+          </button>
+        )}
       </div>
 
       {/* Online payment toggle */}
       <div className={`rounded-2xl p-5 border transition-all ${online ? 'bg-amber-500/10 border-amber-500/30' : 'bg-zinc-900 border-zinc-800'}`}>
         <div className="flex items-center justify-between">
           <div>
-            <h3 className="text-white font-black uppercase tracking-wide text-sm">Pagamento Online</h3>
+            <h3 className="text-white font-black uppercase tracking-wide text-sm">Pagamento Online (Pix + Cartão)</h3>
             <p className="text-zinc-500 text-xs mt-0.5">
-              {settings.gatewayKeyConfigured ? 'Processa Pix/cartão automaticamente via gateway' : 'Requer configurar uma chave de gateway (veja acima)'}
+              {settings.mercadoPagoConfigured ? 'Processa Pix e cartão automaticamente via Mercado Pago' : 'Salve as credenciais acima para poder ativar'}
             </p>
           </div>
-          <button type="button" disabled={!settings.gatewayKeyConfigured} onClick={() => setOnline(!online)}
-            className={`transition-colors ${!settings.gatewayKeyConfigured ? 'text-zinc-700 cursor-not-allowed' : online ? 'text-amber-500' : 'text-zinc-600'}`}>
+          <button type="button" disabled={!settings.mercadoPagoConfigured} onClick={() => setOnline(!online)}
+            className={`transition-colors ${!settings.mercadoPagoConfigured ? 'text-zinc-700 cursor-not-allowed' : online ? 'text-amber-500' : 'text-zinc-600'}`}>
             {online ? <ToggleRight size={34} /> : <ToggleLeft size={34} />}
           </button>
         </div>
-      </div>
-
-      {/* Gateway provider selector */}
-      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-3">
-        <Label className="text-zinc-400 text-xs uppercase font-bold">Gateway de pagamento preferido</Label>
-        <div className="grid grid-cols-2 gap-2">
-          {[
-            { key: 'mercadopago', label: 'Mercado Pago' },
-            { key: 'stripe', label: 'Stripe' },
-          ].map(g => (
-            <button key={g.key} type="button" onClick={() => setProvider(g.key)}
-              className={`h-11 rounded-xl border font-bold text-sm transition-all ${provider === g.key ? 'border-amber-500 bg-amber-500/10 text-amber-500' : 'border-zinc-800 text-zinc-400'}`}>
-              {g.label}
-            </button>
-          ))}
-        </div>
-        <p className="text-zinc-600 text-xs">Escolha o gateway e peça ao suporte para configurar a chave secreta correspondente como variável de ambiente.</p>
       </div>
 
       {/* Cash on delivery */}
@@ -147,6 +180,7 @@ function PaymentTab() {
       </div>
 
       {success && <p className="text-green-400 text-sm px-1 flex items-center gap-2"><Check size={16} /> Configurações salvas!</p>}
+      {error && <p className="text-red-400 text-sm px-1 flex items-center gap-2"><X size={16} /> {error}</p>}
 
       <Button onClick={handleSave} disabled={saving}
         className="w-full h-12 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold rounded-xl flex items-center justify-center gap-2">
