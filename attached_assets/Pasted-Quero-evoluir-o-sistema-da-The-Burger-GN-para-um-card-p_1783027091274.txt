@@ -1,0 +1,62 @@
+Quero evoluir o sistema da The Burger GN para um cardápio digital completo com entrega, localização e pagamento online.
+
+Adicione as seguintes funções:
+
+1. Finalização de pedido com localização do cliente:
+- No checkout, o cliente deve informar endereço completo.
+- Adicionar botão "Usar minha localização".
+- Integrar com Google Maps/Google Distance Matrix API para calcular a distância entre a loja e o cliente.
+- O sistema deve calcular a taxa de entrega com base na quilometragem.
+
+2. Painel administrativo para cadastrar taxas:
+- Criar uma área no painel admin chamada "Taxas de Entrega".
+- O administrador poderá cadastrar faixas de distância, exemplo:
+  - 0 a 2 km = R$ 5,00
+  - 2,1 a 5 km = R$ 8,00
+  - 5,1 a 8 km = R$ 12,00
+  - acima de 8 km = consultar
+- A taxa deve ser aplicada automaticamente no checkout.
+
+3. Pagamentos:
+- Adicionar pagamento online via Pix.
+- Adicionar pagamento online via cartão de crédito/débito.
+- Preparar integração com Mercado Pago ou outro gateway de pagamento.
+- Criar configuração no painel admin para cadastrar as credenciais da conta de pagamento.
+- O pagamento online deve cair diretamente na conta configurada pela The Burger GN.
+- Dinheiro deve aparecer apenas para retirada/pagamento presencial ou pagamento na entrega, se o admin permitir.
+
+4. Checkout:
+- Mostrar resumo do pedido.
+- Mostrar subtotal.
+- Mostrar taxa de entrega.
+- Mostrar valor total.
+- Mostrar forma de pagamento.
+- Após pagamento aprovado, criar o pedido automaticamente no painel administrativo.
+
+5. Cardápio externo:
+- Criar uma área no painel admin chamada "Links Externos".
+- Permitir cadastrar o link do sistema Nota aí/cardápio atual.
+- Exibir esse link dentro do cardápio digital como opção "Ver cardápio completo" ou "Cardápio antigo".
+
+6. Painel de pedidos:
+- Mostrar pedidos recebidos.
+- Status do pedido:
+  - Recebido
+  - Em preparo
+  - Saiu para entrega
+  - Finalizado
+  - Cancelado
+- Mostrar endereço, distância, taxa de entrega, forma de pagamento e status do pagamento.
+
+7. Segurança:
+- Nunca deixar chave de API exposta no frontend.
+- Usar variáveis de ambiente/secrets para Google Maps API e gateway de pagamento.
+- Validar valores no backend para evitar alteração manual pelo cliente.
+
+8. Importante:
+- Não integrar pagamento real ainda se faltar API.
+- Primeiro criar toda a estrutura visual e lógica.
+- Se alguma integração depender de chave externa, criar mensagem clara dizendo qual chave precisa ser configurada.
+- Manter todo o sistema em português.
+- Design responsivo para celular.
+- Visual moderno, profissional, nas cores da The Burger GN: preto, amarelo mostarda/dourado e detalhes fortes de hamburgueria.

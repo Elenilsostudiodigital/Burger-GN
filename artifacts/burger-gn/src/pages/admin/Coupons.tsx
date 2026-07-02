@@ -7,7 +7,7 @@ import {
 } from '../../lib/api';
 import { useAdmin } from '../../context/AdminContext';
 import {
-  LayoutDashboard, UtensilsCrossed, Tag, MapPin, LogOut,
+  LayoutDashboard, UtensilsCrossed, Tag, MapPin, Navigation, Settings, LogOut,
   Plus, Pencil, Trash2, Check, X, ToggleLeft, ToggleRight,
   Loader2, Percent, DollarSign, Calendar,
 } from 'lucide-react';
@@ -17,19 +17,21 @@ import { Label } from '@/components/ui/label';
 
 function AdminNav({ active }: { active: string }) {
   const navItems = [
-    { href: '/admin', icon: <LayoutDashboard size={20} />, label: 'Pedidos' },
-    { href: '/admin/cardapio', icon: <UtensilsCrossed size={20} />, label: 'Cardápio' },
-    { href: '/admin/cupons', icon: <Tag size={20} />, label: 'Cupons' },
-    { href: '/admin/taxas', icon: <MapPin size={20} />, label: 'Taxas' },
+    { href: '/admin', icon: <LayoutDashboard size={18} />, label: 'Pedidos' },
+    { href: '/admin/cardapio', icon: <UtensilsCrossed size={18} />, label: 'Cardápio' },
+    { href: '/admin/cupons', icon: <Tag size={18} />, label: 'Cupons' },
+    { href: '/admin/taxas', icon: <MapPin size={18} />, label: 'Bairros' },
+    { href: '/admin/entrega-km', icon: <Navigation size={18} />, label: 'Por KM' },
+    { href: '/admin/config', icon: <Settings size={18} />, label: 'Config' },
   ];
   return (
     <nav className="fixed bottom-0 left-0 right-0 bg-zinc-950/95 backdrop-blur border-t border-zinc-800 z-40">
       <div className="max-w-2xl mx-auto flex">
         {navItems.map(item => (
           <Link key={item.href} href={item.href} className="flex-1">
-            <div className={`flex flex-col items-center gap-1 py-3 transition-colors ${active === item.href ? 'text-amber-500' : 'text-zinc-500 hover:text-white'}`}>
+            <div className={`flex flex-col items-center gap-0.5 py-2.5 transition-colors ${active === item.href ? 'text-amber-500' : 'text-zinc-500 hover:text-white'}`}>
               {item.icon}
-              <span className="text-[10px] font-bold uppercase">{item.label}</span>
+              <span className="text-[9px] font-bold uppercase">{item.label}</span>
             </div>
           </Link>
         ))}

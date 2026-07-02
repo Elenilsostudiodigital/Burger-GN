@@ -10,7 +10,7 @@ import { useAdmin } from '../../context/AdminContext';
 import { useLocation } from 'wouter';
 import {
   LayoutDashboard, UtensilsCrossed, Plus, Pencil, Trash2, Check, X,
-  ToggleLeft, ToggleRight, Loader2, Tag, MapPin, LogOut,
+  ToggleLeft, ToggleRight, Loader2, Tag, MapPin, LogOut, Navigation, Settings,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -356,27 +356,39 @@ export default function MenuAdmin() {
       <nav className="fixed bottom-0 left-0 right-0 bg-zinc-950/95 backdrop-blur border-t border-zinc-800 z-40">
         <div className="max-w-2xl mx-auto flex">
           <Link href="/admin" className="flex-1">
-            <div className="flex flex-col items-center gap-1 py-3 text-zinc-500 hover:text-white transition-colors">
-              <LayoutDashboard size={20} />
-              <span className="text-[10px] font-bold uppercase">Pedidos</span>
+            <div className="flex flex-col items-center gap-0.5 py-2.5 text-zinc-500 hover:text-white transition-colors">
+              <LayoutDashboard size={18} />
+              <span className="text-[9px] font-bold uppercase">Pedidos</span>
             </div>
           </Link>
           <Link href="/admin/cardapio" className="flex-1">
-            <div className="flex flex-col items-center gap-1 py-3 text-amber-500">
-              <UtensilsCrossed size={20} />
-              <span className="text-[10px] font-bold uppercase">Cardápio</span>
+            <div className="flex flex-col items-center gap-0.5 py-2.5 text-amber-500">
+              <UtensilsCrossed size={18} />
+              <span className="text-[9px] font-bold uppercase">Cardápio</span>
             </div>
           </Link>
           <Link href="/admin/cupons" className="flex-1">
-            <div className="flex flex-col items-center gap-1 py-3 text-zinc-500 hover:text-white transition-colors">
-              <Tag size={20} />
-              <span className="text-[10px] font-bold uppercase">Cupons</span>
+            <div className="flex flex-col items-center gap-0.5 py-2.5 text-zinc-500 hover:text-white transition-colors">
+              <Tag size={18} />
+              <span className="text-[9px] font-bold uppercase">Cupons</span>
             </div>
           </Link>
           <Link href="/admin/taxas" className="flex-1">
-            <div className="flex flex-col items-center gap-1 py-3 text-zinc-500 hover:text-white transition-colors">
-              <MapPin size={20} />
-              <span className="text-[10px] font-bold uppercase">Taxas</span>
+            <div className="flex flex-col items-center gap-0.5 py-2.5 text-zinc-500 hover:text-white transition-colors">
+              <MapPin size={18} />
+              <span className="text-[9px] font-bold uppercase">Bairros</span>
+            </div>
+          </Link>
+          <Link href="/admin/entrega-km" className="flex-1">
+            <div className="flex flex-col items-center gap-0.5 py-2.5 text-zinc-500 hover:text-white transition-colors">
+              <Navigation size={18} />
+              <span className="text-[9px] font-bold uppercase">Por KM</span>
+            </div>
+          </Link>
+          <Link href="/admin/config" className="flex-1">
+            <div className="flex flex-col items-center gap-0.5 py-2.5 text-zinc-500 hover:text-white transition-colors">
+              <Settings size={18} />
+              <span className="text-[9px] font-bold uppercase">Config</span>
             </div>
           </Link>
         </div>

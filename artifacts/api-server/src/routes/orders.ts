@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { ordersTable, orderItemsTable, couponsTable, deliveryZonesTable, kmDeliveryConfigTable, kmDeliveryTiersTable } from "@workspace/db";
+import { ordersTable, orderItemsTable, couponsTable, deliveryZonesTable, kmDeliveryConfigTable, kmDeliveryTiersTable, paymentSettingsTable } from "@workspace/db";
 import { eq, desc, sql, asc } from "drizzle-orm";
 import { requireAdmin } from "../middlewares/auth";
 import { addSSEClient, removeSSEClient, broadcastSSE } from "../lib/sse";
@@ -41,6 +41,15 @@ router.post("/orders", async (req, res) => {
 
     if (!body.customerName || !body.phone || !body.orderType || !body.paymentMethod || !body.items?.length) {
       res.status(400).json({ error: "Missing required fields" }); return;
+    }
+
+    // Server-side payment validation: cash-on-delivery may be restricted by admin
+    if (body.orderType === "delivery" && body.paymentMethod === "cash") {
+      const [paySettings] = await db.select().from(paymentSettingsTable).limit(1);
+      if (paySettings && !paySettings.cashOnDeliveryEnabled) {
+        res.status(400).json({ error: "Pagamento em dinheiro não está disponível para entrega. Escolha Pix, cartão ou retire no balcão." });
+        return;
+      }
     }
 
     const subtotal = body.items.reduce((acc, i) => acc + i.productPrice * i.quantity, 0);

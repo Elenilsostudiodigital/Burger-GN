@@ -3,10 +3,14 @@ import { useLocation } from 'wouter';
 import { useForm } from 'react-hook-form';
 import { useCart } from '../context/CartContext';
 import { PageTransition } from '../components/PageTransition';
-import { createOrder, validateCoupon, getDeliveryZones, getDeliveryFee, WHATSAPP_NUMBER, ValidateCouponResult, DeliveryZone } from '../lib/api';
+import {
+  createOrder, validateCoupon, getDeliveryZones, getDeliveryFee, getKmDeliveryConfig, geocodeAddress,
+  haversineKm, findKmTier, getPaymentSettings,
+  WHATSAPP_NUMBER, ValidateCouponResult, DeliveryZone, KmDeliveryConfig, PaymentSettingsPublic,
+} from '../lib/api';
 import {
   ArrowLeft, Bike, Store, Utensils, CreditCard, Banknote, QrCode,
-  Loader2, Tag, X, CheckCircle2, MapPin, AlertCircle, ChevronDown,
+  Loader2, Tag, X, CheckCircle2, MapPin, AlertCircle, ChevronDown, LocateFixed, Navigation,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -31,13 +35,24 @@ export default function Checkout() {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
 
-  // Delivery zones
+  // Delivery zones (neighborhood fallback)
   const [zones, setZones] = useState<DeliveryZone[]>([]);
   const [deliveryFee, setDeliveryFee] = useState<number>(0);
   const [feeLoading, setFeeLoading] = useState(false);
   const [feeMessage, setFeeMessage] = useState('');
   const [feeFound, setFeeFound] = useState<boolean | null>(null);
   const feeDebounce = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  // KM delivery (GPS/geocoding)
+  const [kmConfig, setKmConfig] = useState<KmDeliveryConfig | null>(null);
+  const kmEnabled = !!kmConfig?.enabled;
+  const [customerCoords, setCustomerCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [distanceKm, setDistanceKm] = useState<number | null>(null);
+  const [gpsLoading, setGpsLoading] = useState(false);
+  const [gpsError, setGpsError] = useState('');
+
+  // Payment settings
+  const [paySettings, setPaySettings] = useState<PaymentSettingsPublic | null>(null);
 
   // Coupon
   const [couponInput, setCouponInput] = useState('');
@@ -47,12 +62,30 @@ export default function Checkout() {
 
   const { register, handleSubmit, watch, setValue, formState: { errors } } = useForm<CheckoutFormData>();
   const bairroValue = watch('bairro');
-
-  useEffect(() => { getDeliveryZones().then(setZones).catch(() => {}); }, []);
+  const enderecoValue = watch('endereco');
+  const numeroValue = watch('numero');
 
   useEffect(() => {
-    if (orderType !== 'delivery' || !bairroValue?.trim()) {
-      setDeliveryFee(0); setFeeMessage(''); setFeeFound(null); return;
+    getDeliveryZones().then(setZones).catch(() => {});
+    getKmDeliveryConfig().then(setKmConfig).catch(() => {});
+    getPaymentSettings().then(setPaySettings).catch(() => {});
+  }, []);
+
+  // Cash restricted for delivery unless admin allows — auto-switch away if needed
+  useEffect(() => {
+    if (orderType === 'delivery' && paymentMethod === 'cash' && paySettings && !paySettings.cashOnDeliveryEnabled) {
+      setPaymentMethod('pix');
+    }
+  }, [orderType, paymentMethod, paySettings]);
+
+  // Neighborhood-based fee lookup (used only when KM mode is off, or as fallback with no GPS)
+  useEffect(() => {
+    if (orderType !== 'delivery' || kmEnabled || customerCoords || !bairroValue?.trim()) {
+      if (!kmEnabled) { /* keep neighborhood flow */ } else return;
+    }
+    if (orderType !== 'delivery' || customerCoords || !bairroValue?.trim() || bairroValue === '__outro__') {
+      if (!customerCoords) { setDeliveryFee(0); setFeeMessage(''); setFeeFound(null); }
+      return;
     }
     clearTimeout(feeDebounce.current);
     feeDebounce.current = setTimeout(async () => {
@@ -75,9 +108,68 @@ export default function Checkout() {
       }
     }, 500);
     return () => clearTimeout(feeDebounce.current);
-  }, [bairroValue, orderType]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bairroValue, orderType, customerCoords, kmEnabled]);
 
   const isDelivery = orderType === 'delivery';
+  const usingKm = isDelivery && kmEnabled && customerCoords !== null;
+
+  const applyCoordinates = (lat: number, lng: number) => {
+    setCustomerCoords({ lat, lng });
+    setGpsError('');
+    if (kmConfig && kmConfig.enabled) {
+      const baseLat = parseFloat(kmConfig.baseLat);
+      const baseLng = parseFloat(kmConfig.baseLng);
+      if (baseLat !== 0 || baseLng !== 0) {
+        const dist = haversineKm(baseLat, baseLng, lat, lng);
+        setDistanceKm(dist);
+        const maxDist = parseFloat(kmConfig.maxDistanceKm);
+        if (dist <= maxDist) {
+          const { fee, consult } = findKmTier(dist, kmConfig.tiers);
+          if (!consult && fee !== null) {
+            setDeliveryFee(fee);
+            setFeeFound(true);
+            setFeeMessage('');
+          } else {
+            setDeliveryFee(0);
+            setFeeFound(false);
+            setFeeMessage('Distância fora das faixas cadastradas. Consulte pelo WhatsApp.');
+          }
+        } else {
+          setDeliveryFee(0);
+          setFeeFound(false);
+          setFeeMessage(`Distância de ${dist.toFixed(1)}km excede o raio de entrega (${maxDist}km). Consulte pelo WhatsApp.`);
+        }
+      }
+    }
+  };
+
+  const handleUseLocation = () => {
+    if (!navigator.geolocation) { setGpsError('Seu navegador não suporta localização.'); return; }
+    setGpsLoading(true); setGpsError('');
+    navigator.geolocation.getCurrentPosition(
+      pos => { applyCoordinates(pos.coords.latitude, pos.coords.longitude); setGpsLoading(false); },
+      () => { setGpsError('Não foi possível obter sua localização. Preencha o endereço manualmente.'); setGpsLoading(false); },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  };
+
+  // Fallback: geocode typed address when KM mode is on and user hasn't used GPS
+  useEffect(() => {
+    if (!kmEnabled || !isDelivery || customerCoords || !enderecoValue?.trim() || !numeroValue?.trim() || !bairroValue?.trim() || bairroValue === '__outro__') return;
+    clearTimeout(feeDebounce.current);
+    feeDebounce.current = setTimeout(async () => {
+      setFeeLoading(true);
+      const fullAddr = `${enderecoValue}, ${numeroValue}, ${bairroValue}, Lauro de Freitas, Bahia, Brasil`;
+      const coords = await geocodeAddress(fullAddr);
+      if (coords) applyCoordinates(coords.lat, coords.lng);
+      else { setFeeFound(false); setFeeMessage('Não foi possível localizar este endereço automaticamente. Consulte a taxa pelo WhatsApp.'); }
+      setFeeLoading(false);
+    }, 900);
+    return () => clearTimeout(feeDebounce.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enderecoValue, numeroValue, bairroValue, kmEnabled, isDelivery, customerCoords]);
+
   const discount = appliedCoupon?.discountAmount ?? 0;
   const total = Math.max(0, subtotal + (isDelivery ? deliveryFee : 0) - discount);
   const fmt = (v: number) => `R$ ${v.toFixed(2).replace('.', ',')}`;
@@ -112,6 +204,8 @@ export default function Checkout() {
         neighborhood: isDelivery ? data.bairro : '',
         reference: isDelivery ? data.referencia : '',
         notes: data.observacoes,
+        customerLat: isDelivery && customerCoords ? customerCoords.lat : undefined,
+        customerLng: isDelivery && customerCoords ? customerCoords.lng : undefined,
         orderType, paymentMethod,
         changeFor: data.troco ? parseFloat(data.troco) : undefined,
         couponCode: appliedCoupon?.code,
@@ -130,6 +224,7 @@ export default function Checkout() {
         complemento: data.complemento,
         neighborhood: data.bairro, reference: data.referencia,
         notes: data.observacoes,
+        distanceKm: result.distanceKm ?? null,
         couponCode: appliedCoupon?.code ?? null,
         discountAmount: result.discountAmount ?? 0,
         items: cartItems.map(ci => ({ name: ci.item.name, quantity: ci.quantity, price: ci.item.price, subtotal: ci.item.price * ci.quantity })),
@@ -141,8 +236,8 @@ export default function Checkout() {
           : total,
       }));
       setLocation('/confirmacao');
-    } catch {
-      setSubmitError('Erro ao enviar pedido. Verifique a conexão e tente novamente.');
+    } catch (err) {
+      setSubmitError(err instanceof Error && err.message ? err.message : 'Erro ao enviar pedido. Verifique a conexão e tente novamente.');
     } finally { setSubmitting(false); }
   };
 
@@ -151,6 +246,8 @@ export default function Checkout() {
   const stepNum = (n: number) => (
     <span className="w-6 h-6 rounded-full bg-amber-500/20 text-amber-500 flex items-center justify-center text-xs font-black flex-shrink-0">{n}</span>
   );
+
+  const cashBlockedForDelivery = isDelivery && paySettings !== null && !paySettings.cashOnDeliveryEnabled;
 
   return (
     <PageTransition className="bg-[#0a0a0a]">
@@ -213,6 +310,22 @@ export default function Checkout() {
               <h2 className="text-white font-bold uppercase tracking-wider text-sm flex items-center gap-2">
                 {stepNum(3)} <MapPin size={16} className="text-amber-500" /> Endereço de Entrega
               </h2>
+
+              {kmEnabled && (
+                <Button type="button" onClick={handleUseLocation} disabled={gpsLoading}
+                  className="w-full h-12 bg-amber-500/10 border border-amber-500/40 text-amber-500 hover:bg-amber-500/20 font-bold rounded-xl flex items-center justify-center gap-2">
+                  {gpsLoading ? <Loader2 size={18} className="animate-spin" /> : <LocateFixed size={18} />}
+                  Usar minha localização
+                </Button>
+              )}
+              {gpsError && <p className="text-orange-400 text-xs flex items-center gap-1.5"><AlertCircle size={13} /> {gpsError}</p>}
+              {usingKm && distanceKm !== null && (
+                <div className="flex items-center gap-2 bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-2.5 text-sm">
+                  <Navigation size={15} className="text-amber-500" />
+                  <span className="text-zinc-300">Distância até você: <span className="text-amber-500 font-bold">{distanceKm.toFixed(1)} km</span></span>
+                </div>
+              )}
+
               <div className="space-y-3 bg-zinc-900 p-4 rounded-xl border border-zinc-800">
                 {/* Street + Number in one row */}
                 <div className="grid grid-cols-3 gap-2">
@@ -240,7 +353,7 @@ export default function Checkout() {
                 {/* Neighborhood with zone select */}
                 <div className="space-y-1.5">
                   <Label className="text-zinc-400 text-xs">Bairro *</Label>
-                  {zones.length > 0 ? (
+                  {zones.length > 0 && !kmEnabled ? (
                     <div className="relative">
                       <select
                         className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 h-11 text-white text-sm focus:border-amber-500 focus:outline-none appearance-none pr-8"
@@ -268,13 +381,13 @@ export default function Checkout() {
                     <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
                       {feeLoading ? (
                         <div className="flex items-center gap-2 text-zinc-500 text-sm">
-                          <Loader2 size={14} className="animate-spin" /> Consultando taxa...
+                          <Loader2 size={14} className="animate-spin" /> Calculando taxa de entrega...
                         </div>
                       ) : feeFound === true ? (
                         <div className="flex items-center justify-between bg-green-900/20 border border-green-800/40 rounded-xl px-4 py-2.5">
                           <div className="flex items-center gap-2 text-green-400">
                             <CheckCircle2 size={16} />
-                            <span className="text-sm font-bold">Taxa de entrega para {bairroValue}</span>
+                            <span className="text-sm font-bold">Taxa de entrega{usingKm ? '' : ` para ${bairroValue}`}</span>
                           </div>
                           <span className="text-green-400 font-black">{fmt(deliveryFee)}</span>
                         </div>
@@ -334,16 +447,31 @@ export default function Checkout() {
             <div className="grid grid-cols-3 gap-2">
               {([
                 { key: 'pix', icon: <QrCode size={22} />, label: 'Pix' },
-                { key: 'cash', icon: <Banknote size={22} />, label: 'Dinheiro' },
+                { key: 'cash', icon: <Banknote size={22} />, label: 'Dinheiro', blocked: cashBlockedForDelivery },
                 { key: 'card', icon: <CreditCard size={22} />, label: 'Cartão' },
               ] as const).map(opt => (
-                <button key={opt.key} type="button" onClick={() => setPaymentMethod(opt.key)}
-                  className={`p-3 rounded-xl border flex flex-col items-center gap-2 transition-all ${paymentMethod === opt.key ? 'border-amber-500 bg-amber-500/10 text-amber-500' : 'border-zinc-800 bg-zinc-900 text-zinc-400'}`}>
+                <button key={opt.key} type="button" disabled={'blocked' in opt && opt.blocked}
+                  onClick={() => setPaymentMethod(opt.key)}
+                  className={`p-3 rounded-xl border flex flex-col items-center gap-2 transition-all relative ${
+                    'blocked' in opt && opt.blocked
+                      ? 'border-zinc-900 bg-zinc-950 text-zinc-700 cursor-not-allowed opacity-50'
+                      : paymentMethod === opt.key ? 'border-amber-500 bg-amber-500/10 text-amber-500' : 'border-zinc-800 bg-zinc-900 text-zinc-400'
+                  }`}>
                   {opt.icon}
                   <span className="text-[10px] uppercase font-bold">{opt.label}</span>
                 </button>
               ))}
             </div>
+            {cashBlockedForDelivery && (
+              <p className="text-zinc-600 text-xs flex items-center gap-1.5">
+                <AlertCircle size={12} /> Dinheiro disponível apenas para retirada no balcão.
+              </p>
+            )}
+            {!paySettings?.onlinePaymentEnabled && (paymentMethod === 'pix' || paymentMethod === 'card') && (
+              <p className="text-zinc-600 text-xs">
+                Pagamento combinado na entrega/retirada — confirmação final acontece pelo WhatsApp.
+              </p>
+            )}
             {paymentMethod === 'cash' && (
               <div className="space-y-1.5 p-4 bg-zinc-900 border border-zinc-800 rounded-xl">
                 <Label className="text-zinc-400 text-sm">Troco para quanto?</Label>
@@ -417,9 +545,12 @@ export default function Checkout() {
                   <span>{ci.quantity}x {ci.item.name}</span><span>{fmt(ci.item.price * ci.quantity)}</span>
                 </div>
               ))}
+              <div className="flex justify-between text-zinc-500 text-xs pt-1">
+                <span>Subtotal</span><span className="text-zinc-300">{fmt(subtotal)}</span>
+              </div>
               {isDelivery && (
                 <div className="flex justify-between text-zinc-500 text-xs">
-                  <span>Taxa de entrega</span>
+                  <span>Taxa de entrega {usingKm && distanceKm !== null ? `(${distanceKm.toFixed(1)}km)` : ''}</span>
                   <span className={feeFound === true ? 'text-zinc-300' : 'text-orange-400'}>
                     {feeFound === true ? fmt(deliveryFee) : feeFound === false ? 'A consultar' : 'A calcular'}
                   </span>
@@ -431,6 +562,10 @@ export default function Checkout() {
                   <span>-{fmt(discount)}</span>
                 </div>
               )}
+              <div className="flex justify-between text-zinc-500 text-xs">
+                <span>Pagamento</span>
+                <span className="text-zinc-300">{paymentMethod === 'pix' ? 'Pix' : paymentMethod === 'cash' ? 'Dinheiro' : 'Cartão'}</span>
+              </div>
               <div className="border-t border-zinc-800 pt-2 flex justify-between font-bold text-white">
                 <span>Total</span>
                 <span className="text-amber-500 text-xl">{fmt(total)}</span>

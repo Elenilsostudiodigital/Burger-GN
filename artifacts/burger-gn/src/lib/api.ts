@@ -103,13 +103,14 @@ export type OrderType = "delivery" | "pickup" | "local";
 export type PaymentMethod = "pix" | "cash" | "card";
 
 export interface OrderItem { id: number; orderId: number; productName: string; productPrice: string; quantity: number; subtotal: string; }
+export type PaymentStatus = "pending" | "paid" | "failed";
 export interface Order {
   id: number; orderNumber: number; trackingId: string;
   customerName: string; phone: string;
   address: string; addressNumber: string; addressComplement: string;
   neighborhood: string; reference: string; notes: string;
   customerLat: string | null; customerLng: string | null; distanceKm: string | null;
-  orderType: OrderType; paymentMethod: PaymentMethod; changeFor: string | null;
+  orderType: OrderType; paymentMethod: PaymentMethod; paymentStatus: PaymentStatus; changeFor: string | null;
   subtotal: string; deliveryFee: string; discountAmount: string; couponCode: string | null;
   total: string; status: OrderStatus; createdAt: string; items: OrderItem[];
 }
@@ -141,6 +142,25 @@ export const createCoupon = (d: Partial<Coupon>) => api.post("/admin/coupons", d
 export const updateCoupon = (id: number, d: Partial<Coupon>) => api.put(`/admin/coupons/${id}`, d) as Promise<Coupon>;
 export const deleteCoupon = (id: number) => api.delete(`/admin/coupons/${id}`);
 
+// ── Payment Settings ──────────────────────────────────────────────────────────
+export interface PaymentSettingsPublic { onlinePaymentEnabled: boolean; cashOnDeliveryEnabled: boolean; }
+export interface PaymentSettingsAdmin {
+  id: number; onlinePaymentEnabled: boolean; gatewayProvider: string; cashOnDeliveryEnabled: boolean;
+  updatedAt: string; gatewayKeyConfigured: boolean; gatewayKeyEnvVars: string[];
+}
+export const getPaymentSettings = () => api.get("/payment-settings") as Promise<PaymentSettingsPublic>;
+export const getAdminPaymentSettings = () => api.get("/admin/payment-settings") as Promise<PaymentSettingsAdmin>;
+export const updatePaymentSettings = (d: { onlinePaymentEnabled?: boolean; gatewayProvider?: string; cashOnDeliveryEnabled?: boolean }) =>
+  api.put("/admin/payment-settings", d) as Promise<PaymentSettingsAdmin>;
+
+// ── External Links ────────────────────────────────────────────────────────────
+export interface ExternalLink { id: number; label: string; url: string; active: boolean; displayOrder: number; createdAt: string; }
+export const getExternalLinks = () => api.get("/external-links") as Promise<ExternalLink[]>;
+export const getAdminExternalLinks = () => api.get("/admin/external-links") as Promise<ExternalLink[]>;
+export const createExternalLink = (d: Partial<ExternalLink>) => api.post("/admin/external-links", d) as Promise<ExternalLink>;
+export const updateExternalLink = (id: number, d: Partial<ExternalLink>) => api.put(`/admin/external-links/${id}`, d) as Promise<ExternalLink>;
+export const deleteExternalLink = (id: number) => api.delete(`/admin/external-links/${id}`);
+
 // ── Admin Auth ────────────────────────────────────────────────────────────────
 export const adminLogin = (password: string) => api.post("/admin/login", { password });
 export const adminLogout = () => api.post("/admin/logout", {});
@@ -152,3 +172,4 @@ export const WHATSAPP_NUMBER = "5571996981707";
 export const ORDER_TYPE_LABELS: Record<OrderType, string> = { delivery: "Delivery", pickup: "Retirada no balcão", local: "Comer no local" };
 export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = { pix: "Pix", cash: "Dinheiro", card: "Cartão" };
 export const STATUS_LABELS: Record<OrderStatus, string> = { new: "Novo Pedido", preparing: "Em Preparo", delivery: "Saiu p/ Entrega", done: "Finalizado", cancelled: "Cancelado" };
+export const PAYMENT_STATUS_LABELS: Record<PaymentStatus, string> = { pending: "Pendente", paid: "Pago", failed: "Falhou" };

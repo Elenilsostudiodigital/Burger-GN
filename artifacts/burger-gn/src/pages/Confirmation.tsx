@@ -15,6 +15,7 @@ interface StoredOrder {
   changeFor: string | null;
   address: string; numero: string; complemento: string;
   neighborhood: string; reference: string; notes: string;
+  distanceKm: number | null;
   couponCode: string | null; discountAmount: number;
   items: Array<{ name: string; quantity: number; price: number; subtotal: number }>;
   subtotal: number; deliveryFee: number; discount: number; total: number;
@@ -36,6 +37,7 @@ function buildWhatsAppMessage(order: StoredOrder): string {
     deliveryText += `\n📍 *Endereço:* ${fullAddress(order)}`;
     deliveryText += `\n🏘️ *Bairro:* ${order.neighborhood}`;
     if (order.reference) deliveryText += `\n📌 *Referência:* ${order.reference}`;
+    if (order.distanceKm !== null) deliveryText += `\n📏 *Distância:* ${order.distanceKm.toFixed(1)} km`;
   }
 
   let paymentText = PAYMENT_METHOD_LABELS[order.paymentMethod];

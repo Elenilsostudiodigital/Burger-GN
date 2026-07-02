@@ -1,5 +1,5 @@
 import { db } from "@workspace/db";
-import { categoriesTable, productsTable, deliveryZonesTable, kmDeliveryConfigTable, kmDeliveryTiersTable } from "@workspace/db";
+import { categoriesTable, productsTable, deliveryZonesTable, kmDeliveryConfigTable, kmDeliveryTiersTable, paymentSettingsTable } from "@workspace/db";
 import { count } from "drizzle-orm";
 import { logger } from "./logger";
 
@@ -68,6 +68,12 @@ export async function runSeed() {
         minFee: "5.00", feePerKm: "2.00", maxDistanceKm: "10.00",
       });
       await db.insert(kmDeliveryTiersTable).values(DEFAULT_KM_TIERS);
+    }
+
+    const [{ value: paySettingsCount }] = await db.select({ value: count() }).from(paymentSettingsTable);
+    if (Number(paySettingsCount) === 0) {
+      logger.info("Seeding default payment settings...");
+      await db.insert(paymentSettingsTable).values({});
     }
 
     logger.info("Seed complete.");

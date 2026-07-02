@@ -5,12 +5,12 @@ import { useAdmin } from '../../context/AdminContext';
 import {
   getOrders, updateOrderStatus,
   Order, OrderStatus,
-  STATUS_LABELS, ORDER_TYPE_LABELS, PAYMENT_METHOD_LABELS,
+  STATUS_LABELS, ORDER_TYPE_LABELS, PAYMENT_METHOD_LABELS, PAYMENT_STATUS_LABELS,
 } from '../../lib/api';
 import {
   LayoutDashboard, UtensilsCrossed, LogOut, Bell,
   Printer, ChevronDown, ChevronUp, Clock, CheckCircle2,
-  Bike, ChefHat, XCircle, Tag, MapPin,
+  Bike, ChefHat, XCircle, Tag, MapPin, Navigation, Settings, Route,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
@@ -146,8 +146,12 @@ function OrderCard({ order, highlight, onStatusChange }: {
             )}
           </div>
           <p className="text-white font-bold truncate">{order.customerName}</p>
-          <p className="text-zinc-400 text-xs mt-0.5">
-            {ORDER_TYPE_LABELS[order.orderType]} · {PAYMENT_METHOD_LABELS[order.paymentMethod]}
+          <p className="text-zinc-400 text-xs mt-0.5 flex items-center gap-1.5 flex-wrap">
+            <span>{ORDER_TYPE_LABELS[order.orderType]} · {PAYMENT_METHOD_LABELS[order.paymentMethod]}</span>
+            <span className={`text-[9px] font-black uppercase px-1.5 py-0.5 rounded ${
+              order.paymentStatus === 'paid' ? 'bg-green-500/15 text-green-400' :
+              order.paymentStatus === 'failed' ? 'bg-red-500/15 text-red-400' : 'bg-zinc-700/40 text-zinc-400'
+            }`}>{PAYMENT_STATUS_LABELS[order.paymentStatus]}</span>
           </p>
           <p className="text-amber-500 font-bold mt-1">{fmt(order.total)}</p>
         </div>
@@ -189,6 +193,10 @@ function OrderCard({ order, highlight, onStatusChange }: {
                 <div className="bg-zinc-950 rounded-xl p-3 text-xs space-y-1">
                   <p className="text-zinc-300"><span className="text-zinc-500">End.:</span> {order.address}, {order.neighborhood}</p>
                   {order.reference && <p className="text-zinc-300"><span className="text-zinc-500">Ref.:</span> {order.reference}</p>}
+                  {order.distanceKm && (
+                    <p className="text-zinc-300 flex items-center gap-1"><Route size={12} className="text-amber-500" /> <span className="text-zinc-500">Distância:</span> {parseFloat(order.distanceKm).toFixed(1)} km</p>
+                  )}
+                  <p className="text-zinc-300"><span className="text-zinc-500">Taxa de entrega:</span> {parseFloat(order.deliveryFee) > 0 ? fmt(order.deliveryFee) : 'Grátis'}</p>
                 </div>
               )}
 
@@ -396,27 +404,39 @@ export default function AdminDashboard() {
       <nav className="fixed bottom-0 left-0 right-0 bg-zinc-950/95 backdrop-blur border-t border-zinc-800 z-40">
         <div className="max-w-2xl mx-auto flex">
           <Link href="/admin" className="flex-1">
-            <div className="flex flex-col items-center gap-1 py-3 text-amber-500">
-              <LayoutDashboard size={20} />
-              <span className="text-[10px] font-bold uppercase">Pedidos</span>
+            <div className="flex flex-col items-center gap-0.5 py-2.5 text-amber-500">
+              <LayoutDashboard size={18} />
+              <span className="text-[9px] font-bold uppercase">Pedidos</span>
             </div>
           </Link>
           <Link href="/admin/cardapio" className="flex-1">
-            <div className="flex flex-col items-center gap-1 py-3 text-zinc-500 hover:text-white transition-colors">
-              <UtensilsCrossed size={20} />
-              <span className="text-[10px] font-bold uppercase">Cardápio</span>
+            <div className="flex flex-col items-center gap-0.5 py-2.5 text-zinc-500 hover:text-white transition-colors">
+              <UtensilsCrossed size={18} />
+              <span className="text-[9px] font-bold uppercase">Cardápio</span>
             </div>
           </Link>
           <Link href="/admin/cupons" className="flex-1">
-            <div className="flex flex-col items-center gap-1 py-3 text-zinc-500 hover:text-white transition-colors">
-              <Tag size={20} />
-              <span className="text-[10px] font-bold uppercase">Cupons</span>
+            <div className="flex flex-col items-center gap-0.5 py-2.5 text-zinc-500 hover:text-white transition-colors">
+              <Tag size={18} />
+              <span className="text-[9px] font-bold uppercase">Cupons</span>
             </div>
           </Link>
           <Link href="/admin/taxas" className="flex-1">
-            <div className="flex flex-col items-center gap-1 py-3 text-zinc-500 hover:text-white transition-colors">
-              <MapPin size={20} />
-              <span className="text-[10px] font-bold uppercase">Taxas</span>
+            <div className="flex flex-col items-center gap-0.5 py-2.5 text-zinc-500 hover:text-white transition-colors">
+              <MapPin size={18} />
+              <span className="text-[9px] font-bold uppercase">Bairros</span>
+            </div>
+          </Link>
+          <Link href="/admin/entrega-km" className="flex-1">
+            <div className="flex flex-col items-center gap-0.5 py-2.5 text-zinc-500 hover:text-white transition-colors">
+              <Navigation size={18} />
+              <span className="text-[9px] font-bold uppercase">Por KM</span>
+            </div>
+          </Link>
+          <Link href="/admin/config" className="flex-1">
+            <div className="flex flex-col items-center gap-0.5 py-2.5 text-zinc-500 hover:text-white transition-colors">
+              <Settings size={18} />
+              <span className="text-[9px] font-bold uppercase">Config</span>
             </div>
           </Link>
         </div>

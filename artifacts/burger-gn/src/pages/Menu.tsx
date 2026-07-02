@@ -1,16 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useCart } from '../context/CartContext';
-import { getCategories, getProducts, Category, Product } from '../lib/api';
+import { getCategories, getProducts, getExternalLinks, Category, Product, ExternalLink } from '../lib/api';
 import { BottomNav } from '../components/BottomNav';
 import { WhatsAppButton } from '../components/WhatsAppButton';
 import { PageTransition } from '../components/PageTransition';
-import { ShoppingCart, Plus, Minus, Flame } from 'lucide-react';
+import { ShoppingCart, Plus, Minus, Flame, ExternalLink as ExternalLinkIcon } from 'lucide-react';
 import { Link } from 'wouter';
 
 export default function Menu() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
+  const [externalLinks, setExternalLinks] = useState<ExternalLink[]>([]);
   const [activeCategory, setActiveCategory] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const { cartItems, addItem, updateQuantity, totalItems } = useCart();
@@ -24,6 +25,7 @@ export default function Menu() {
       })
       .catch(() => {})
       .finally(() => setLoading(false));
+    getExternalLinks().then(setExternalLinks).catch(() => {});
   }, []);
 
   const filteredItems = products.filter(p => p.categorySlug === activeCategory);
@@ -155,6 +157,17 @@ export default function Menu() {
               )}
             </motion.div>
           </AnimatePresence>
+        )}
+
+        {externalLinks.length > 0 && (
+          <div className="mt-8 space-y-2">
+            {externalLinks.map(link => (
+              <a key={link.id} href={link.url} target="_blank" rel="noopener noreferrer"
+                className="flex items-center justify-center gap-2 w-full py-3 rounded-xl border border-zinc-800 bg-zinc-900 text-zinc-400 hover:text-amber-500 hover:border-amber-500/40 transition-colors text-sm font-bold uppercase tracking-wider">
+                <ExternalLinkIcon size={16} /> {link.label}
+              </a>
+            ))}
+          </div>
         )}
       </main>
 

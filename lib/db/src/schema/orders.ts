@@ -7,6 +7,7 @@ export const orderStatusEnum = pgEnum("order_status", [
 ]);
 export const orderTypeEnum = pgEnum("order_type", ["delivery", "pickup", "local"]);
 export const paymentMethodEnum = pgEnum("payment_method", ["pix", "cash", "card"]);
+export const paymentStatusEnum = pgEnum("payment_status", ["pending", "paid", "failed"]);
 
 export const ordersTable = pgTable("orders", {
   id: serial("id").primaryKey(),
@@ -25,6 +26,7 @@ export const ordersTable = pgTable("orders", {
   distanceKm: numeric("distance_km", { precision: 10, scale: 2 }),
   orderType: orderTypeEnum("order_type").notNull(),
   paymentMethod: paymentMethodEnum("payment_method").notNull(),
+  paymentStatus: paymentStatusEnum("payment_status").notNull().default("pending"),
   changeFor: numeric("change_for", { precision: 10, scale: 2 }),
   subtotal: numeric("subtotal", { precision: 10, scale: 2 }).notNull(),
   deliveryFee: numeric("delivery_fee", { precision: 10, scale: 2 }).notNull().default("0"),

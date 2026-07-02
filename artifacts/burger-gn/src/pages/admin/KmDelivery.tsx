@@ -7,7 +7,7 @@ import {
 } from '../../lib/api';
 import { useAdmin } from '../../context/AdminContext';
 import {
-  LayoutDashboard, UtensilsCrossed, Tag, MapPin, Navigation,
+  LayoutDashboard, UtensilsCrossed, Tag, MapPin, Navigation, Settings,
   LogOut, Plus, Pencil, Trash2, Check, X, ToggleLeft, ToggleRight,
   Loader2, Locate, AlertCircle, Route, Info,
 } from 'lucide-react';
@@ -22,6 +22,7 @@ function AdminNav({ active }: { active: string }) {
     { href: '/admin/cupons', icon: <Tag size={18} />, label: 'Cupons' },
     { href: '/admin/taxas', icon: <MapPin size={18} />, label: 'Bairros' },
     { href: '/admin/entrega-km', icon: <Navigation size={18} />, label: 'Por KM' },
+    { href: '/admin/config', icon: <Settings size={18} />, label: 'Config' },
   ];
   return (
     <nav className="fixed bottom-0 left-0 right-0 bg-zinc-950/95 backdrop-blur border-t border-zinc-800 z-40">
