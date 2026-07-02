@@ -7,12 +7,12 @@ import { PageTransition } from '../components/PageTransition';
 import { ArrowLeft, Trash2, Plus, Minus, ShoppingBag } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
-// Edite a taxa de entrega aqui
-export const DELIVERY_FEE = 5.00;
-
 export default function Cart() {
   const [, setLocation] = useLocation();
   const { cartItems, updateQuantity, removeItem, subtotal, totalItems } = useCart();
+
+  const lineTotal = (item: (typeof cartItems)[number]) =>
+    (item.item.price + item.selectedAddons.reduce((acc, a) => acc + a.price, 0)) * item.quantity;
 
   return (
     <PageTransition className="bg-[#0a0a0a]">
@@ -50,7 +50,7 @@ export default function Cart() {
               <AnimatePresence>
                 {cartItems.map((cartItem) => (
                   <motion.div 
-                    key={cartItem.item.id}
+                    key={cartItem.lineId}
                     initial={{ opacity: 0, scale: 0.95 }}
                     animate={{ opacity: 1, scale: 1 }}
                     exit={{ opacity: 0, scale: 0.95, height: 0, marginBottom: 0 }}
@@ -63,34 +63,47 @@ export default function Cart() {
                         className="w-full h-full object-cover"
                       />
                     </div>
-                    <div className="flex-1 flex flex-col justify-between">
+                    <div className="flex-1 flex flex-col justify-between min-w-0">
                       <div className="flex justify-between items-start">
                         <h3 className="text-white font-bold uppercase leading-tight max-w-[150px]">
                           {cartItem.item.name}
                         </h3>
                         <button 
-                          onClick={() => removeItem(cartItem.item.id)}
-                          className="p-1.5 text-zinc-500 hover:text-red-500 transition-colors bg-zinc-950 rounded-lg"
+                          onClick={() => removeItem(cartItem.lineId)}
+                          className="p-1.5 text-zinc-500 hover:text-red-500 transition-colors bg-zinc-950 rounded-lg shrink-0"
                         >
                           <Trash2 size={16} />
                         </button>
                       </div>
-                      
+
+                      {cartItem.selectedAddons.length > 0 && (
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {cartItem.selectedAddons.map((a, i) => (
+                            <span key={i} className="text-[10px] px-2 py-0.5 rounded-full bg-zinc-950 border border-zinc-800 text-zinc-400">
+                              + {a.name}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                      {cartItem.notes && (
+                        <p className="text-zinc-500 text-xs italic mt-1 line-clamp-2">"{cartItem.notes}"</p>
+                      )}
+
                       <div className="flex items-center justify-between mt-2">
                         <span className="text-primary font-black">
-                          R$ {(cartItem.item.price * cartItem.quantity).toFixed(2).replace('.', ',')}
+                          R$ {lineTotal(cartItem).toFixed(2).replace('.', ',')}
                         </span>
                         
                         <div className="flex items-center gap-3 bg-zinc-950 p-1 rounded-lg border border-zinc-800">
                           <button 
-                            onClick={() => updateQuantity(cartItem.item.id, -1)}
+                            onClick={() => updateQuantity(cartItem.lineId, -1)}
                             className="w-7 h-7 flex items-center justify-center bg-zinc-800 text-white rounded hover:bg-zinc-700 transition-colors"
                           >
                             <Minus size={14} />
                           </button>
                           <span className="font-bold text-white text-sm w-4 text-center">{cartItem.quantity}</span>
                           <button 
-                            onClick={() => updateQuantity(cartItem.item.id, 1)}
+                            onClick={() => updateQuantity(cartItem.lineId, 1)}
                             className="w-7 h-7 flex items-center justify-center bg-zinc-800 text-white rounded hover:bg-zinc-700 transition-colors"
                           >
                             <Plus size={14} />

@@ -22,6 +22,9 @@ router.get("/products", async (req, res) => {
         price: productsTable.price,
         categoryId: productsTable.categoryId,
         image: productsTable.image,
+        videoUrl: productsTable.videoUrl,
+        ingredients: productsTable.ingredients,
+        addons: productsTable.addons,
         available: productsTable.available,
         displayOrder: productsTable.displayOrder,
         categorySlug: categoriesTable.slug,
@@ -48,6 +51,9 @@ router.get("/admin/products", requireAdmin, async (req, res) => {
         price: productsTable.price,
         categoryId: productsTable.categoryId,
         image: productsTable.image,
+        videoUrl: productsTable.videoUrl,
+        ingredients: productsTable.ingredients,
+        addons: productsTable.addons,
         available: productsTable.available,
         displayOrder: productsTable.displayOrder,
         categorySlug: categoriesTable.slug,
@@ -63,14 +69,30 @@ router.get("/admin/products", requireAdmin, async (req, res) => {
   }
 });
 
+function sanitizeAddons(raw: unknown): { name: string; price: number }[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((a): a is { name?: unknown; price?: unknown } => typeof a === "object" && a !== null)
+    .map(a => ({ name: String(a.name ?? "").trim(), price: Number(a.price) || 0 }))
+    .filter(a => a.name.length > 0 && a.price >= 0);
+}
+
+function sanitizeIngredients(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.map(i => String(i).trim()).filter(i => i.length > 0);
+}
+
 router.post("/admin/products", requireAdmin, async (req, res) => {
   try {
-    const { name, description, price, categoryId, image, available, displayOrder } = req.body as {
-      name: string; description?: string; price: string; categoryId?: number; image?: string; available?: boolean; displayOrder?: number;
+    const { name, description, price, categoryId, image, videoUrl, ingredients, addons, available, displayOrder } = req.body as {
+      name: string; description?: string; price: string; categoryId?: number; image?: string; videoUrl?: string;
+      ingredients?: string[]; addons?: { name: string; price: number }[]; available?: boolean; displayOrder?: number;
     };
     if (!name || !price) { res.status(400).json({ error: "name and price are required" }); return; }
     const [prod] = await db.insert(productsTable).values({
-      name, description: description ?? "", price, categoryId: categoryId ?? null, image: image ?? "", available: available ?? true, displayOrder: displayOrder ?? 0,
+      name, description: description ?? "", price, categoryId: categoryId ?? null, image: image ?? "",
+      videoUrl: videoUrl ?? "", ingredients: sanitizeIngredients(ingredients), addons: sanitizeAddons(addons),
+      available: available ?? true, displayOrder: displayOrder ?? 0,
     }).returning();
     res.status(201).json(prod);
   } catch (err) {
@@ -82,9 +104,16 @@ router.post("/admin/products", requireAdmin, async (req, res) => {
 router.put("/admin/products/:id", requireAdmin, async (req, res) => {
   try {
     const id = Number(req.params["id"]);
-    const body = req.body as { name?: string; description?: string; price?: string; categoryId?: number | null; image?: string; available?: boolean; displayOrder?: number };
+    const body = req.body as {
+      name?: string; description?: string; price?: string; categoryId?: number | null; image?: string; videoUrl?: string;
+      ingredients?: string[]; addons?: { name: string; price: number }[]; available?: boolean; displayOrder?: number;
+    };
+    const { ingredients, addons, ...rest } = body;
+    const updateValues: Record<string, unknown> = { ...rest, updatedAt: new Date() };
+    if (ingredients !== undefined) updateValues["ingredients"] = sanitizeIngredients(ingredients);
+    if (addons !== undefined) updateValues["addons"] = sanitizeAddons(addons);
     const [prod] = await db.update(productsTable)
-      .set({ ...body, updatedAt: new Date() })
+      .set(updateValues)
       .where(eq(productsTable.id, id))
       .returning();
     if (!prod) { res.status(404).json({ error: "Not found" }); return; }

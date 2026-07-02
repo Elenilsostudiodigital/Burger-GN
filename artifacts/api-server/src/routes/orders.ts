@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { ordersTable, orderItemsTable, couponsTable, deliveryZonesTable, kmDeliveryConfigTable, kmDeliveryTiersTable, paymentSettingsTable } from "@workspace/db";
-import { eq, desc, sql, asc } from "drizzle-orm";
+import { ordersTable, orderItemsTable, couponsTable, deliveryZonesTable, kmDeliveryConfigTable, kmDeliveryTiersTable, paymentSettingsTable, productsTable } from "@workspace/db";
+import { eq, desc, sql, asc, inArray } from "drizzle-orm";
 import { requireAdmin } from "../middlewares/auth";
 import { addSSEClient, removeSSEClient, broadcastSSE } from "../lib/sse";
 import { calcDiscount } from "./coupons";
@@ -36,11 +36,17 @@ router.post("/orders", async (req, res) => {
       orderType: "delivery" | "pickup" | "local";
       paymentMethod: "pix" | "cash" | "card";
       changeFor?: number; couponCode?: string;
-      items: Array<{ productId?: number; productName: string; productPrice: number; quantity: number }>;
+      items: Array<{
+        productId?: number; productName: string; productPrice: number; quantity: number;
+        addons?: Array<{ name: string; price: number }>; notes?: string;
+      }>;
     };
 
     if (!body.customerName || !body.phone || !body.orderType || !body.paymentMethod || !body.items?.length) {
       res.status(400).json({ error: "Missing required fields" }); return;
+    }
+    if (body.items.some(i => !i.quantity || i.quantity <= 0)) {
+      res.status(400).json({ error: "Invalid item quantity" }); return;
     }
 
     // Server-side payment validation: cash-on-delivery may be restricted by admin
@@ -52,7 +58,45 @@ router.post("/orders", async (req, res) => {
       }
     }
 
-    const subtotal = body.items.reduce((acc, i) => acc + i.productPrice * i.quantity, 0);
+    // Server-side price validation: never trust client-submitted prices when a productId is present.
+    // Re-price each item from the DB (product price + matched addon prices) so tampering with the
+    // client payload cannot under-charge an order.
+    const productIds = [...new Set(body.items.map(i => i.productId).filter((id): id is number => typeof id === "number"))];
+    const dbProducts = productIds.length
+      ? await db.select().from(productsTable).where(inArray(productsTable.id, productIds))
+      : [];
+    const productMap = new Map(dbProducts.map(p => [p.id, p]));
+
+    const validatedItems: Array<{
+      productId: number | null; productName: string; productPrice: number; quantity: number;
+      addons: Array<{ name: string; price: number }>; notes: string; subtotal: number;
+    }> = [];
+
+    for (const i of body.items) {
+      let productPrice = i.productPrice;
+      let validatedAddons: Array<{ name: string; price: number }> = [];
+
+      if (i.productId !== undefined) {
+        const product = productMap.get(i.productId);
+        if (!product || !product.available) {
+          res.status(400).json({ error: `Produto "${i.productName}" não está mais disponível.` }); return;
+        }
+        productPrice = parseFloat(product.price);
+        const dbAddons = (product.addons ?? []) as Array<{ name: string; price: number }>;
+        validatedAddons = (i.addons ?? [])
+          .map(sel => dbAddons.find(a => a.name === sel.name))
+          .filter((a): a is { name: string; price: number } => !!a);
+      }
+
+      const addonsTotal = validatedAddons.reduce((acc, a) => acc + a.price, 0);
+      const lineSubtotal = (productPrice + addonsTotal) * i.quantity;
+      validatedItems.push({
+        productId: i.productId ?? null, productName: i.productName, productPrice,
+        quantity: i.quantity, addons: validatedAddons, notes: i.notes ?? "", subtotal: lineSubtotal,
+      });
+    }
+
+    const subtotal = validatedItems.reduce((acc, i) => acc + i.subtotal, 0);
 
     // Delivery fee calculation (KM-based first, neighborhood fallback)
     let deliveryFee = 0;
@@ -134,10 +178,11 @@ router.post("/orders", async (req, res) => {
       }).returning();
 
       await tx.insert(orderItemsTable).values(
-        body.items.map(i => ({
-          orderId: order.id, productId: i.productId ?? null,
+        validatedItems.map(i => ({
+          orderId: order.id, productId: i.productId,
           productName: i.productName, productPrice: String(i.productPrice.toFixed(2)),
-          quantity: i.quantity, subtotal: String((i.productPrice * i.quantity).toFixed(2)),
+          quantity: i.quantity, addons: i.addons, notes: i.notes,
+          subtotal: String(i.subtotal.toFixed(2)),
         }))
       );
 

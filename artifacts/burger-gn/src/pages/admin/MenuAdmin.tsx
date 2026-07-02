@@ -12,6 +12,7 @@ import {
   LayoutDashboard, UtensilsCrossed, Plus, Pencil, Trash2, Check, X,
   ToggleLeft, ToggleRight, Loader2, Tag, MapPin, LogOut, Navigation, Settings,
 } from 'lucide-react';
+import type { Addon } from '../../lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -23,11 +24,16 @@ interface ProductFormData {
   description: string;
   price: string;
   image: string;
+  videoUrl: string;
+  ingredients: string;
+  addons: Addon[];
   categoryId: string;
   displayOrder: string;
 }
 
-const EMPTY_FORM: ProductFormData = { name: '', description: '', price: '', image: '', categoryId: '', displayOrder: '0' };
+const EMPTY_FORM: ProductFormData = {
+  name: '', description: '', price: '', image: '', videoUrl: '', ingredients: '', addons: [], categoryId: '', displayOrder: '0',
+};
 
 function ProductForm({ categories, initial, onSave, onCancel, saving }: {
   categories: Category[];
@@ -39,6 +45,14 @@ function ProductForm({ categories, initial, onSave, onCancel, saving }: {
   const [form, setForm] = useState<ProductFormData>(initial ?? EMPTY_FORM);
   const set = (key: keyof ProductFormData) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
     setForm(f => ({ ...f, [key]: e.target.value }));
+
+  const addAddonRow = () => setForm(f => ({ ...f, addons: [...f.addons, { name: '', price: 0 }] }));
+  const removeAddonRow = (idx: number) => setForm(f => ({ ...f, addons: f.addons.filter((_, i) => i !== idx) }));
+  const updateAddonRow = (idx: number, field: 'name' | 'price', value: string) =>
+    setForm(f => ({
+      ...f,
+      addons: f.addons.map((a, i) => i === idx ? { ...a, [field]: field === 'price' ? parseFloat(value) || 0 : value } : a),
+    }));
 
   return (
     <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }}
@@ -76,6 +90,11 @@ function ProductForm({ categories, initial, onSave, onCancel, saving }: {
           <Input value={form.image} onChange={set('image')} placeholder="https://..."
             className="bg-zinc-950 border-zinc-800 text-white h-10 text-sm focus:border-amber-500" />
         </div>
+        <div className="col-span-2 space-y-1">
+          <Label className="text-zinc-400 text-xs">URL do Vídeo (opcional)</Label>
+          <Input value={form.videoUrl} onChange={set('videoUrl')} placeholder="https://..."
+            className="bg-zinc-950 border-zinc-800 text-white h-10 text-sm focus:border-amber-500" />
+        </div>
         <div className="space-y-1">
           <Label className="text-zinc-400 text-xs">Ordem</Label>
           <Input type="number" min="0" value={form.displayOrder} onChange={set('displayOrder')}
@@ -85,6 +104,36 @@ function ProductForm({ categories, initial, onSave, onCancel, saving }: {
       {form.image && (
         <img src={form.image} alt="preview" className="w-full h-32 object-cover rounded-xl border border-zinc-800" onError={e => (e.currentTarget.style.display = 'none')} />
       )}
+
+      <div className="space-y-1">
+        <Label className="text-zinc-400 text-xs">Ingredientes (separados por vírgula)</Label>
+        <textarea value={form.ingredients} onChange={set('ingredients')}
+          placeholder="Pão brioche, hambúrguer 180g, queijo cheddar, alface, tomate"
+          className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-white text-sm resize-none focus:border-amber-500 focus:outline-none h-14 placeholder:text-zinc-600" />
+      </div>
+
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <Label className="text-zinc-400 text-xs">Adicionais</Label>
+          <button type="button" onClick={addAddonRow} className="text-amber-500 text-xs font-bold flex items-center gap-1 hover:text-amber-400">
+            <Plus size={14} /> Adicionar
+          </button>
+        </div>
+        {form.addons.map((addon, idx) => (
+          <div key={idx} className="flex gap-2 items-center">
+            <Input value={addon.name} onChange={e => updateAddonRow(idx, 'name', e.target.value)} placeholder="Ex: Bacon extra"
+              className="bg-zinc-950 border-zinc-800 text-white h-9 text-sm flex-1 focus:border-amber-500" />
+            <Input type="number" step="0.01" min="0" value={addon.price} onChange={e => updateAddonRow(idx, 'price', e.target.value)} placeholder="0.00"
+              className="bg-zinc-950 border-zinc-800 text-white h-9 text-sm w-24 focus:border-amber-500" />
+            <button type="button" onClick={() => removeAddonRow(idx)} className="p-2 text-red-500 hover:bg-red-900/20 rounded-lg shrink-0">
+              <Trash2 size={14} />
+            </button>
+          </div>
+        ))}
+        {form.addons.length === 0 && (
+          <p className="text-zinc-600 text-xs">Nenhum adicional cadastrado.</p>
+        )}
+      </div>
       <div className="flex gap-3 pt-2">
         <Button onClick={() => onSave(form)} disabled={saving || !form.name || !form.price}
           className="flex-1 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold rounded-xl h-10 text-sm">
@@ -132,6 +181,9 @@ export default function MenuAdmin() {
         description: form.description,
         price: form.price,
         image: form.image,
+        videoUrl: form.videoUrl,
+        ingredients: form.ingredients.split(',').map(i => i.trim()).filter(Boolean),
+        addons: form.addons.filter(a => a.name.trim()),
         categoryId: form.categoryId ? parseInt(form.categoryId) : null,
         displayOrder: parseInt(form.displayOrder) || 0,
       };
@@ -227,6 +279,9 @@ export default function MenuAdmin() {
                   description: editProduct.description,
                   price: editProduct.price,
                   image: editProduct.image,
+                  videoUrl: editProduct.videoUrl ?? '',
+                  ingredients: (editProduct.ingredients ?? []).join(', '),
+                  addons: editProduct.addons ?? [],
                   categoryId: editProduct.categoryId ? String(editProduct.categoryId) : '',
                   displayOrder: String(editProduct.displayOrder),
                 } : undefined}

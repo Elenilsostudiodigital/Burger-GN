@@ -212,6 +212,7 @@ export default function Checkout() {
         items: cartItems.map(ci => ({
           productId: ci.item.id, productName: ci.item.name,
           productPrice: ci.item.price, quantity: ci.quantity,
+          addons: ci.selectedAddons, notes: ci.notes,
         })),
       });
       sessionStorage.setItem('lastOrder', JSON.stringify({
@@ -227,7 +228,11 @@ export default function Checkout() {
         distanceKm: result.distanceKm ?? null,
         couponCode: appliedCoupon?.code ?? null,
         discountAmount: result.discountAmount ?? 0,
-        items: cartItems.map(ci => ({ name: ci.item.name, quantity: ci.quantity, price: ci.item.price, subtotal: ci.item.price * ci.quantity })),
+        items: cartItems.map(ci => ({
+          name: ci.item.name, quantity: ci.quantity, price: ci.item.price,
+          addons: ci.selectedAddons, notes: ci.notes,
+          subtotal: (ci.item.price + ci.selectedAddons.reduce((acc, a) => acc + a.price, 0)) * ci.quantity,
+        })),
         subtotal,
         deliveryFee: result.deliveryFee ?? 0,
         discount,

@@ -56,7 +56,8 @@ export const updateCategory = (id: number, d: Partial<Category>) => api.put(`/ad
 export const deleteCategory = (id: number) => api.delete(`/admin/categories/${id}`);
 
 // ── Products ──────────────────────────────────────────────────────────────────
-export interface Product { id: number; name: string; description: string; price: string; categoryId: number | null; image: string; available: boolean; displayOrder: number; categorySlug: string | null; categoryName: string | null; }
+export interface Addon { name: string; price: number; }
+export interface Product { id: number; name: string; description: string; price: string; categoryId: number | null; image: string; videoUrl: string; ingredients: string[]; addons: Addon[]; available: boolean; displayOrder: number; categorySlug: string | null; categoryName: string | null; }
 export const getProducts = () => api.get("/products") as Promise<Product[]>;
 export const getAdminProducts = () => api.get("/admin/products") as Promise<Product[]>;
 export const createProduct = (d: Partial<Product>) => api.post("/admin/products", d) as Promise<Product>;
@@ -102,7 +103,7 @@ export type OrderStatus = "new" | "preparing" | "delivery" | "done" | "cancelled
 export type OrderType = "delivery" | "pickup" | "local";
 export type PaymentMethod = "pix" | "cash" | "card";
 
-export interface OrderItem { id: number; orderId: number; productName: string; productPrice: string; quantity: number; subtotal: string; }
+export interface OrderItem { id: number; orderId: number; productName: string; productPrice: string; quantity: number; addons: Addon[]; notes: string; subtotal: string; }
 export type PaymentStatus = "pending" | "paid" | "failed";
 export interface Order {
   id: number; orderNumber: number; trackingId: string;
@@ -121,7 +122,7 @@ export interface CreateOrderPayload {
   customerLat?: number; customerLng?: number;
   orderType: OrderType; paymentMethod: PaymentMethod; changeFor?: number;
   couponCode?: string;
-  items: Array<{ productId?: number; productName: string; productPrice: number; quantity: number }>;
+  items: Array<{ productId?: number; productName: string; productPrice: number; quantity: number; addons?: Addon[]; notes?: string }>;
 }
 export const createOrder = (d: CreateOrderPayload) => api.post("/orders", d) as Promise<{
   ok: boolean; trackingId: string; orderNumber: number; orderId: number;

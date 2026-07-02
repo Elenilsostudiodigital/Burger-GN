@@ -178,9 +178,17 @@ function OrderCard({ order, highlight, onStatusChange }: {
               {/* Items */}
               <div className="space-y-1.5">
                 {order.items.map(item => (
-                  <div key={item.id} className="flex justify-between text-sm">
-                    <span className="text-zinc-300">{item.quantity}x {item.productName}</span>
-                    <span className="text-zinc-400">{fmt(item.subtotal)}</span>
+                  <div key={item.id} className="text-sm">
+                    <div className="flex justify-between">
+                      <span className="text-zinc-300">{item.quantity}x {item.productName}</span>
+                      <span className="text-zinc-400">{fmt(item.subtotal)}</span>
+                    </div>
+                    {item.addons && item.addons.length > 0 && (
+                      <p className="text-zinc-500 text-xs pl-4">+ {item.addons.map(a => a.name).join(', ')}</p>
+                    )}
+                    {item.notes && (
+                      <p className="text-zinc-500 text-xs pl-4 italic">Obs: {item.notes}</p>
+                    )}
                   </div>
                 ))}
                 <div className="border-t border-zinc-800 pt-1.5 flex justify-between text-sm font-bold text-white">

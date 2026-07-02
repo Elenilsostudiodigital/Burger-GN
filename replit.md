@@ -30,6 +30,7 @@ Sistema completo de pedidos online para hamburgueria — cardápio com carrinho,
 - `artifacts/api-server/src/lib/sse.ts` — SSE broadcaster for real-time admin notifications
 - `artifacts/api-server/src/lib/seed.ts` — Seed default categories + products on first boot
 - `artifacts/burger-gn/src/pages/` — Customer pages (Menu, Cart, Checkout, Confirmation, OrderTracking)
+- `artifacts/burger-gn/src/components/ProductDetailModal.tsx` — Bottom-sheet product modal: ingredients, addon selection, notes, quantity stepper
 - `artifacts/burger-gn/src/pages/admin/` — Admin pages (Login, Dashboard, MenuAdmin)
 - `artifacts/burger-gn/src/context/` — CartContext, AdminContext
 - `artifacts/burger-gn/src/lib/api.ts` — Typed API client + config constants (WhatsApp number, delivery fee)
@@ -45,7 +46,7 @@ Sistema completo de pedidos online para hamburgueria — cardápio com carrinho,
 ## Product
 
 ### Customer flow
-1. Browse menu by category (products from DB)
+1. Browse menu by category (products from DB); tap a product card to open a detail modal with ingredients, optional add-ons, and an observações field (quick-add "+" still available for simple products)
 2. Add to cart → Checkout (delivery/pickup/local + payment method + notes)
 3. Order POSTed to API → Confirmation page
 4. WhatsApp opens automatically with full order message
@@ -70,6 +71,8 @@ Sistema completo de pedidos online para hamburgueria — cardápio com carrinho,
 - The SSE route must come before `/orders/:id` route in orders.ts (specific routes first)
 - Cookie for admin auth is signed with SESSION_SECRET — changing that secret invalidates all sessions
 - `ADMIN_PASSWORD` defaults to "burger123" if env var not set — always set this in production
+- Order prices are always re-validated/re-priced server-side from `products.price` + matched `addons` by name at order creation (never trust client-submitted prices)
+- Cart items use a composite line key (productId + sorted addon names + notes) so identical products with different customization don't merge into one line
 
 ## Pointers
 

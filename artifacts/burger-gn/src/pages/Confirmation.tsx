@@ -17,7 +17,7 @@ interface StoredOrder {
   neighborhood: string; reference: string; notes: string;
   distanceKm: number | null;
   couponCode: string | null; discountAmount: number;
-  items: Array<{ name: string; quantity: number; price: number; subtotal: number }>;
+  items: Array<{ name: string; quantity: number; price: number; addons?: Array<{ name: string; price: number }>; notes?: string; subtotal: number }>;
   subtotal: number; deliveryFee: number; discount: number; total: number;
 }
 
@@ -28,9 +28,16 @@ function fullAddress(order: StoredOrder): string {
 }
 
 function buildWhatsAppMessage(order: StoredOrder): string {
-  const itemsText = order.items.map(i =>
-    `• ${i.quantity}x ${i.name} — R$ ${i.subtotal.toFixed(2).replace('.', ',')}`
-  ).join('\n');
+  const itemsText = order.items.map(i => {
+    let line = `• ${i.quantity}x ${i.name} — R$ ${i.subtotal.toFixed(2).replace('.', ',')}`;
+    if (i.addons && i.addons.length > 0) {
+      line += `\n   + ${i.addons.map(a => a.name).join(', ')}`;
+    }
+    if (i.notes) {
+      line += `\n   Obs: ${i.notes}`;
+    }
+    return line;
+  }).join('\n');
 
   let deliveryText = ORDER_TYPE_LABELS[order.orderType];
   if (order.orderType === 'delivery') {

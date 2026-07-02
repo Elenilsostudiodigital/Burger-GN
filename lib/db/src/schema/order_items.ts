@@ -1,7 +1,8 @@
-import { pgTable, serial, integer, text, numeric, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, serial, integer, text, numeric, timestamp, jsonb } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { ordersTable } from "./orders";
+import type { ProductAddon } from "./products";
 
 export const orderItemsTable = pgTable("order_items", {
   id: serial("id").primaryKey(),
@@ -10,6 +11,8 @@ export const orderItemsTable = pgTable("order_items", {
   productName: text("product_name").notNull(),
   productPrice: numeric("product_price", { precision: 10, scale: 2 }).notNull(),
   quantity: integer("quantity").notNull(),
+  addons: jsonb("addons").$type<ProductAddon[]>().notNull().default([]),
+  notes: text("notes").notNull().default(""),
   subtotal: numeric("subtotal", { precision: 10, scale: 2 }).notNull(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });

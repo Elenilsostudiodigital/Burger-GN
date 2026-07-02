@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useCart } from '../context/CartContext';
-import { getCategories, getProducts, getExternalLinks, Category, Product, ExternalLink } from '../lib/api';
+import { getCategories, getProducts, getExternalLinks, Category, Product, ExternalLink, Addon } from '../lib/api';
 import { BottomNav } from '../components/BottomNav';
 import { WhatsAppButton } from '../components/WhatsAppButton';
 import { PageTransition } from '../components/PageTransition';
-import { ShoppingCart, Plus, Minus, Flame, ExternalLink as ExternalLinkIcon } from 'lucide-react';
+import { ProductDetailModal } from '../components/ProductDetailModal';
+import { ShoppingCart, Plus, Minus, Flame, ExternalLink as ExternalLinkIcon, PlayCircle, ListChecks } from 'lucide-react';
 import { Link } from 'wouter';
 
 export default function Menu() {
@@ -14,6 +15,7 @@ export default function Menu() {
   const [externalLinks, setExternalLinks] = useState<ExternalLink[]>([]);
   const [activeCategory, setActiveCategory] = useState<string>('');
   const [loading, setLoading] = useState(true);
+  const [detailProduct, setDetailProduct] = useState<Product | null>(null);
   const { cartItems, addItem, updateQuantity, totalItems } = useCart();
 
   useEffect(() => {
@@ -30,10 +32,14 @@ export default function Menu() {
 
   const filteredItems = products.filter(p => p.categorySlug === activeCategory);
 
-  const cartItemForProduct = (productId: number) =>
-    cartItems.find(ci => ci.item.id === productId);
+  const quantityForProduct = (productId: number) =>
+    cartItems.filter(ci => ci.item.id === productId && ci.selectedAddons.length === 0 && !ci.notes)
+      .reduce((acc, ci) => acc + ci.quantity, 0);
 
-  const handleAdd = (product: Product) => {
+  const lineIdForSimpleProduct = (productId: number) =>
+    cartItems.find(ci => ci.item.id === productId && ci.selectedAddons.length === 0 && !ci.notes)?.lineId;
+
+  const handleQuickAdd = (product: Product) => {
     addItem({
       id: product.id,
       name: product.name,
@@ -42,6 +48,22 @@ export default function Menu() {
       image: product.image,
       available: product.available,
     });
+  };
+
+  const handleModalAdd = (product: Product, addons: Addon[], notes: string, quantity: number) => {
+    addItem({
+      id: product.id,
+      name: product.name,
+      description: product.description,
+      price: parseFloat(product.price),
+      image: product.image,
+      available: product.available,
+    }, { addons, notes, quantity });
+  };
+
+  const handleQuantityChange = (productId: number, delta: number) => {
+    const lineId = lineIdForSimpleProduct(productId);
+    if (lineId) updateQuantity(lineId, delta);
   };
 
   return (
@@ -103,55 +125,73 @@ export default function Menu() {
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -20 }}
               transition={{ duration: 0.25 }}
-              className="space-y-4"
+              className="grid grid-cols-2 gap-3"
             >
               {filteredItems.length === 0 ? (
-                <p className="text-zinc-500 text-center py-12">Nenhum item nesta categoria.</p>
+                <p className="text-zinc-500 text-center py-12 col-span-2">Nenhum item nesta categoria.</p>
               ) : (
-                filteredItems.map(item => {
-                  const cartItem = cartItemForProduct(item.id);
-                  const quantity = cartItem?.quantity ?? 0;
+                filteredItems.map((item, idx) => {
+                  const quantity = quantityForProduct(item.id);
+                  const hasCustomization = item.ingredients.length > 0 || item.addons.length > 0;
                   return (
-                    <div key={item.id} className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden flex shadow-sm relative">
+                    <motion.div
+                      key={item.id}
+                      initial={{ opacity: 0, y: 12 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.25, delay: idx * 0.03 }}
+                      onClick={() => setDetailProduct(item)}
+                      className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden shadow-sm relative flex flex-col cursor-pointer active:scale-[0.98] transition-transform"
+                    >
                       {item.categorySlug === 'promocao' && (
                         <div className="absolute top-2 left-2 z-10 bg-red-600 text-white text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded flex items-center gap-1">
                           <Flame size={12} /> Promo
                         </div>
                       )}
-                      <div className="w-1/3 relative">
-                        <img src={item.image || 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=400&h=300&fit=crop'} alt={item.name} className="w-full h-full object-cover min-h-[140px]" />
-                        <div className="absolute inset-0 bg-gradient-to-r from-transparent to-zinc-900" />
-                      </div>
-                      <div className="w-2/3 p-4 flex flex-col justify-between">
-                        <div>
-                          <h3 className="text-white font-bold uppercase text-lg leading-tight mb-1">{item.name}</h3>
-                          <p className="text-zinc-400 text-xs line-clamp-2 mb-2 leading-relaxed">{item.description}</p>
+                      {item.videoUrl && (
+                        <div className="absolute top-2 right-2 z-10 bg-black/60 backdrop-blur text-white p-1 rounded-full">
+                          <PlayCircle size={16} />
                         </div>
-                        <div className="flex items-center justify-between mt-2">
-                          <span className="text-amber-500 font-black text-lg">
+                      )}
+                      <div className="relative aspect-square w-full">
+                        <img
+                          src={item.image || 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=400&h=400&fit=crop'}
+                          alt={item.name}
+                          className="w-full h-full object-cover"
+                        />
+                        <div className="absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-zinc-900 to-transparent" />
+                      </div>
+                      <div className="p-3 flex flex-col gap-1.5 flex-1">
+                        <h3 className="text-white font-bold uppercase text-sm leading-tight line-clamp-2">{item.name}</h3>
+                        {hasCustomization && (
+                          <span className="flex items-center gap-1 text-zinc-500 text-[10px]">
+                            <ListChecks size={11} /> Personalizável
+                          </span>
+                        )}
+                        <div className="mt-auto flex items-center justify-between pt-1">
+                          <span className="text-amber-500 font-black text-base">
                             R$ {parseFloat(item.price).toFixed(2).replace('.', ',')}
                           </span>
                           {quantity === 0 ? (
                             <button
-                              onClick={() => handleAdd(item)}
-                              className="bg-zinc-800 text-amber-500 hover:bg-amber-500 hover:text-zinc-950 p-2 px-3 rounded-lg font-bold text-sm uppercase tracking-wider transition-colors flex items-center gap-1"
+                              onClick={e => { e.stopPropagation(); handleQuickAdd(item); }}
+                              className="w-8 h-8 flex items-center justify-center bg-zinc-800 text-amber-500 hover:bg-amber-500 hover:text-zinc-950 rounded-lg transition-colors"
                             >
-                              <Plus size={16} /> Adicionar
+                              <Plus size={16} />
                             </button>
                           ) : (
-                            <div className="flex items-center gap-3 bg-zinc-950 p-1.5 rounded-xl border border-zinc-800">
-                              <button onClick={() => updateQuantity(item.id, -1)} className="w-8 h-8 flex items-center justify-center bg-zinc-800 text-white rounded-lg hover:bg-zinc-700 active:scale-95 transition-transform">
-                                <Minus size={16} />
+                            <div onClick={e => e.stopPropagation()} className="flex items-center gap-1.5 bg-zinc-950 p-1 rounded-lg border border-zinc-800">
+                              <button onClick={() => handleQuantityChange(item.id, -1)} className="w-6 h-6 flex items-center justify-center bg-zinc-800 text-white rounded hover:bg-zinc-700 active:scale-95 transition-transform">
+                                <Minus size={12} />
                               </button>
-                              <span className="font-bold text-white w-4 text-center">{quantity}</span>
-                              <button onClick={() => updateQuantity(item.id, 1)} className="w-8 h-8 flex items-center justify-center bg-amber-500 text-zinc-950 rounded-lg hover:brightness-110 active:scale-95 transition-transform">
-                                <Plus size={16} />
+                              <span className="font-bold text-white w-4 text-center text-xs">{quantity}</span>
+                              <button onClick={() => handleQuantityChange(item.id, 1)} className="w-6 h-6 flex items-center justify-center bg-amber-500 text-zinc-950 rounded hover:brightness-110 active:scale-95 transition-transform">
+                                <Plus size={12} />
                               </button>
                             </div>
                           )}
                         </div>
                       </div>
-                    </div>
+                    </motion.div>
                   );
                 })
               )}
@@ -170,6 +210,8 @@ export default function Menu() {
           </div>
         )}
       </main>
+
+      <ProductDetailModal product={detailProduct} onClose={() => setDetailProduct(null)} onAdd={handleModalAdd} />
 
       <WhatsAppButton />
       <BottomNav />
