@@ -9,7 +9,7 @@ import { useAdmin } from '../../context/AdminContext';
 import {
   LayoutDashboard, UtensilsCrossed, Tag, MapPin, Navigation, Settings,
   LogOut, Plus, Pencil, Trash2, Check, X, ToggleLeft, ToggleRight,
-  Loader2, CreditCard, Link as LinkIcon, ShieldAlert, ShieldCheck,
+  Loader2, CreditCard, Link as LinkIcon, ShieldAlert, ShieldCheck, Upload,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -23,6 +23,7 @@ function AdminNav({ active }: { active: string }) {
     { href: '/admin/taxas', icon: <MapPin size={17} />, label: 'Bairros' },
     { href: '/admin/entrega-km', icon: <Navigation size={17} />, label: 'Por KM' },
     { href: '/admin/config', icon: <Settings size={17} />, label: 'Config' },
+    { href: '/admin/importar', icon: <Upload size={17} />, label: 'Importar' },
   ];
   return (
     <nav className="fixed bottom-0 left-0 right-0 bg-zinc-950/95 backdrop-blur border-t border-zinc-800 z-40">

@@ -87,6 +87,16 @@ export const createKmTier = (d: { fromKm: string; toKm?: string | null; fee?: st
 export const updateKmTier = (id: number, d: Partial<KmDeliveryTier>) => api.put(`/admin/km-delivery/tiers/${id}`, d) as Promise<KmDeliveryTier>;
 export const deleteKmTier = (id: number) => api.delete(`/admin/km-delivery/tiers/${id}`);
 
+// ── Import Cardápio ────────────────────────────────────────────────────────────
+export interface ImportDraftCategory { name: string; slug: string; }
+export interface ImportDraftProduct { name: string; description: string; price: number; image: string; available: boolean; categorySlug: string; categoryName: string; include?: boolean; }
+export interface ImportDraft { categories: ImportDraftCategory[]; products: ImportDraftProduct[]; }
+export interface ImportCommitResult { ok: boolean; categoriesCreated: number; productsCreated: number; productsSkipped: number; }
+
+export const parseImportText = (text: string) => api.post("/admin/import/parse", { text }) as Promise<ImportDraft>;
+export const fetchImportLink = (url: string) => api.post("/admin/import/fetch-link", { url }) as Promise<ImportDraft>;
+export const commitImport = (draft: ImportDraft) => api.post("/admin/import/commit", draft) as Promise<ImportCommitResult>;
+
 // Nominatim geocoding (free, no API key needed)
 export async function geocodeAddress(address: string): Promise<{ lat: number; lng: number } | null> {
   try {

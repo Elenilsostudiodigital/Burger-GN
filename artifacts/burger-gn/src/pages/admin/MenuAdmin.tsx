@@ -10,7 +10,7 @@ import { useAdmin } from '../../context/AdminContext';
 import { useLocation } from 'wouter';
 import {
   LayoutDashboard, UtensilsCrossed, Plus, Pencil, Trash2, Check, X,
-  ToggleLeft, ToggleRight, Loader2, Tag, MapPin, LogOut, Navigation, Settings,
+  ToggleLeft, ToggleRight, Loader2, Tag, MapPin, LogOut, Navigation, Settings, Upload,
 } from 'lucide-react';
 import type { Addon } from '../../lib/api';
 import { Button } from '@/components/ui/button';
@@ -444,6 +444,12 @@ export default function MenuAdmin() {
             <div className="flex flex-col items-center gap-0.5 py-2.5 text-zinc-500 hover:text-white transition-colors">
               <Settings size={18} />
               <span className="text-[9px] font-bold uppercase">Config</span>
+            </div>
+          </Link>
+          <Link href="/admin/importar" className="flex-1">
+            <div className="flex flex-col items-center gap-0.5 py-2.5 text-zinc-500 hover:text-white transition-colors">
+              <Upload size={18} />
+              <span className="text-[9px] font-bold uppercase">Importar</span>
             </div>
           </Link>
         </div>

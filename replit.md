@@ -31,7 +31,8 @@ Sistema completo de pedidos online para hamburgueria — cardápio com carrinho,
 - `artifacts/api-server/src/lib/seed.ts` — Seed default categories + products on first boot
 - `artifacts/burger-gn/src/pages/` — Customer pages (Menu, Cart, Checkout, Confirmation, OrderTracking)
 - `artifacts/burger-gn/src/components/ProductDetailModal.tsx` — Bottom-sheet product modal: ingredients, addon selection, notes, quantity stepper
-- `artifacts/burger-gn/src/pages/admin/` — Admin pages (Login, Dashboard, MenuAdmin)
+- `artifacts/burger-gn/src/pages/admin/` — Admin pages (Login, Dashboard, MenuAdmin, ImportMenu)
+- `artifacts/api-server/src/routes/import.ts` — "Importar Cardápio" tool: parses pasted text/link into a draft (categories+products), commits on approval
 - `artifacts/burger-gn/src/context/` — CartContext, AdminContext
 - `artifacts/burger-gn/src/lib/api.ts` — Typed API client + config constants (WhatsApp number, delivery fee)
 
@@ -58,6 +59,7 @@ Sistema completo de pedidos online para hamburgueria — cardápio com carrinho,
 3. SSE notifications with beep sound when new order arrives
 4. Advance order status with one tap, print receipt, view full order details
 5. Menu management at `/admin/cardapio`: add/edit/delete products, toggle availability, manage categories
+6. Import cardápio at `/admin/importar`: paste text (markdown-ish: `## Categoria`, `### Produto`, description, `R$ preço`, `![](imagem)`), upload CSV/Excel (columns: nome, descricao, preco, categoria, imagem), or paste a link (best-effort server fetch; JS-rendered sites like Anota Aí usually need "Colar Texto" instead) — always shows an editable preview before committing to the DB
 
 ## User preferences
 
@@ -73,6 +75,8 @@ Sistema completo de pedidos online para hamburgueria — cardápio com carrinho,
 - `ADMIN_PASSWORD` defaults to "burger123" if env var not set — always set this in production
 - Order prices are always re-validated/re-priced server-side from `products.price` + matched `addons` by name at order creation (never trust client-submitted prices)
 - Cart items use a composite line key (productId + sorted addon names + notes) so identical products with different customization don't merge into one line
+- Anota Aí (and similar SPA menu sites) render their menu via client-side JS — a plain server-side `fetch` only gets an empty HTML shell, so automatic "link" import can't read them; only a JS-rendering fetch (like the agent's own web tools) or manual paste works for those sites
+- Import commit matches categories by slug (creates if missing) and skips products whose name+category already exist, so re-running an import is safe
 
 ## Pointers
 
