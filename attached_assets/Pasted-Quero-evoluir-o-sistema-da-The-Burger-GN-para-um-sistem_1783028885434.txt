@@ -1,0 +1,340 @@
+Quero evoluir o sistema da The Burger GN para um sistema profissional de pedidos online, mantendo o design moderno nas cores preto, amarelo mostarda/dourado e branco, totalmente responsivo para celular e computador.
+
+## 1 - IMPORTAÇÃO DO CARDÁPIO DA NOTA AÍ
+
+Criar no painel administrativo uma área chamada "Importar Cardápio".
+
+Quero poder colar o link público do meu cardápio da Nota Aí.
+
+O sistema deverá tentar importar automaticamente:
+
+- Nome do produto
+- Categoria
+- Descrição
+- Valor
+- Imagem
+- Disponibilidade
+
+Antes de salvar, mostrar uma tela de revisão para eu editar qualquer informação.
+
+Caso o site da Nota Aí não permita leitura automática, criar alternativas:
+
+- Importação por CSV
+- Importação por Excel
+- Colar lista manualmente
+
+Após confirmar, todos os produtos deverão aparecer automaticamente no novo cardápio digital.
+
+Também quero uma opção para sincronizar novamente futuramente.
+
+------------------------------------------------
+
+## 2 - ENTREGA POR DISTÂNCIA
+
+No checkout:
+
+O cliente poderá:
+
+• Digitar endereço completo
+
+ou
+
+• Clicar em "Usar minha localização"
+
+Utilizar Google Maps API / Distance Matrix API para calcular automaticamente a distância entre a loja e o cliente.
+
+Criar uma área no painel:
+
+Taxas por Quilometragem
+
+Exemplo:
+
+0 a 2 km = R$ 5,00
+
+2,1 a 5 km = R$ 8,00
+
+5,1 a 8 km = R$ 12,00
+
+Acima disso = Consultar
+
+O sistema deverá calcular automaticamente a taxa.
+
+Mostrar:
+
+Subtotal
+
+Taxa de entrega
+
+Valor total
+
+Tempo estimado
+
+Distância
+
+------------------------------------------------
+
+## 3 - PAGAMENTOS
+
+Criar uma área no painel chamada:
+
+Pagamentos
+
+Nela quero configurar:
+
+Mercado Pago
+
+PagBank
+
+Asaas
+
+Stripe
+
+Pagar.me
+
+Ativar ou desativar qualquer gateway.
+
+Cadastrar API Keys diretamente pelo painel.
+
+Enquanto não configurar nenhum gateway:
+
+Quero utilizar meu Pix manual.
+
+Pix da empresa:
+
+Chave Pix (CNPJ)
+
+52.662.873/0001-63
+
+No checkout:
+
+Mostrar:
+
+Nome THE BURGER GN
+
+Chave Pix
+
+Botão Copiar Chave
+
+QR Code Pix quando possível.
+
+Depois do pagamento:
+
+Mostrar botão
+
+Enviar comprovante
+
+Aceitar:
+
+Imagem
+
+PDF
+
+Arquivo
+
+O pedido ficará:
+
+Aguardando confirmação do pagamento.
+
+No painel:
+
+Botão:
+
+Confirmar Pagamento
+
+Após confirmar:
+
+Status Pago
+
+Em preparo
+
+Cliente recebe confirmação.
+
+Registrar:
+
+Horário
+
+Forma de pagamento
+
+Valor
+
+Comprovante
+
+------------------------------------------------
+
+## 4 - CHECKOUT
+
+Mostrar:
+
+Resumo do pedido
+
+Produtos
+
+Quantidade
+
+Observações
+
+Subtotal
+
+Taxa
+
+Total
+
+Forma de pagamento
+
+Endereço
+
+Distância
+
+Tempo estimado
+
+Cupom
+
+Finalizar Pedido
+
+------------------------------------------------
+
+## 5 - PEDIDOS
+
+Criar status:
+
+Recebido
+
+Pagamento pendente
+
+Pago
+
+Em preparo
+
+Saiu para entrega
+
+Finalizado
+
+Cancelado
+
+Mostrar tudo no painel.
+
+------------------------------------------------
+
+## 6 - CUPONS
+
+Criar painel para:
+
+Cupom percentual
+
+Cupom em reais
+
+Valor mínimo
+
+Data de validade
+
+Quantidade de uso
+
+Ativar ou desativar.
+
+------------------------------------------------
+
+## 7 - CLIENTE
+
+Criar área do cliente.
+
+Histórico de pedidos.
+
+Favoritos.
+
+Repetir pedido.
+
+Editar endereço.
+
+Salvar vários endereços.
+
+------------------------------------------------
+
+## 8 - ADMIN
+
+Criar painel administrativo completo.
+
+Dashboard com:
+
+Pedidos do dia
+
+Faturamento
+
+Produtos mais vendidos
+
+Clientes
+
+Entregas
+
+Relatórios.
+
+------------------------------------------------
+
+## 9 - SEGURANÇA
+
+Nunca expor API Keys.
+
+Guardar tudo nas variáveis de ambiente.
+
+Validar todos os valores no backend.
+
+------------------------------------------------
+
+## 10 - DESIGN
+
+Quero um sistema extremamente profissional.
+
+Visual semelhante aos grandes aplicativos de delivery.
+
+Animações suaves.
+
+Ícones modernos.
+
+Carregamento rápido.
+
+Interface premium.
+
+------------------------------------------------
+
+## 11 - DIFERENCIAL
+
+Cada hambúrguer deverá possuir:
+
+Imagem em alta qualidade
+
+Descrição
+
+Ingredientes
+
+Preço
+
+Adicionais
+
+Observações
+
+Vídeo do hambúrguer (quando disponível)
+
+Botão Comprar Agora.
+
+Também preparar toda a estrutura para futuras funções como:
+
+Programa de fidelidade
+
+Cashback
+
+Notificações
+
+Avaliações dos clientes
+
+Chat com atendimento
+
+Promoções automáticas
+
+Sistema de franquias
+
+Aplicativo Android e iPhone no futuro.
+
+Importante:
+
+Não remover nenhuma função existente.
+
+Apenas melhorar, organizar e integrar tudo em um único sistema robusto, profissional e escalável para a The Burger GN.
