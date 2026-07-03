@@ -2,6 +2,7 @@ import { pgTable, serial, text, integer, numeric, boolean, timestamp, jsonb } fr
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { categoriesTable } from "./categories";
+import { companiesTable } from "./company";
 
 export interface ProductAddon {
   name: string;
@@ -10,6 +11,7 @@ export interface ProductAddon {
 
 export const productsTable = pgTable("products", {
   id: serial("id").primaryKey(),
+  companyId: integer("company_id").references(() => companiesTable.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
   description: text("description").notNull().default(""),
   price: numeric("price", { precision: 10, scale: 2 }).notNull(),

@@ -1,6 +1,7 @@
-import { pgTable, serial, text, integer, numeric, timestamp, pgEnum } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, integer, numeric, timestamp, pgEnum, uniqueIndex } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
+import { companiesTable } from "./company";
 
 export const orderStatusEnum = pgEnum("order_status", [
   "new", "preparing", "delivery", "done", "cancelled",
@@ -11,6 +12,7 @@ export const paymentStatusEnum = pgEnum("payment_status", ["pending", "paid", "f
 
 export const ordersTable = pgTable("orders", {
   id: serial("id").primaryKey(),
+  companyId: integer("company_id").references(() => companiesTable.id, { onDelete: "cascade" }),
   orderNumber: integer("order_number").notNull(),
   trackingId: text("tracking_id").notNull().unique(),
   customerName: text("customer_name").notNull(),
@@ -38,7 +40,9 @@ export const ordersTable = pgTable("orders", {
   mpPreferenceId: text("mp_preference_id"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
-});
+}, (t) => [
+  uniqueIndex("orders_company_order_number_idx").on(t.companyId, t.orderNumber),
+]);
 
 export const insertOrderSchema = createInsertSchema(ordersTable).omit({
   id: true, orderNumber: true, createdAt: true, updatedAt: true, status: true,
