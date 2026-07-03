@@ -196,3 +196,27 @@ export const ORDER_TYPE_LABELS: Record<OrderType, string> = { delivery: "Deliver
 export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = { pix: "Pix", cash: "Dinheiro", card: "Cartão" };
 export const STATUS_LABELS: Record<OrderStatus, string> = { new: "Novo Pedido", preparing: "Em Preparo", delivery: "Saiu p/ Entrega", done: "Finalizado", cancelled: "Cancelado" };
 export const PAYMENT_STATUS_LABELS: Record<PaymentStatus, string> = { pending: "Pendente", paid: "Pago", failed: "Falhou" };
+
+// ── Financial Report ────────────────────────────────────────────────────────
+export interface FinancialChartPoint { label: string; total: number; orders: number; }
+export interface FinancialReport {
+  period: { from: string; to: string };
+  fixedRevenue: { today: number; week: number; month: number; year: number };
+  totals: { totalOrders: number; deliveredOrders: number; cancelledOrders: number; pendingOrders: number };
+  revenue: number;
+  averageTicket: number;
+  totalDeliveryFees: number;
+  topProduct: { name: string; quantity: number } | null;
+  topCategory: { name: string; quantity: number } | null;
+  topCustomer: { name: string; phone: string; total: number; orderCount: number } | null;
+  customers: { new: number; returning: number };
+  paymentMethods: Record<PaymentMethod, { revenue: number; count: number }>;
+  charts: { daily: FinancialChartPoint[]; weekly: FinancialChartPoint[]; monthly: FinancialChartPoint[]; yearly: FinancialChartPoint[] };
+}
+export const getFinancialReport = (from?: string, to?: string) => {
+  const params = new URLSearchParams();
+  if (from) params.set("from", from);
+  if (to) params.set("to", to);
+  const qs = params.toString();
+  return api.get(`/admin/financial-report${qs ? `?${qs}` : ""}`) as Promise<FinancialReport>;
+};

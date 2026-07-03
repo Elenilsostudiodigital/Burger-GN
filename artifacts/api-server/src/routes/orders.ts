@@ -250,7 +250,7 @@ router.get("/orders", requireAdmin, async (req, res) => {
     const orders = await db.select().from(ordersTable).orderBy(desc(ordersTable.createdAt));
     const ids = orders.map(o => o.id);
     if (ids.length === 0) { res.json([]); return; }
-    const items = await db.select().from(orderItemsTable).where(sql`order_id = ANY(${ids})`);
+    const items = await db.select().from(orderItemsTable).where(inArray(orderItemsTable.orderId, ids));
     res.json(orders.map(o => ({ ...o, items: items.filter(i => i.orderId === o.id) })));
   } catch (err) {
     req.log.error({ err }, "Failed to list orders");

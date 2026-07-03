@@ -9,7 +9,7 @@ import { useAdmin } from '../../context/AdminContext';
 import {
   LayoutDashboard, UtensilsCrossed, Tag, MapPin, Navigation, Settings, LogOut,
   Plus, Pencil, Trash2, Check, X, ToggleLeft, ToggleRight,
-  Loader2, Percent, DollarSign, Calendar, Upload,
+  Loader2, Percent, DollarSign, Calendar, Upload, TrendingUp,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -19,6 +19,7 @@ function AdminNav({ active }: { active: string }) {
   const navItems = [
     { href: '/admin', icon: <LayoutDashboard size={18} />, label: 'Pedidos' },
     { href: '/admin/cardapio', icon: <UtensilsCrossed size={18} />, label: 'Cardápio' },
+    { href: '/admin/financeiro', icon: <TrendingUp size={18} />, label: 'Financeiro' },
     { href: '/admin/cupons', icon: <Tag size={18} />, label: 'Cupons' },
     { href: '/admin/taxas', icon: <MapPin size={18} />, label: 'Bairros' },
     { href: '/admin/entrega-km', icon: <Navigation size={18} />, label: 'Por KM' },

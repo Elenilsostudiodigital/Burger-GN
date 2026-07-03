@@ -20,6 +20,7 @@ import AdminDeliveryZones from "./pages/admin/DeliveryZones";
 import AdminKmDelivery from "./pages/admin/KmDelivery";
 import AdminSettingsHub from "./pages/admin/SettingsHub";
 import AdminImportMenu from "./pages/admin/ImportMenu";
+import AdminFinancial from "./pages/admin/Financial";
 
 const queryClient = new QueryClient();
 
@@ -58,6 +59,7 @@ function Router() {
       <Route path="/admin/login" component={AdminLogin} />
       <Route path="/admin" component={() => <ProtectedAdminRoute component={AdminDashboard} />} />
       <Route path="/admin/cardapio" component={() => <ProtectedAdminRoute component={AdminMenuAdmin} />} />
+      <Route path="/admin/financeiro" component={() => <ProtectedAdminRoute component={AdminFinancial} />} />
       <Route path="/admin/cupons" component={() => <ProtectedAdminRoute component={AdminCoupons} />} />
       <Route path="/admin/taxas" component={() => <ProtectedAdminRoute component={AdminDeliveryZones} />} />
       <Route path="/admin/entrega-km" component={() => <ProtectedAdminRoute component={AdminKmDelivery} />} />

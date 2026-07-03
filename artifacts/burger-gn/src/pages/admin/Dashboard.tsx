@@ -10,7 +10,7 @@ import {
 import {
   LayoutDashboard, UtensilsCrossed, LogOut, Bell,
   Printer, ChevronDown, ChevronUp, Clock, CheckCircle2,
-  Bike, ChefHat, XCircle, Tag, MapPin, Navigation, Settings, Route, Upload,
+  Bike, ChefHat, XCircle, Tag, MapPin, Navigation, Settings, Route, Upload, TrendingUp,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
@@ -423,6 +423,13 @@ export default function AdminDashboard() {
               <span className="text-[9px] font-bold uppercase">Cardápio</span>
             </div>
           </Link>
+          <Link href="/admin/financeiro" className="flex-1">
+            <div className="flex flex-col items-center gap-0.5 py-2.5 text-zinc-500 hover:text-white transition-colors">
+              <TrendingUp size={18} />
+              <span className="text-[9px] font-bold uppercase">Financeiro</span>
+            </div>
+          </Link>
+
           <Link href="/admin/cupons" className="flex-1">
             <div className="flex flex-col items-center gap-0.5 py-2.5 text-zinc-500 hover:text-white transition-colors">
               <Tag size={18} />
