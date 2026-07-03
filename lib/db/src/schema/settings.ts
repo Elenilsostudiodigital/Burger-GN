@@ -10,6 +10,12 @@ export const paymentSettingsTable = pgTable("payment_settings", {
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
+export const whatsappSettingsTable = pgTable("whatsapp_settings", {
+  id: serial("id").primaryKey(),
+  number: text("number").notNull().default(""),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
 export const externalLinksTable = pgTable("external_links", {
   id: serial("id").primaryKey(),
   label: text("label").notNull(),
@@ -21,3 +27,4 @@ export const externalLinksTable = pgTable("external_links", {
 
 export type PaymentSettings = typeof paymentSettingsTable.$inferSelect;
 export type ExternalLink = typeof externalLinksTable.$inferSelect;
+export type WhatsappSettings = typeof whatsappSettingsTable.$inferSelect;

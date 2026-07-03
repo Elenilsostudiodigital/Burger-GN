@@ -5,7 +5,7 @@ import { useCart } from '../context/CartContext';
 import { PageTransition } from '../components/PageTransition';
 import {
   createOrder, validateCoupon, getDeliveryZones, getDeliveryFee, getKmDeliveryConfig, geocodeAddress,
-  haversineKm, findKmTier, getPaymentSettings,
+  haversineKm, findKmTier, getPaymentSettings, getWhatsappSettings,
   WHATSAPP_NUMBER, ValidateCouponResult, DeliveryZone, KmDeliveryConfig, PaymentSettingsPublic,
 } from '../lib/api';
 import {
@@ -53,6 +53,7 @@ export default function Checkout() {
 
   // Payment settings
   const [paySettings, setPaySettings] = useState<PaymentSettingsPublic | null>(null);
+  const [waNumber, setWaNumber] = useState(WHATSAPP_NUMBER);
 
   // Coupon
   const [couponInput, setCouponInput] = useState('');
@@ -69,6 +70,7 @@ export default function Checkout() {
     getDeliveryZones().then(setZones).catch(() => {});
     getKmDeliveryConfig().then(setKmConfig).catch(() => {});
     getPaymentSettings().then(setPaySettings).catch(() => {});
+    getWhatsappSettings().then(s => setWaNumber(s.number)).catch(() => {});
   }, []);
 
   // Cash restricted for delivery unless admin allows — auto-switch away if needed
@@ -226,6 +228,8 @@ export default function Checkout() {
         neighborhood: data.bairro, reference: data.referencia,
         notes: data.observacoes,
         distanceKm: result.distanceKm ?? null,
+        customerLat: isDelivery && customerCoords ? customerCoords.lat : null,
+        customerLng: isDelivery && customerCoords ? customerCoords.lng : null,
         couponCode: appliedCoupon?.code ?? null,
         discountAmount: result.discountAmount ?? 0,
         items: cartItems.map(ci => ({
@@ -240,6 +244,8 @@ export default function Checkout() {
           ? parseFloat((subtotal + result.deliveryFee - (result.discountAmount ?? 0)).toFixed(2))
           : total,
         pixPayment: result.pixPayment ?? null,
+        paymentStatus: 'pending',
+        createdAt: new Date().toISOString(),
       }));
       if (result.cardCheckoutUrl) {
         window.location.href = result.cardCheckoutUrl;
@@ -406,7 +412,7 @@ export default function Checkout() {
                           <AlertCircle size={16} className="text-orange-400 mt-0.5 shrink-0" />
                           <p className="text-orange-400 text-sm">
                             {feeMessage}{' '}
-                            <a href={`https://wa.me/${WHATSAPP_NUMBER}`} target="_blank" rel="noopener noreferrer" className="underline font-bold">
+                            <a href={`https://wa.me/${waNumber}`} target="_blank" rel="noopener noreferrer" className="underline font-bold">
                               Chamar no WhatsApp
                             </a>
                           </p>
@@ -420,7 +426,7 @@ export default function Checkout() {
                         <AlertCircle size={16} className="text-orange-400 mt-0.5 shrink-0" />
                         <p className="text-orange-400 text-sm">
                           Consulte a taxa de entrega pelo{' '}
-                          <a href={`https://wa.me/${WHATSAPP_NUMBER}`} target="_blank" rel="noopener noreferrer" className="underline font-bold">
+                          <a href={`https://wa.me/${waNumber}`} target="_blank" rel="noopener noreferrer" className="underline font-bold">
                             WhatsApp
                           </a>
                         </p>

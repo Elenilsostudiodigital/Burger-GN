@@ -4,7 +4,7 @@ import { motion } from 'framer-motion';
 import { CheckCircle2, MessageCircle, Home, ExternalLink, Copy, Check, QrCode } from 'lucide-react';
 import { PageTransition } from '../components/PageTransition';
 import { useCart } from '../context/CartContext';
-import { WHATSAPP_NUMBER, ORDER_TYPE_LABELS, PAYMENT_METHOD_LABELS, trackOrder, PixPaymentResult } from '../lib/api';
+import { WHATSAPP_NUMBER, getWhatsappSettings, ORDER_TYPE_LABELS, PAYMENT_METHOD_LABELS, PAYMENT_STATUS_LABELS, PaymentStatus, trackOrder, PixPaymentResult } from '../lib/api';
 import { Button } from '@/components/ui/button';
 
 interface StoredOrder {
@@ -12,20 +12,30 @@ interface StoredOrder {
   customerName: string; phone: string;
   orderType: 'delivery' | 'pickup' | 'local';
   paymentMethod: 'pix' | 'cash' | 'card';
+  paymentStatus: PaymentStatus;
   changeFor: string | null;
   address: string; numero: string; complemento: string;
   neighborhood: string; reference: string; notes: string;
   distanceKm: number | null;
+  customerLat: number | null; customerLng: number | null;
   couponCode: string | null; discountAmount: number;
   items: Array<{ name: string; quantity: number; price: number; addons?: Array<{ name: string; price: number }>; notes?: string; subtotal: number }>;
   subtotal: number; deliveryFee: number; discount: number; total: number;
   pixPayment: PixPaymentResult | null;
+  createdAt: string;
 }
 
 function fullAddress(order: StoredOrder): string {
   let addr = `${order.address}, ${order.numero}`;
   if (order.complemento) addr += `, ${order.complemento}`;
   return addr;
+}
+
+function formatDateTime(iso: string): string {
+  const d = new Date(iso);
+  const date = d.toLocaleDateString('pt-BR');
+  const time = d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  return `${date} às ${time}`;
 }
 
 function buildWhatsAppMessage(order: StoredOrder): string {
@@ -46,12 +56,16 @@ function buildWhatsAppMessage(order: StoredOrder): string {
     deliveryText += `\n🏘️ *Bairro:* ${order.neighborhood}`;
     if (order.reference) deliveryText += `\n📌 *Referência:* ${order.reference}`;
     if (order.distanceKm !== null) deliveryText += `\n📏 *Distância:* ${order.distanceKm.toFixed(1)} km`;
+    if (order.customerLat !== null && order.customerLng !== null) {
+      deliveryText += `\n🗺️ *Localização:* https://www.google.com/maps?q=${order.customerLat},${order.customerLng}`;
+    }
   }
 
   let paymentText = PAYMENT_METHOD_LABELS[order.paymentMethod];
   if (order.paymentMethod === 'cash' && order.changeFor) {
     paymentText += ` (troco p/ R$ ${order.changeFor})`;
   }
+  const paymentStatusText = PAYMENT_STATUS_LABELS[order.paymentStatus];
 
   const feeText = order.deliveryFee > 0
     ? `R$ ${order.deliveryFee.toFixed(2).replace('.', ',')}`
@@ -62,6 +76,7 @@ function buildWhatsAppMessage(order: StoredOrder): string {
     : '';
 
   return `🍔 *PEDIDO #${order.orderNumber} — The Burger GN*
+🕒 *Data/Hora:* ${formatDateTime(order.createdAt)}
 
 👤 *Cliente:* ${order.customerName}
 📱 *Telefone:* ${order.phone}
@@ -77,6 +92,7 @@ ${itemsText}
 💵 *TOTAL: R$ ${order.total.toFixed(2).replace('.', ',')}*
 ━━━━━━━━━━━━━━━━━
 💳 *Pagamento:* ${paymentText}
+✅ *Status do pagamento:* ${paymentStatusText}
 
 Aguardo confirmação! 🙏`;
 }
@@ -96,11 +112,16 @@ export default function Confirmation() {
     if (!raw) return;
     const stored = JSON.parse(raw) as StoredOrder;
     setOrder(stored);
-    const url = `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(buildWhatsAppMessage(stored))}`;
-    setWhatsappUrl(url);
-    clearCart();
     sessionStorage.removeItem('lastOrder');
-    setTimeout(() => { window.open(url, '_blank'); }, 1500);
+    getWhatsappSettings()
+      .then(s => s.number)
+      .catch(() => WHATSAPP_NUMBER)
+      .then(number => {
+        const url = `https://wa.me/${number}?text=${encodeURIComponent(buildWhatsAppMessage(stored))}`;
+        setWhatsappUrl(url);
+        setTimeout(() => { window.open(url, '_blank'); }, 1500);
+      });
+    clearCart();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

@@ -1,10 +1,11 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { paymentSettingsTable, externalLinksTable } from "@workspace/db";
+import { paymentSettingsTable, externalLinksTable, whatsappSettingsTable } from "@workspace/db";
 import { eq, asc } from "drizzle-orm";
 import { requireAdmin } from "../middlewares/auth";
 
 const router = Router();
+const DEFAULT_WHATSAPP_NUMBER = "5571996981707";
 
 function maskToken(token: string | null): string {
   if (!token) return "";
@@ -16,6 +17,13 @@ async function getOrCreatePaymentSettings() {
   const [existing] = await db.select().from(paymentSettingsTable).limit(1);
   if (existing) return existing;
   const [created] = await db.insert(paymentSettingsTable).values({}).returning();
+  return created;
+}
+
+async function getOrCreateWhatsappSettings() {
+  const [existing] = await db.select().from(whatsappSettingsTable).limit(1);
+  if (existing) return existing;
+  const [created] = await db.insert(whatsappSettingsTable).values({ number: DEFAULT_WHATSAPP_NUMBER }).returning();
   return created;
 }
 
@@ -31,6 +39,16 @@ router.get("/payment-settings", async (req, res) => {
     });
   } catch (err) {
     req.log.error({ err }, "Failed to get payment settings");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.get("/whatsapp-settings", async (req, res) => {
+  try {
+    const settings = await getOrCreateWhatsappSettings();
+    res.json({ number: settings.number || DEFAULT_WHATSAPP_NUMBER });
+  } catch (err) {
+    req.log.error({ err }, "Failed to get whatsapp settings");
     res.status(500).json({ error: "Internal server error" });
   }
 });
@@ -103,6 +121,38 @@ router.put("/admin/payment-settings", requireAdmin, async (req, res) => {
     res.json(toAdminPaymentSettings(updated));
   } catch (err) {
     req.log.error({ err }, "Failed to update payment settings");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ── Admin: WhatsApp settings ──────────────────────────────────────────────────
+
+router.get("/admin/whatsapp-settings", requireAdmin, async (req, res) => {
+  try {
+    const settings = await getOrCreateWhatsappSettings();
+    res.json(settings);
+  } catch (err) {
+    req.log.error({ err }, "Failed to get admin whatsapp settings");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.put("/admin/whatsapp-settings", requireAdmin, async (req, res) => {
+  try {
+    const { number } = req.body as { number?: string };
+    const digits = (number ?? "").replace(/\D/g, "");
+    if (!digits || digits.length < 10 || digits.length > 15) {
+      res.status(400).json({ error: "Número de WhatsApp inválido. Use o formato com DDI+DDD, ex: 5571999998888." });
+      return;
+    }
+    const settings = await getOrCreateWhatsappSettings();
+    const [updated] = await db.update(whatsappSettingsTable)
+      .set({ number: digits, updatedAt: new Date() })
+      .where(eq(whatsappSettingsTable.id, settings.id))
+      .returning();
+    res.json(updated);
+  } catch (err) {
+    req.log.error({ err }, "Failed to update whatsapp settings");
     res.status(500).json({ error: "Internal server error" });
   }
 });

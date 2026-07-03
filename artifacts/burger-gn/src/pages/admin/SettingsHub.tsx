@@ -4,12 +4,14 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   getAdminPaymentSettings, updatePaymentSettings, PaymentSettingsAdmin,
   getAdminExternalLinks, createExternalLink, updateExternalLink, deleteExternalLink, ExternalLink,
+  getAdminWhatsappSettings, updateWhatsappSettings,
 } from '../../lib/api';
 import { useAdmin } from '../../context/AdminContext';
 import {
   LayoutDashboard, UtensilsCrossed, Tag, MapPin, Navigation, Settings,
   LogOut, Plus, Pencil, Trash2, Check, X, ToggleLeft, ToggleRight,
   Loader2, CreditCard, Link as LinkIcon, ShieldAlert, ShieldCheck, Upload,
+  MessageCircle,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -41,7 +43,7 @@ function AdminNav({ active }: { active: string }) {
   );
 }
 
-type Tab = 'pagamento' | 'links';
+type Tab = 'pagamento' | 'links' | 'whatsapp';
 
 function PaymentTab() {
   const [settings, setSettings] = useState<PaymentSettingsAdmin | null>(null);
@@ -308,6 +310,68 @@ function LinksTab() {
   );
 }
 
+function WhatsappTab() {
+  const [number, setNumber] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [success, setSuccess] = useState(false);
+  const [error, setError] = useState('');
+
+  const load = async () => {
+    setLoading(true);
+    const s = await getAdminWhatsappSettings();
+    setNumber(s.number);
+    setLoading(false);
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const handleSave = async () => {
+    setSaving(true); setSuccess(false); setError('');
+    try {
+      const updated = await updateWhatsappSettings({ number: number.trim() });
+      setNumber(updated.number);
+      setSuccess(true);
+      setTimeout(() => setSuccess(false), 3000);
+    } catch {
+      setError('Número inválido. Use apenas dígitos com DDI e DDD (ex: 5571999998888).');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) return <div className="flex justify-center py-16"><div className="w-8 h-8 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" /></div>;
+
+  return (
+    <div className="space-y-5">
+      <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
+        <p className="text-zinc-500 text-xs leading-relaxed">
+          Cadastre o número oficial de WhatsApp da loja. Após finalizar o pedido, o cliente é redirecionado automaticamente para este número com a mensagem completa do pedido.
+        </p>
+      </div>
+
+      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-3">
+        <Label className="text-zinc-400 text-xs uppercase font-bold">Número do WhatsApp</Label>
+        <div className="space-y-1.5">
+          <Input value={number} onChange={e => setNumber(e.target.value)} placeholder="5571999998888"
+            className="bg-zinc-950 border-zinc-800 text-white h-11 text-sm focus:border-amber-500 font-mono" />
+          <p className="text-zinc-600 text-xs leading-relaxed">
+            Apenas números, com código do país e DDD (ex: 55 + 71 + número = 5571999998888). Sem espaços, traços ou parênteses.
+          </p>
+        </div>
+      </div>
+
+      {success && <p className="text-green-400 text-sm px-1 flex items-center gap-2"><Check size={16} /> Número salvo!</p>}
+      {error && <p className="text-red-400 text-sm px-1 flex items-center gap-2"><X size={16} /> {error}</p>}
+
+      <Button onClick={handleSave} disabled={saving}
+        className="w-full h-12 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold rounded-xl flex items-center justify-center gap-2">
+        {saving ? <Loader2 size={18} className="animate-spin" /> : <Check size={18} />} Salvar Número
+      </Button>
+    </div>
+  );
+}
+
 export default function SettingsHub() {
   const { logout } = useAdmin();
   const [, setLocation] = useLocation();
@@ -342,9 +406,13 @@ export default function SettingsHub() {
             className={`flex-1 h-11 rounded-xl font-bold text-sm uppercase tracking-wide transition-all flex items-center justify-center gap-2 ${tab === 'links' ? 'bg-amber-500 text-zinc-950' : 'bg-zinc-900 text-zinc-400 border border-zinc-800'}`}>
             <LinkIcon size={16} /> Links Externos
           </button>
+          <button onClick={() => setTab('whatsapp')}
+            className={`flex-1 h-11 rounded-xl font-bold text-sm uppercase tracking-wide transition-all flex items-center justify-center gap-2 ${tab === 'whatsapp' ? 'bg-amber-500 text-zinc-950' : 'bg-zinc-900 text-zinc-400 border border-zinc-800'}`}>
+            <MessageCircle size={16} /> WhatsApp
+          </button>
         </div>
 
-        {tab === 'pagamento' ? <PaymentTab /> : <LinksTab />}
+        {tab === 'pagamento' ? <PaymentTab /> : tab === 'links' ? <LinksTab /> : <WhatsappTab />}
       </main>
 
       <AdminNav active="/admin/config" />

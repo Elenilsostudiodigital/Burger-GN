@@ -182,7 +182,14 @@ export const adminLogin = (password: string) => api.post("/admin/login", { passw
 export const adminLogout = () => api.post("/admin/logout", {});
 export const adminMe = () => api.get("/admin/me") as Promise<{ authenticated: boolean }>;
 
+// ── WhatsApp Settings ─────────────────────────────────────────────────────────
+export interface WhatsappSettings { id: number; number: string; updatedAt: string; }
+export const getWhatsappSettings = () => api.get("/whatsapp-settings") as Promise<{ number: string }>;
+export const getAdminWhatsappSettings = () => api.get("/admin/whatsapp-settings") as Promise<WhatsappSettings>;
+export const updateWhatsappSettings = (d: { number: string }) => api.put("/admin/whatsapp-settings", d) as Promise<WhatsappSettings>;
+
 // ── Config ────────────────────────────────────────────────────────────────────
+// Fallback used only until the value configured in the admin panel is fetched.
 export const WHATSAPP_NUMBER = "5571996981707";
 
 export const ORDER_TYPE_LABELS: Record<OrderType, string> = { delivery: "Delivery", pickup: "Retirada no balcão", local: "Comer no local" };
