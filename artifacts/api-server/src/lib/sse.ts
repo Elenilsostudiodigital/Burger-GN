@@ -1,22 +1,30 @@
 import { Response } from "express";
 
-const clients = new Set<Response>();
+interface SSEClient {
+  res: Response;
+  companyId: number;
+}
 
-export function addSSEClient(res: Response) {
-  clients.add(res);
+const clients = new Set<SSEClient>();
+
+export function addSSEClient(res: Response, companyId: number) {
+  clients.add({ res, companyId });
 }
 
 export function removeSSEClient(res: Response) {
-  clients.delete(res);
+  for (const client of clients) {
+    if (client.res === res) clients.delete(client);
+  }
 }
 
-export function broadcastSSE(event: string, data: unknown) {
+export function broadcastSSE(companyId: number, event: string, data: unknown) {
   const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
-  for (const res of clients) {
+  for (const client of clients) {
+    if (client.companyId !== companyId) continue;
     try {
-      res.write(payload);
+      client.res.write(payload);
     } catch {
-      clients.delete(res);
+      clients.delete(client);
     }
   }
 }

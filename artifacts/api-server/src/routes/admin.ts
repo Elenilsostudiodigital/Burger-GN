@@ -1,9 +1,11 @@
 import { Router } from "express";
-import { requireAdmin } from "../middlewares/auth";
+import bcrypt from "bcryptjs";
+import { db, companyUsersTable, companiesTable } from "@workspace/db";
+import { eq } from "drizzle-orm";
+import { requireCompanyAuth } from "../middlewares/auth";
 
 const router = Router();
 
-const ADMIN_PASSWORD = process.env["ADMIN_PASSWORD"] || "burger123";
 const COOKIE_OPTS = {
   httpOnly: true,
   sameSite: "lax" as const,
@@ -12,23 +14,80 @@ const COOKIE_OPTS = {
   signed: true,
 };
 
-router.post("/admin/login", (req, res) => {
-  const { password } = req.body as { password?: string };
-  if (!password || password !== ADMIN_PASSWORD) {
-    res.status(401).json({ error: "Senha incorreta" });
+router.post("/admin/login", async (req, res) => {
+  const { email, password } = req.body as { email?: string; password?: string };
+  if (!email || !password) {
+    res.status(401).json({ error: "Informe e-mail e senha" });
     return;
   }
-  res.cookie("admin_session", "true", COOKIE_OPTS);
+
+  const [user] = await db
+    .select()
+    .from(companyUsersTable)
+    .where(eq(companyUsersTable.email, email.trim().toLowerCase()));
+
+  if (!user || !user.active) {
+    res.status(401).json({ error: "E-mail ou senha incorretos" });
+    return;
+  }
+
+  const matches = await bcrypt.compare(password, user.passwordHash);
+  if (!matches) {
+    res.status(401).json({ error: "E-mail ou senha incorretos" });
+    return;
+  }
+
+  const [company] = await db
+    .select()
+    .from(companiesTable)
+    .where(eq(companiesTable.id, user.companyId));
+
+  if (!company || company.status === "blocked") {
+    res.status(403).json({ error: "Empresa bloqueada. Entre em contato com o suporte." });
+    return;
+  }
+
+  res.cookie(
+    "company_session",
+    JSON.stringify({ companyId: user.companyId, userId: user.id }),
+    COOKIE_OPTS,
+  );
   res.json({ ok: true });
 });
 
 router.post("/admin/logout", (req, res) => {
-  res.clearCookie("admin_session", { path: "/" });
+  res.clearCookie("company_session", { path: "/" });
   res.json({ ok: true });
 });
 
-router.get("/admin/me", requireAdmin, (req, res) => {
-  res.json({ authenticated: true });
+router.get("/admin/me", requireCompanyAuth, async (req, res) => {
+  const [user] = await db
+    .select()
+    .from(companyUsersTable)
+    .where(eq(companyUsersTable.id, req.companyUserId!));
+  const [company] = await db
+    .select()
+    .from(companiesTable)
+    .where(eq(companiesTable.id, req.companyId!));
+
+  if (!user || !company) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+
+  res.json({
+    authenticated: true,
+    user: { id: user.id, name: user.name, email: user.email, role: user.role },
+    company: {
+      id: company.id,
+      name: company.name,
+      slug: company.slug,
+      logoUrl: company.logoUrl,
+      primaryColor: company.primaryColor,
+      secondaryColor: company.secondaryColor,
+      plan: company.plan,
+    },
+  });
 });
 
 export default router;

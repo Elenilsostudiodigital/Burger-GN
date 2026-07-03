@@ -3,7 +3,7 @@ import { companiesTable } from "./company";
 
 export const kmDeliveryConfigTable = pgTable("km_delivery_config", {
   id: serial("id").primaryKey(),
-  companyId: integer("company_id").references(() => companiesTable.id, { onDelete: "cascade" }),
+  companyId: integer("company_id").notNull().unique().references(() => companiesTable.id, { onDelete: "cascade" }),
   enabled: boolean("enabled").notNull().default(false),
   baseAddress: text("base_address").notNull().default(""),
   baseLat: numeric("base_lat", { precision: 12, scale: 8 }).notNull().default("0"),
@@ -16,7 +16,7 @@ export const kmDeliveryConfigTable = pgTable("km_delivery_config", {
 
 export const kmDeliveryTiersTable = pgTable("km_delivery_tiers", {
   id: serial("id").primaryKey(),
-  companyId: integer("company_id").references(() => companiesTable.id, { onDelete: "cascade" }),
+  companyId: integer("company_id").notNull().references(() => companiesTable.id, { onDelete: "cascade" }),
   fromKm: numeric("from_km", { precision: 10, scale: 2 }).notNull(),
   toKm: numeric("to_km", { precision: 10, scale: 2 }), // null = "above fromKm"
   fee: numeric("fee", { precision: 10, scale: 2 }),    // null = consult WhatsApp

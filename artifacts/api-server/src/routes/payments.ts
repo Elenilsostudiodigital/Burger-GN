@@ -1,6 +1,6 @@
 import { Router } from "express";
-import { db, ordersTable, paymentSettingsTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { db, ordersTable, paymentSettingsTable, companiesTable } from "@workspace/db";
+import { eq, and } from "drizzle-orm";
 import { fetchMPPayment } from "../lib/mercadopago";
 import { broadcastSSE } from "../lib/sse";
 
@@ -18,9 +18,13 @@ router.post("/payments/mercadopago/webhook", async (req, res) => {
     const body = req.body as { data?: { id?: string }; type?: string };
     const paymentId = query["data.id"] || query["id"] || body?.data?.id;
     const topic = query["type"] || query["topic"] || body?.type;
-    if (!paymentId || (topic && topic !== "payment")) return;
+    const companySlug = query["company"];
+    if (!paymentId || (topic && topic !== "payment") || !companySlug) return;
 
-    const [settings] = await db.select().from(paymentSettingsTable).limit(1);
+    const [company] = await db.select().from(companiesTable).where(eq(companiesTable.slug, companySlug));
+    if (!company) return;
+
+    const [settings] = await db.select().from(paymentSettingsTable).where(eq(paymentSettingsTable.companyId, company.id));
     if (!settings?.mercadoPagoAccessToken) return;
 
     const payment = await fetchMPPayment(settings.mercadoPagoAccessToken, String(paymentId));
@@ -30,11 +34,11 @@ router.post("/payments/mercadopago/webhook", async (req, res) => {
 
     const [order] = await db.update(ordersTable)
       .set({ paymentStatus, updatedAt: new Date() })
-      .where(eq(ordersTable.trackingId, payment.externalReference))
+      .where(and(eq(ordersTable.trackingId, payment.externalReference), eq(ordersTable.companyId, company.id)))
       .returning();
 
     if (order) {
-      broadcastSSE("order_payment", { id: order.id, trackingId: order.trackingId, paymentStatus: order.paymentStatus });
+      broadcastSSE(company.id, "order_payment", { id: order.id, trackingId: order.trackingId, paymentStatus: order.paymentStatus });
     }
   } catch (err) {
     req.log.error({ err }, "Failed to process Mercado Pago webhook");

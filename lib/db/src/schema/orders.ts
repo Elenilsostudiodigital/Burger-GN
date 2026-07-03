@@ -12,7 +12,7 @@ export const paymentStatusEnum = pgEnum("payment_status", ["pending", "paid", "f
 
 export const ordersTable = pgTable("orders", {
   id: serial("id").primaryKey(),
-  companyId: integer("company_id").references(() => companiesTable.id, { onDelete: "cascade" }),
+  companyId: integer("company_id").notNull().references(() => companiesTable.id, { onDelete: "cascade" }),
   orderNumber: integer("order_number").notNull(),
   trackingId: text("tracking_id").notNull().unique(),
   customerName: text("customer_name").notNull(),

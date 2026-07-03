@@ -1,8 +1,9 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
 import { couponsTable, ordersTable } from "@workspace/db";
-import { eq, sql, sum } from "drizzle-orm";
-import { requireAdmin } from "../middlewares/auth";
+import { eq, sql, and } from "drizzle-orm";
+import { requireCompanyAuth } from "../middlewares/auth";
+import { resolvePublicCompany } from "../middlewares/company";
 
 const router = Router();
 
@@ -14,7 +15,7 @@ function calcDiscount(discountType: "percentage" | "fixed", discountValue: numbe
 }
 
 // Validate coupon (public)
-router.post("/coupons/validate", async (req, res) => {
+router.post("/coupons/validate", resolvePublicCompany, async (req, res) => {
   try {
     const { code, subtotal } = req.body as { code: string; subtotal: number };
     if (!code || !subtotal) { res.status(400).json({ valid: false, message: "Dados inválidos" }); return; }
@@ -22,7 +23,7 @@ router.post("/coupons/validate", async (req, res) => {
     const [coupon] = await db
       .select()
       .from(couponsTable)
-      .where(sql`LOWER(code) = LOWER(${code})`);
+      .where(and(eq(couponsTable.companyId, req.companyId!), sql`LOWER(code) = LOWER(${code})`));
 
     if (!coupon) { res.json({ valid: false, message: "Cupom não encontrado" }); return; }
     if (!coupon.active) { res.json({ valid: false, message: "Cupom inativo" }); return; }
@@ -53,18 +54,20 @@ router.post("/coupons/validate", async (req, res) => {
 });
 
 // Stats (admin)
-router.get("/admin/coupons/stats", requireAdmin, async (req, res) => {
+router.get("/admin/coupons/stats", requireCompanyAuth, async (req, res) => {
   try {
     const [{ active }] = await db
       .select({ active: sql<number>`COUNT(*) FILTER (WHERE active = true)` })
-      .from(couponsTable);
+      .from(couponsTable)
+      .where(eq(couponsTable.companyId, req.companyId!));
     const [{ totalDiscount }] = await db
       .select({ totalDiscount: sql<string>`COALESCE(SUM(discount_amount), 0)` })
       .from(ordersTable)
-      .where(sql`coupon_code IS NOT NULL`);
+      .where(and(eq(ordersTable.companyId, req.companyId!), sql`coupon_code IS NOT NULL`));
     const [{ totalUses }] = await db
       .select({ totalUses: sql<number>`COALESCE(SUM(used_count), 0)` })
-      .from(couponsTable);
+      .from(couponsTable)
+      .where(eq(couponsTable.companyId, req.companyId!));
     res.json({ active: Number(active), totalDiscount: parseFloat(totalDiscount ?? "0"), totalUses: Number(totalUses) });
   } catch (err) {
     req.log.error({ err }, "Failed to fetch coupon stats");
@@ -73,9 +76,11 @@ router.get("/admin/coupons/stats", requireAdmin, async (req, res) => {
 });
 
 // List all coupons (admin)
-router.get("/admin/coupons", requireAdmin, async (req, res) => {
+router.get("/admin/coupons", requireCompanyAuth, async (req, res) => {
   try {
-    const coupons = await db.select().from(couponsTable).orderBy(couponsTable.createdAt);
+    const coupons = await db.select().from(couponsTable)
+      .where(eq(couponsTable.companyId, req.companyId!))
+      .orderBy(couponsTable.createdAt);
     res.json(coupons);
   } catch (err) {
     req.log.error({ err }, "Failed to list coupons");
@@ -84,7 +89,7 @@ router.get("/admin/coupons", requireAdmin, async (req, res) => {
 });
 
 // Create coupon (admin)
-router.post("/admin/coupons", requireAdmin, async (req, res) => {
+router.post("/admin/coupons", requireCompanyAuth, async (req, res) => {
   try {
     const body = req.body as {
       code: string;
@@ -99,6 +104,7 @@ router.post("/admin/coupons", requireAdmin, async (req, res) => {
       res.status(400).json({ error: "code, discountType and discountValue are required" }); return;
     }
     const [coupon] = await db.insert(couponsTable).values({
+      companyId: req.companyId!,
       code: body.code.toUpperCase().trim(),
       discountType: body.discountType,
       discountValue: body.discountValue,
@@ -116,7 +122,7 @@ router.post("/admin/coupons", requireAdmin, async (req, res) => {
 });
 
 // Update coupon (admin)
-router.put("/admin/coupons/:id", requireAdmin, async (req, res) => {
+router.put("/admin/coupons/:id", requireCompanyAuth, async (req, res) => {
   try {
     const id = Number(req.params["id"]);
     const body = req.body as Partial<{
@@ -131,7 +137,9 @@ router.put("/admin/coupons/:id", requireAdmin, async (req, res) => {
     const updateData: Record<string, unknown> = { ...body };
     if (body.code) updateData["code"] = body.code.toUpperCase().trim();
     if (body.expiresAt !== undefined) updateData["expiresAt"] = body.expiresAt ? new Date(body.expiresAt) : null;
-    const [coupon] = await db.update(couponsTable).set(updateData).where(eq(couponsTable.id, id)).returning();
+    const [coupon] = await db.update(couponsTable).set(updateData)
+      .where(and(eq(couponsTable.id, id), eq(couponsTable.companyId, req.companyId!)))
+      .returning();
     if (!coupon) { res.status(404).json({ error: "Not found" }); return; }
     res.json(coupon);
   } catch (err) {
@@ -141,10 +149,10 @@ router.put("/admin/coupons/:id", requireAdmin, async (req, res) => {
 });
 
 // Delete coupon (admin)
-router.delete("/admin/coupons/:id", requireAdmin, async (req, res) => {
+router.delete("/admin/coupons/:id", requireCompanyAuth, async (req, res) => {
   try {
     const id = Number(req.params["id"]);
-    await db.delete(couponsTable).where(eq(couponsTable.id, id));
+    await db.delete(couponsTable).where(and(eq(couponsTable.id, id), eq(couponsTable.companyId, req.companyId!)));
     res.json({ ok: true });
   } catch (err) {
     req.log.error({ err }, "Failed to delete coupon");

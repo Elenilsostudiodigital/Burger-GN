@@ -1,5 +1,6 @@
 import { MercadoPagoConfig, Payment, Preference } from "mercadopago";
 import { db, paymentSettingsTable } from "@workspace/db";
+import { eq } from "drizzle-orm";
 import { logger } from "./logger";
 
 export interface MPSettings {
@@ -8,8 +9,8 @@ export interface MPSettings {
   publicKey: string;
 }
 
-export async function getMPSettings(): Promise<MPSettings | null> {
-  const [settings] = await db.select().from(paymentSettingsTable).limit(1);
+export async function getMPSettings(companyId: number): Promise<MPSettings | null> {
+  const [settings] = await db.select().from(paymentSettingsTable).where(eq(paymentSettingsTable.companyId, companyId));
   if (!settings || !settings.onlinePaymentEnabled || !settings.mercadoPagoAccessToken) return null;
   return {
     onlinePaymentEnabled: settings.onlinePaymentEnabled,

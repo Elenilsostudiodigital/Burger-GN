@@ -7,7 +7,7 @@ export const discountTypeEnum = pgEnum("discount_type", ["percentage", "fixed"])
 
 export const couponsTable = pgTable("coupons", {
   id: serial("id").primaryKey(),
-  companyId: integer("company_id").references(() => companiesTable.id, { onDelete: "cascade" }),
+  companyId: integer("company_id").notNull().references(() => companiesTable.id, { onDelete: "cascade" }),
   code: text("code").notNull(),
   discountType: discountTypeEnum("discount_type").notNull(),
   discountValue: numeric("discount_value", { precision: 10, scale: 2 }).notNull(),

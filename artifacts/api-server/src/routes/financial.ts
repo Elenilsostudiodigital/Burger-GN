@@ -1,8 +1,8 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
 import { ordersTable, orderItemsTable, productsTable, categoriesTable } from "@workspace/db";
-import { and, gte, lte, eq, ne, inArray, isNotNull, sql, desc } from "drizzle-orm";
-import { requireAdmin } from "../middlewares/auth";
+import { and, gte, lte, eq, inArray, isNotNull, sql, desc } from "drizzle-orm";
+import { requireCompanyAuth } from "../middlewares/auth";
 
 const router = Router();
 
@@ -43,30 +43,32 @@ function startOfYear(d: Date): Date {
   return new Date(d.getFullYear(), 0, 1, 0, 0, 0, 0);
 }
 
-async function sumRevenueSince(since: Date): Promise<number> {
+async function sumRevenueSince(companyId: number, since: Date): Promise<number> {
   const [row] = await db
     .select({ total: sql<string>`COALESCE(SUM(${ordersTable.total}), 0)` })
     .from(ordersTable)
-    .where(and(eq(ordersTable.status, DONE), gte(ordersTable.createdAt, since)));
+    .where(and(eq(ordersTable.companyId, companyId), eq(ordersTable.status, DONE), gte(ordersTable.createdAt, since)));
   return parseFloat(row?.total ?? "0");
 }
 
-router.get("/admin/financial-report", requireAdmin, async (req, res) => {
+router.get("/admin/financial-report", requireCompanyAuth, async (req, res) => {
   try {
+    const companyId = req.companyId!;
     const now = new Date();
     const defaultFrom = startOfDay(new Date(now.getTime() - 29 * 24 * 60 * 60 * 1000));
     const from = startOfDay(parseDate(req.query["from"], defaultFrom));
     const to = endOfDay(parseDate(req.query["to"], now));
 
-    const periodFilter = and(gte(ordersTable.createdAt, from), lte(ordersTable.createdAt, to));
+    const companyFilter = eq(ordersTable.companyId, companyId);
+    const periodFilter = and(companyFilter, gte(ordersTable.createdAt, from), lte(ordersTable.createdAt, to));
     const periodDoneFilter = and(periodFilter, eq(ordersTable.status, DONE));
 
     // ── Fixed revenue cards (always "live", independent of the period filter) ──
     const [todayRevenue, weekRevenue, monthRevenue, yearRevenue] = await Promise.all([
-      sumRevenueSince(startOfDay(now)),
-      sumRevenueSince(startOfWeek(now)),
-      sumRevenueSince(startOfMonth(now)),
-      sumRevenueSince(startOfYear(now)),
+      sumRevenueSince(companyId, startOfDay(now)),
+      sumRevenueSince(companyId, startOfWeek(now)),
+      sumRevenueSince(companyId, startOfMonth(now)),
+      sumRevenueSince(companyId, startOfYear(now)),
     ]);
 
     // ── Order counts by status within the selected period ──
@@ -159,7 +161,7 @@ router.get("/admin/financial-report", requireAdmin, async (req, res) => {
       const firstOrders = await db
         .select({ phone: ordersTable.phone, first: sql<string>`MIN(${ordersTable.createdAt})` })
         .from(ordersTable)
-        .where(inArray(ordersTable.phone, phoneList))
+        .where(and(companyFilter, inArray(ordersTable.phone, phoneList)))
         .groupBy(ordersTable.phone);
       for (const row of firstOrders) {
         if (new Date(row.first) >= from) newCustomers++;
@@ -187,7 +189,7 @@ router.get("/admin/financial-report", requireAdmin, async (req, res) => {
         orders: sql<number>`COUNT(*)`,
       })
       .from(ordersTable)
-      .where(and(eq(ordersTable.status, DONE), gte(ordersTable.createdAt, twelveWeeksAgo)))
+      .where(and(companyFilter, eq(ordersTable.status, DONE), gte(ordersTable.createdAt, twelveWeeksAgo)))
       .groupBy(sql`DATE_TRUNC('week', ${ordersTable.createdAt})`)
       .orderBy(sql`DATE_TRUNC('week', ${ordersTable.createdAt})`);
 
@@ -199,7 +201,7 @@ router.get("/admin/financial-report", requireAdmin, async (req, res) => {
         orders: sql<number>`COUNT(*)`,
       })
       .from(ordersTable)
-      .where(and(eq(ordersTable.status, DONE), gte(ordersTable.createdAt, twelveMonthsAgo)))
+      .where(and(companyFilter, eq(ordersTable.status, DONE), gte(ordersTable.createdAt, twelveMonthsAgo)))
       .groupBy(sql`DATE_TRUNC('month', ${ordersTable.createdAt})`)
       .orderBy(sql`DATE_TRUNC('month', ${ordersTable.createdAt})`);
 
@@ -211,7 +213,7 @@ router.get("/admin/financial-report", requireAdmin, async (req, res) => {
         orders: sql<number>`COUNT(*)`,
       })
       .from(ordersTable)
-      .where(and(eq(ordersTable.status, DONE), gte(ordersTable.createdAt, fiveYearsAgo)))
+      .where(and(companyFilter, eq(ordersTable.status, DONE), gte(ordersTable.createdAt, fiveYearsAgo)))
       .groupBy(sql`DATE_TRUNC('year', ${ordersTable.createdAt})`)
       .orderBy(sql`DATE_TRUNC('year', ${ordersTable.createdAt})`);
 

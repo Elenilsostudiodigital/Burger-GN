@@ -5,7 +5,7 @@ import { companiesTable } from "./company";
 
 export const deliveryZonesTable = pgTable("delivery_zones", {
   id: serial("id").primaryKey(),
-  companyId: integer("company_id").references(() => companiesTable.id, { onDelete: "cascade" }),
+  companyId: integer("company_id").notNull().references(() => companiesTable.id, { onDelete: "cascade" }),
   neighborhood: text("neighborhood").notNull(),
   fee: numeric("fee", { precision: 10, scale: 2 }).notNull(),
   active: boolean("active").notNull().default(true),

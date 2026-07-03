@@ -2,16 +2,17 @@ import { Router } from "express";
 import { db } from "@workspace/db";
 import { productsTable, categoriesTable } from "@workspace/db";
 import { eq, asc, and } from "drizzle-orm";
-import { requireAdmin } from "../middlewares/auth";
+import { requireCompanyAuth } from "../middlewares/auth";
+import { resolvePublicCompany } from "../middlewares/company";
 
 const router = Router();
 
-router.get("/products", async (req, res) => {
+router.get("/products", resolvePublicCompany, async (req, res) => {
   try {
     const { category } = req.query as { category?: string };
-    const conditions = [eq(productsTable.available, true)];
+    const conditions = [eq(productsTable.companyId, req.companyId!), eq(productsTable.available, true)];
     if (category) {
-      const [cat] = await db.select().from(categoriesTable).where(eq(categoriesTable.slug, category));
+      const [cat] = await db.select().from(categoriesTable).where(and(eq(categoriesTable.companyId, req.companyId!), eq(categoriesTable.slug, category)));
       if (cat) conditions.push(eq(productsTable.categoryId, cat.id));
     }
     const products = await db
@@ -41,7 +42,7 @@ router.get("/products", async (req, res) => {
   }
 });
 
-router.get("/admin/products", requireAdmin, async (req, res) => {
+router.get("/admin/products", requireCompanyAuth, async (req, res) => {
   try {
     const products = await db
       .select({
@@ -61,6 +62,7 @@ router.get("/admin/products", requireAdmin, async (req, res) => {
       })
       .from(productsTable)
       .leftJoin(categoriesTable, eq(productsTable.categoryId, categoriesTable.id))
+      .where(eq(productsTable.companyId, req.companyId!))
       .orderBy(asc(productsTable.displayOrder));
     res.json(products);
   } catch (err) {
@@ -82,7 +84,7 @@ function sanitizeIngredients(raw: unknown): string[] {
   return raw.map(i => String(i).trim()).filter(i => i.length > 0);
 }
 
-router.post("/admin/products", requireAdmin, async (req, res) => {
+router.post("/admin/products", requireCompanyAuth, async (req, res) => {
   try {
     const { name, description, price, categoryId, image, videoUrl, ingredients, addons, available, displayOrder } = req.body as {
       name: string; description?: string; price: string; categoryId?: number; image?: string; videoUrl?: string;
@@ -90,6 +92,7 @@ router.post("/admin/products", requireAdmin, async (req, res) => {
     };
     if (!name || !price) { res.status(400).json({ error: "name and price are required" }); return; }
     const [prod] = await db.insert(productsTable).values({
+      companyId: req.companyId!,
       name, description: description ?? "", price, categoryId: categoryId ?? null, image: image ?? "",
       videoUrl: videoUrl ?? "", ingredients: sanitizeIngredients(ingredients), addons: sanitizeAddons(addons),
       available: available ?? true, displayOrder: displayOrder ?? 0,
@@ -101,7 +104,7 @@ router.post("/admin/products", requireAdmin, async (req, res) => {
   }
 });
 
-router.put("/admin/products/:id", requireAdmin, async (req, res) => {
+router.put("/admin/products/:id", requireCompanyAuth, async (req, res) => {
   try {
     const id = Number(req.params["id"]);
     const body = req.body as {
@@ -114,7 +117,7 @@ router.put("/admin/products/:id", requireAdmin, async (req, res) => {
     if (addons !== undefined) updateValues["addons"] = sanitizeAddons(addons);
     const [prod] = await db.update(productsTable)
       .set(updateValues)
-      .where(eq(productsTable.id, id))
+      .where(and(eq(productsTable.id, id), eq(productsTable.companyId, req.companyId!)))
       .returning();
     if (!prod) { res.status(404).json({ error: "Not found" }); return; }
     res.json(prod);
@@ -124,10 +127,10 @@ router.put("/admin/products/:id", requireAdmin, async (req, res) => {
   }
 });
 
-router.delete("/admin/products/:id", requireAdmin, async (req, res) => {
+router.delete("/admin/products/:id", requireCompanyAuth, async (req, res) => {
   try {
     const id = Number(req.params["id"]);
-    await db.delete(productsTable).where(eq(productsTable.id, id));
+    await db.delete(productsTable).where(and(eq(productsTable.id, id), eq(productsTable.companyId, req.companyId!)));
     res.json({ ok: true });
   } catch (err) {
     req.log.error({ err }, "Failed to delete product");

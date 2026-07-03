@@ -1,8 +1,8 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
 import { categoriesTable, productsTable } from "@workspace/db";
-import { eq, asc } from "drizzle-orm";
-import { requireAdmin } from "../middlewares/auth";
+import { eq, and } from "drizzle-orm";
+import { requireCompanyAuth } from "../middlewares/auth";
 
 const router = Router();
 
@@ -123,7 +123,7 @@ function parseMenuText(raw: string): { categories: DraftCategory[]; products: Dr
   return { categories, products };
 }
 
-router.post("/admin/import/parse", requireAdmin, (req, res) => {
+router.post("/admin/import/parse", requireCompanyAuth, (req, res) => {
   try {
     const { text } = req.body as { text?: string };
     if (!text || !text.trim()) {
@@ -138,7 +138,7 @@ router.post("/admin/import/parse", requireAdmin, (req, res) => {
   }
 });
 
-router.post("/admin/import/fetch-link", requireAdmin, async (req, res) => {
+router.post("/admin/import/fetch-link", requireCompanyAuth, async (req, res) => {
   try {
     const { url } = req.body as { url?: string };
     if (!url) { res.status(400).json({ error: "url is required" }); return; }
@@ -169,7 +169,7 @@ router.post("/admin/import/fetch-link", requireAdmin, async (req, res) => {
   }
 });
 
-router.post("/admin/import/commit", requireAdmin, async (req, res) => {
+router.post("/admin/import/commit", requireCompanyAuth, async (req, res) => {
   try {
     const { categories, products } = req.body as {
       categories: DraftCategory[];
@@ -180,7 +180,8 @@ router.post("/admin/import/commit", requireAdmin, async (req, res) => {
       return;
     }
 
-    const existingCategories = await db.select().from(categoriesTable);
+    const companyId = req.companyId!;
+    const existingCategories = await db.select().from(categoriesTable).where(eq(categoriesTable.companyId, companyId));
     const slugToId = new Map(existingCategories.map(c => [c.slug, c.id]));
     let categoriesCreated = 0;
     let maxOrder = existingCategories.reduce((m, c) => Math.max(m, c.displayOrder), -1);
@@ -189,7 +190,7 @@ router.post("/admin/import/commit", requireAdmin, async (req, res) => {
       if (slugToId.has(cat.slug)) continue;
       maxOrder += 1;
       const [created] = await db.insert(categoriesTable).values({
-        name: cat.name, slug: cat.slug, displayOrder: maxOrder,
+        companyId, name: cat.name, slug: cat.slug, displayOrder: maxOrder,
       }).returning();
       if (created) {
         slugToId.set(cat.slug, created.id);
@@ -197,7 +198,9 @@ router.post("/admin/import/commit", requireAdmin, async (req, res) => {
       }
     }
 
-    const existingProducts = await db.select({ name: productsTable.name, categoryId: productsTable.categoryId }).from(productsTable);
+    const existingProducts = await db.select({ name: productsTable.name, categoryId: productsTable.categoryId })
+      .from(productsTable)
+      .where(eq(productsTable.companyId, companyId));
     const existingKey = new Set(existingProducts.map(p => `${p.categoryId}::${p.name.toLowerCase().trim()}`));
 
     let productsCreated = 0;
@@ -211,6 +214,7 @@ router.post("/admin/import/commit", requireAdmin, async (req, res) => {
         continue;
       }
       await db.insert(productsTable).values({
+        companyId,
         name: prod.name,
         description: prod.description ?? "",
         price: prod.price.toFixed(2),

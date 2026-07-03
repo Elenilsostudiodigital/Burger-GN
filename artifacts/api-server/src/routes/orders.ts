@@ -1,8 +1,9 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { ordersTable, orderItemsTable, couponsTable, deliveryZonesTable, kmDeliveryConfigTable, kmDeliveryTiersTable, paymentSettingsTable, productsTable } from "@workspace/db";
-import { eq, desc, sql, asc, inArray } from "drizzle-orm";
-import { requireAdmin } from "../middlewares/auth";
+import { ordersTable, orderItemsTable, couponsTable, deliveryZonesTable, kmDeliveryConfigTable, kmDeliveryTiersTable, paymentSettingsTable, productsTable, companiesTable } from "@workspace/db";
+import { eq, and, desc, sql, asc, inArray } from "drizzle-orm";
+import { requireCompanyAuth } from "../middlewares/auth";
+import { resolvePublicCompany } from "../middlewares/company";
 import { addSSEClient, removeSSEClient, broadcastSSE } from "../lib/sse";
 import { calcDiscount } from "./coupons";
 import { haversineKm, findKmTier } from "./km_delivery";
@@ -12,14 +13,14 @@ import crypto from "node:crypto";
 const router = Router();
 
 // SSE stream for admin real-time notifications
-router.get("/orders/stream", requireAdmin, (req, res) => {
+router.get("/orders/stream", requireCompanyAuth, (req, res) => {
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
   res.setHeader("X-Accel-Buffering", "no");
   res.flushHeaders();
   res.write("event: connected\ndata: {}\n\n");
-  addSSEClient(res);
+  addSSEClient(res, req.companyId!);
   const heartbeat = setInterval(() => {
     try { res.write(": heartbeat\n\n"); } catch { clearInterval(heartbeat); }
   }, 25000);
@@ -27,8 +28,9 @@ router.get("/orders/stream", requireAdmin, (req, res) => {
 });
 
 // Create order (public)
-router.post("/orders", async (req, res) => {
+router.post("/orders", resolvePublicCompany, async (req, res) => {
   try {
+    const companyId = req.companyId!;
     const body = req.body as {
       customerName: string; phone: string;
       address?: string; addressNumber?: string; addressComplement?: string;
@@ -52,7 +54,7 @@ router.post("/orders", async (req, res) => {
 
     // Server-side payment validation: cash-on-delivery may be restricted by admin
     if (body.orderType === "delivery" && body.paymentMethod === "cash") {
-      const [paySettings] = await db.select().from(paymentSettingsTable).limit(1);
+      const [paySettings] = await db.select().from(paymentSettingsTable).where(eq(paymentSettingsTable.companyId, companyId));
       if (paySettings && !paySettings.cashOnDeliveryEnabled) {
         res.status(400).json({ error: "Pagamento em dinheiro não está disponível para entrega. Escolha Pix, cartão ou retire no balcão." });
         return;
@@ -64,7 +66,7 @@ router.post("/orders", async (req, res) => {
     // client payload cannot under-charge an order.
     const productIds = [...new Set(body.items.map(i => i.productId).filter((id): id is number => typeof id === "number"))];
     const dbProducts = productIds.length
-      ? await db.select().from(productsTable).where(inArray(productsTable.id, productIds))
+      ? await db.select().from(productsTable).where(and(eq(productsTable.companyId, companyId), inArray(productsTable.id, productIds)))
       : [];
     const productMap = new Map(dbProducts.map(p => [p.id, p]));
 
@@ -106,7 +108,7 @@ router.post("/orders", async (req, res) => {
     if (body.orderType === "delivery") {
       // 1) KM-based (if lat/lng provided and KM mode enabled)
       if (body.customerLat && body.customerLng) {
-        const [kmConfig] = await db.select().from(kmDeliveryConfigTable).limit(1);
+        const [kmConfig] = await db.select().from(kmDeliveryConfigTable).where(eq(kmDeliveryConfigTable.companyId, companyId));
         if (kmConfig && kmConfig.enabled) {
           const baseLat = parseFloat(kmConfig.baseLat);
           const baseLng = parseFloat(kmConfig.baseLng);
@@ -115,7 +117,7 @@ router.post("/orders", async (req, res) => {
             customerDistanceKm = parseFloat(distKm.toFixed(2));
             const maxDist = parseFloat(kmConfig.maxDistanceKm);
             if (distKm <= maxDist) {
-              const tiers = await db.select().from(kmDeliveryTiersTable).orderBy(asc(kmDeliveryTiersTable.displayOrder));
+              const tiers = await db.select().from(kmDeliveryTiersTable).where(eq(kmDeliveryTiersTable.companyId, companyId)).orderBy(asc(kmDeliveryTiersTable.displayOrder));
               const { fee } = findKmTier(distKm, tiers);
               if (fee !== null) deliveryFee = fee;
             }
@@ -128,7 +130,7 @@ router.post("/orders", async (req, res) => {
         const [zone] = await db
           .select()
           .from(deliveryZonesTable)
-          .where(sql`LOWER(neighborhood) = LOWER(${body.neighborhood}) AND active = true`);
+          .where(and(eq(deliveryZonesTable.companyId, companyId), sql`LOWER(neighborhood) = LOWER(${body.neighborhood})`));
         if (zone) deliveryFee = parseFloat(zone.fee);
       }
     }
@@ -140,7 +142,7 @@ router.post("/orders", async (req, res) => {
       const [coupon] = await db
         .select()
         .from(couponsTable)
-        .where(sql`LOWER(code) = LOWER(${body.couponCode})`);
+        .where(and(eq(couponsTable.companyId, companyId), sql`LOWER(code) = LOWER(${body.couponCode})`));
       if (
         coupon && coupon.active &&
         (!coupon.expiresAt || new Date(coupon.expiresAt) >= new Date()) &&
@@ -155,11 +157,12 @@ router.post("/orders", async (req, res) => {
     const total = Math.max(0, subtotal + deliveryFee - discountAmount);
     const trackingId = crypto.randomUUID();
 
-    const [{ maxNum }] = await db.select({ maxNum: sql<number>`COALESCE(MAX(order_number), 0)` }).from(ordersTable);
+    const [{ maxNum }] = await db.select({ maxNum: sql<number>`COALESCE(MAX(order_number), 0)` }).from(ordersTable).where(eq(ordersTable.companyId, companyId));
     const orderNumber = (Number(maxNum) || 0) + 1;
 
     const result = await db.transaction(async (tx) => {
       const [order] = await tx.insert(ordersTable).values({
+        companyId,
         orderNumber, trackingId,
         customerName: body.customerName, phone: body.phone,
         address: body.address ?? "", addressNumber: body.addressNumber ?? "",
@@ -190,7 +193,7 @@ router.post("/orders", async (req, res) => {
       if (validatedCouponCode) {
         await tx.update(couponsTable)
           .set({ usedCount: sql`used_count + 1` })
-          .where(sql`LOWER(code) = LOWER(${validatedCouponCode})`);
+          .where(and(eq(couponsTable.companyId, companyId), sql`LOWER(code) = LOWER(${validatedCouponCode})`));
       }
 
       return order;
@@ -201,12 +204,16 @@ router.post("/orders", async (req, res) => {
     let cardCheckoutUrl: string | null = null;
 
     if (body.paymentMethod === "pix" || body.paymentMethod === "card") {
-      const mp = await getMPSettings();
+      const mp = await getMPSettings(companyId);
       if (mp) {
         const protocol = req.get("x-forwarded-proto") ?? req.protocol;
         const host = req.get("host");
         const baseUrl = `${protocol}://${host}`;
-        const notificationUrl = `${baseUrl}/api/payments/mercadopago/webhook`;
+        const [company] = await db.select({ slug: companiesTable.slug }).from(companiesTable).where(eq(companiesTable.id, companyId));
+        // Mercado Pago webhooks only carry the payment id, not our tenant — embed the company
+        // slug in the notification URL so the webhook handler knows which company's access
+        // token to use to fetch the payment.
+        const notificationUrl = `${baseUrl}/api/payments/mercadopago/webhook?company=${encodeURIComponent(company?.slug ?? "")}`;
 
         if (body.paymentMethod === "pix") {
           const pix = await createPixPayment({
@@ -231,7 +238,7 @@ router.post("/orders", async (req, res) => {
     }
 
     const fullOrder = await getOrderWithItems(result.id);
-    broadcastSSE("new_order", fullOrder);
+    broadcastSSE(companyId, "new_order", fullOrder);
 
     res.status(201).json({
       ok: true, trackingId, orderNumber, orderId: result.id,
@@ -245,9 +252,11 @@ router.post("/orders", async (req, res) => {
 });
 
 // Get all orders (admin)
-router.get("/orders", requireAdmin, async (req, res) => {
+router.get("/orders", requireCompanyAuth, async (req, res) => {
   try {
-    const orders = await db.select().from(ordersTable).orderBy(desc(ordersTable.createdAt));
+    const orders = await db.select().from(ordersTable)
+      .where(eq(ordersTable.companyId, req.companyId!))
+      .orderBy(desc(ordersTable.createdAt));
     const ids = orders.map(o => o.id);
     if (ids.length === 0) { res.json([]); return; }
     const items = await db.select().from(orderItemsTable).where(inArray(orderItemsTable.orderId, ids));
@@ -258,7 +267,7 @@ router.get("/orders", requireAdmin, async (req, res) => {
   }
 });
 
-// Track order (public)
+// Track order (public) — trackingId is a globally-unique UUID, so no company scoping is required.
 router.get("/orders/track/:trackingId", async (req, res) => {
   try {
     const { trackingId } = req.params as { trackingId: string };
@@ -273,7 +282,7 @@ router.get("/orders/track/:trackingId", async (req, res) => {
 });
 
 // Update order status (admin)
-router.patch("/orders/:id/status", requireAdmin, async (req, res) => {
+router.patch("/orders/:id/status", requireCompanyAuth, async (req, res) => {
   try {
     const id = Number(req.params["id"]);
     const { status } = req.body as { status: "new" | "preparing" | "delivery" | "done" | "cancelled" };
@@ -282,10 +291,10 @@ router.patch("/orders/:id/status", requireAdmin, async (req, res) => {
     }
     const [order] = await db.update(ordersTable)
       .set({ status, updatedAt: new Date() })
-      .where(eq(ordersTable.id, id))
+      .where(and(eq(ordersTable.id, id), eq(ordersTable.companyId, req.companyId!)))
       .returning();
     if (!order) { res.status(404).json({ error: "Not found" }); return; }
-    broadcastSSE("order_status", { id: order.id, trackingId: order.trackingId, status: order.status });
+    broadcastSSE(req.companyId!, "order_status", { id: order.id, trackingId: order.trackingId, status: order.status });
     res.json(order);
   } catch (err) {
     req.log.error({ err }, "Failed to update order status");

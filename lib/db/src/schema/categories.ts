@@ -5,7 +5,7 @@ import { companiesTable } from "./company";
 
 export const categoriesTable = pgTable("categories", {
   id: serial("id").primaryKey(),
-  companyId: integer("company_id").references(() => companiesTable.id, { onDelete: "cascade" }),
+  companyId: integer("company_id").notNull().references(() => companiesTable.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
   slug: text("slug").notNull(),
   displayOrder: integer("display_order").notNull().default(0),

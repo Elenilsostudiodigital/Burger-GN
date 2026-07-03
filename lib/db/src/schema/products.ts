@@ -11,7 +11,7 @@ export interface ProductAddon {
 
 export const productsTable = pgTable("products", {
   id: serial("id").primaryKey(),
-  companyId: integer("company_id").references(() => companiesTable.id, { onDelete: "cascade" }),
+  companyId: integer("company_id").notNull().references(() => companiesTable.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
   description: text("description").notNull().default(""),
   price: numeric("price", { precision: 10, scale: 2 }).notNull(),

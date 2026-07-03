@@ -1,8 +1,9 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
 import { kmDeliveryConfigTable, kmDeliveryTiersTable } from "@workspace/db";
-import { eq, asc } from "drizzle-orm";
-import { requireAdmin } from "../middlewares/auth";
+import { eq, asc, and } from "drizzle-orm";
+import { requireCompanyAuth } from "../middlewares/auth";
+import { resolvePublicCompany } from "../middlewares/company";
 
 const router = Router();
 
@@ -35,11 +36,13 @@ export function findKmTier(
 // ── Public routes ─────────────────────────────────────────────────────────────
 
 // Get KM config + tiers (for checkout use)
-router.get("/delivery/km-config", async (req, res) => {
+router.get("/delivery/km-config", resolvePublicCompany, async (req, res) => {
   try {
-    const [config] = await db.select().from(kmDeliveryConfigTable).limit(1);
+    const [config] = await db.select().from(kmDeliveryConfigTable).where(eq(kmDeliveryConfigTable.companyId, req.companyId!));
     if (!config) { res.json({ enabled: false, tiers: [] }); return; }
-    const tiers = await db.select().from(kmDeliveryTiersTable).orderBy(asc(kmDeliveryTiersTable.displayOrder));
+    const tiers = await db.select().from(kmDeliveryTiersTable)
+      .where(eq(kmDeliveryTiersTable.companyId, req.companyId!))
+      .orderBy(asc(kmDeliveryTiersTable.displayOrder));
     res.json({ ...config, tiers });
   } catch (err) {
     req.log.error({ err }, "Failed to get km config");
@@ -48,14 +51,14 @@ router.get("/delivery/km-config", async (req, res) => {
 });
 
 // Calculate delivery fee by coordinates (public)
-router.post("/delivery/calculate-fee", async (req, res) => {
+router.post("/delivery/calculate-fee", resolvePublicCompany, async (req, res) => {
   try {
     const { lat, lng } = req.body as { lat: number; lng: number };
     if (typeof lat !== "number" || typeof lng !== "number") {
       res.status(400).json({ error: "lat and lng required" }); return;
     }
 
-    const [config] = await db.select().from(kmDeliveryConfigTable).limit(1);
+    const [config] = await db.select().from(kmDeliveryConfigTable).where(eq(kmDeliveryConfigTable.companyId, req.companyId!));
     if (!config || !config.enabled) { res.json({ enabled: false }); return; }
 
     const baseLat = parseFloat(config.baseLat);
@@ -73,7 +76,9 @@ router.post("/delivery/calculate-fee", async (req, res) => {
       }); return;
     }
 
-    const tiers = await db.select().from(kmDeliveryTiersTable).orderBy(asc(kmDeliveryTiersTable.displayOrder));
+    const tiers = await db.select().from(kmDeliveryTiersTable)
+      .where(eq(kmDeliveryTiersTable.companyId, req.companyId!))
+      .orderBy(asc(kmDeliveryTiersTable.displayOrder));
     const { fee, consult } = findKmTier(distanceKm, tiers);
 
     res.json({
@@ -92,10 +97,12 @@ router.post("/delivery/calculate-fee", async (req, res) => {
 // ── Admin routes ──────────────────────────────────────────────────────────────
 
 // Get config
-router.get("/admin/km-delivery", requireAdmin, async (req, res) => {
+router.get("/admin/km-delivery", requireCompanyAuth, async (req, res) => {
   try {
-    const [config] = await db.select().from(kmDeliveryConfigTable).limit(1);
-    const tiers = await db.select().from(kmDeliveryTiersTable).orderBy(asc(kmDeliveryTiersTable.displayOrder));
+    const [config] = await db.select().from(kmDeliveryConfigTable).where(eq(kmDeliveryConfigTable.companyId, req.companyId!));
+    const tiers = await db.select().from(kmDeliveryTiersTable)
+      .where(eq(kmDeliveryTiersTable.companyId, req.companyId!))
+      .orderBy(asc(kmDeliveryTiersTable.displayOrder));
     res.json({ config: config ?? null, tiers });
   } catch (err) {
     req.log.error({ err }, "Failed to get km delivery config");
@@ -104,22 +111,22 @@ router.get("/admin/km-delivery", requireAdmin, async (req, res) => {
 });
 
 // Update config (upsert)
-router.put("/admin/km-delivery", requireAdmin, async (req, res) => {
+router.put("/admin/km-delivery", requireCompanyAuth, async (req, res) => {
   try {
     const body = req.body as {
       enabled?: boolean; baseAddress?: string;
       baseLat?: string; baseLng?: string;
       minFee?: string; feePerKm?: string; maxDistanceKm?: string;
     };
-    const [existing] = await db.select().from(kmDeliveryConfigTable).limit(1);
+    const [existing] = await db.select().from(kmDeliveryConfigTable).where(eq(kmDeliveryConfigTable.companyId, req.companyId!));
     if (existing) {
       const [updated] = await db.update(kmDeliveryConfigTable)
         .set({ ...body, updatedAt: new Date() })
-        .where(eq(kmDeliveryConfigTable.id, existing.id))
+        .where(and(eq(kmDeliveryConfigTable.id, existing.id), eq(kmDeliveryConfigTable.companyId, req.companyId!)))
         .returning();
       res.json(updated);
     } else {
-      const [created] = await db.insert(kmDeliveryConfigTable).values({ ...body }).returning();
+      const [created] = await db.insert(kmDeliveryConfigTable).values({ ...body, companyId: req.companyId! }).returning();
       res.json(created);
     }
   } catch (err) {
@@ -129,9 +136,11 @@ router.put("/admin/km-delivery", requireAdmin, async (req, res) => {
 });
 
 // List tiers
-router.get("/admin/km-delivery/tiers", requireAdmin, async (req, res) => {
+router.get("/admin/km-delivery/tiers", requireCompanyAuth, async (req, res) => {
   try {
-    const tiers = await db.select().from(kmDeliveryTiersTable).orderBy(asc(kmDeliveryTiersTable.displayOrder));
+    const tiers = await db.select().from(kmDeliveryTiersTable)
+      .where(eq(kmDeliveryTiersTable.companyId, req.companyId!))
+      .orderBy(asc(kmDeliveryTiersTable.displayOrder));
     res.json(tiers);
   } catch (err) {
     req.log.error({ err }, "Failed to list tiers");
@@ -140,14 +149,14 @@ router.get("/admin/km-delivery/tiers", requireAdmin, async (req, res) => {
 });
 
 // Create tier
-router.post("/admin/km-delivery/tiers", requireAdmin, async (req, res) => {
+router.post("/admin/km-delivery/tiers", requireCompanyAuth, async (req, res) => {
   try {
     const { fromKm, toKm, fee, displayOrder } = req.body as {
       fromKm: string; toKm?: string | null; fee?: string | null; displayOrder?: number;
     };
     if (!fromKm) { res.status(400).json({ error: "fromKm is required" }); return; }
     const [tier] = await db.insert(kmDeliveryTiersTable).values({
-      fromKm, toKm: toKm ?? null, fee: fee ?? null, displayOrder: displayOrder ?? 0,
+      companyId: req.companyId!, fromKm, toKm: toKm ?? null, fee: fee ?? null, displayOrder: displayOrder ?? 0,
     }).returning();
     res.status(201).json(tier);
   } catch (err) {
@@ -157,7 +166,7 @@ router.post("/admin/km-delivery/tiers", requireAdmin, async (req, res) => {
 });
 
 // Update tier
-router.put("/admin/km-delivery/tiers/:id", requireAdmin, async (req, res) => {
+router.put("/admin/km-delivery/tiers/:id", requireCompanyAuth, async (req, res) => {
   try {
     const id = Number(req.params["id"]);
     const { fromKm, toKm, fee, displayOrder } = req.body as {
@@ -168,7 +177,9 @@ router.put("/admin/km-delivery/tiers/:id", requireAdmin, async (req, res) => {
     if (toKm !== undefined) patch["toKm"] = toKm;
     if (fee !== undefined) patch["fee"] = fee;
     if (displayOrder !== undefined) patch["displayOrder"] = displayOrder;
-    const [tier] = await db.update(kmDeliveryTiersTable).set(patch).where(eq(kmDeliveryTiersTable.id, id)).returning();
+    const [tier] = await db.update(kmDeliveryTiersTable).set(patch)
+      .where(and(eq(kmDeliveryTiersTable.id, id), eq(kmDeliveryTiersTable.companyId, req.companyId!)))
+      .returning();
     if (!tier) { res.status(404).json({ error: "Not found" }); return; }
     res.json(tier);
   } catch (err) {
@@ -178,10 +189,10 @@ router.put("/admin/km-delivery/tiers/:id", requireAdmin, async (req, res) => {
 });
 
 // Delete tier
-router.delete("/admin/km-delivery/tiers/:id", requireAdmin, async (req, res) => {
+router.delete("/admin/km-delivery/tiers/:id", requireCompanyAuth, async (req, res) => {
   try {
     const id = Number(req.params["id"]);
-    await db.delete(kmDeliveryTiersTable).where(eq(kmDeliveryTiersTable.id, id));
+    await db.delete(kmDeliveryTiersTable).where(and(eq(kmDeliveryTiersTable.id, id), eq(kmDeliveryTiersTable.companyId, req.companyId!)));
     res.json({ ok: true });
   } catch (err) {
     req.log.error({ err }, "Failed to delete tier");
