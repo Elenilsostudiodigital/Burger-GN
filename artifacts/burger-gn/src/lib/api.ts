@@ -192,6 +192,12 @@ export const updateWhatsappSettings = (d: { number: string }) => api.put("/admin
 // Fallback used only until the value configured in the admin panel is fetched.
 export const WHATSAPP_NUMBER = "5571996981707";
 
+export function normalizePhoneForWhatsapp(phone: string): string {
+  const digits = phone.replace(/\D/g, "");
+  if (digits.length === 10 || digits.length === 11) return `55${digits}`;
+  return digits;
+}
+
 export const ORDER_TYPE_LABELS: Record<OrderType, string> = { delivery: "Delivery", pickup: "Retirada no balcão", local: "Comer no local" };
 export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = { pix: "Pix", cash: "Dinheiro", card: "Cartão" };
 export const STATUS_LABELS: Record<OrderStatus, string> = { new: "Novo Pedido", preparing: "Em Preparo", delivery: "Saiu p/ Entrega", done: "Finalizado", cancelled: "Cancelado" };

@@ -2,3 +2,4 @@
 - [useRef TypeScript](useref-ts.md) — useRef with non-undefined generic type requires explicit initial value: useRef<T | undefined>(undefined), not useRef<T>().
 - [Delivery fee lookup](delivery-fee-lookup.md) — delivery fee is looked up from delivery_zones table by neighborhood at order creation time; no static DELIVERY_FEE constant in API anymore.
 - [Cart line composite keys](cart-line-composite-key.md) — key cart items by productId+addons+notes, not productId alone, when products support customization; always re-price server-side from DB.
+- [window.print() breaks e2e automation](window-print-e2e.md) — clicking a button that calls window.print() can hang/freeze automated browser tests; verify presence instead of clicking, or use popup-event handling.
