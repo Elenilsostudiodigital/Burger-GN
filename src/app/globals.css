@@ -1,0 +1,99 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg-deep: #1a1410;
+  --bg-warm: #2a2018;
+  --ember: #c45c26;
+  --flame: #e07a3a;
+  --cream: #f7f0e6;
+  --smoke: #3d3229;
+  --mustard: #d4a017;
+}
+
+html,
+body {
+  min-height: 100%;
+}
+
+body {
+  color: var(--cream);
+  background:
+    radial-gradient(ellipse 80% 50% at 10% -10%, rgba(196, 92, 38, 0.35), transparent 55%),
+    radial-gradient(ellipse 60% 40% at 90% 0%, rgba(212, 160, 23, 0.18), transparent 50%),
+    linear-gradient(180deg, #1a1410 0%, #241b14 45%, #1a1410 100%);
+  background-attachment: fixed;
+}
+
+@layer utilities {
+  .texture-grid {
+    background-image:
+      linear-gradient(rgba(247, 240, 230, 0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(247, 240, 230, 0.03) 1px, transparent 1px);
+    background-size: 48px 48px;
+  }
+
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-md bg-ember px-4 py-2.5 text-sm font-semibold text-cream transition hover:bg-flame disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 rounded-md border border-cream/20 bg-cream/5 px-4 py-2.5 text-sm font-medium text-cream transition hover:bg-cream/10 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .field {
+    @apply w-full rounded-md border border-cream/15 bg-charcoal/60 px-3 py-2 text-sm text-cream outline-none ring-ember/40 placeholder:text-cream/35 focus:border-ember focus:ring-2;
+  }
+
+  .panel {
+    @apply rounded-xl border border-cream/10 bg-smoke/40 backdrop-blur-sm;
+  }
+}
+
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes stamp-pop {
+  0% {
+    transform: scale(0.7);
+    opacity: 0;
+  }
+  60% {
+    transform: scale(1.08);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes glow-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(196, 92, 38, 0.35);
+  }
+  50% {
+    box-shadow: 0 0 28px 2px rgba(196, 92, 38, 0.25);
+  }
+}
+
+.animate-rise {
+  animation: rise-in 0.6s ease-out both;
+}
+
+.animate-stamp {
+  animation: stamp-pop 0.45s ease-out both;
+}
+
+.animate-glow {
+  animation: glow-pulse 2.8s ease-in-out infinite;
+}

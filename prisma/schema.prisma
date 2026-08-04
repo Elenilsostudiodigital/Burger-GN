@@ -1,0 +1,121 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Product {
+  id          String      @id @default(cuid())
+  name        String
+  description String      @default("")
+  priceCents  Int
+  category    String      @default("Hambúrgueres")
+  imageUrl    String?
+  active      Boolean     @default(true)
+  isReward    Boolean     @default(false)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  orderItems  OrderItem[]
+}
+
+model Customer {
+  id               String                @id @default(cuid())
+  name             String
+  phone            String                @unique
+  email            String?
+  cashbackBalanceCents Int               @default(0)
+  stampCount       Int                   @default(0)
+  freeBurgersAvailable Int               @default(0)
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
+  orders           Order[]
+  cashbackLedger   CashbackTransaction[]
+  stampLedger      StampTransaction[]
+}
+
+model Order {
+  id                    String      @id @default(cuid())
+  code                  String      @unique
+  status                String      @default("PENDING")
+  customerId            String?
+  customer              Customer?   @relation(fields: [customerId], references: [id])
+  customerName          String
+  customerPhone         String
+  subtotalCents         Int
+  cashbackUsedCents     Int         @default(0)
+  cashbackEarnedCents   Int         @default(0)
+  freeBurgerApplied     Boolean     @default(false)
+  stampAwarded          Boolean     @default(false)
+  totalCents            Int
+  notes                 String      @default("")
+  printedAt             DateTime?
+  acceptedAt            DateTime?
+  completedAt           DateTime?
+  createdAt             DateTime    @default(now())
+  updatedAt             DateTime    @updatedAt
+  items                 OrderItem[]
+}
+
+model OrderItem {
+  id              String   @id @default(cuid())
+  orderId         String
+  order           Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId       String?
+  product         Product? @relation(fields: [productId], references: [id])
+  name            String
+  unitPriceCents  Int
+  quantity        Int
+  isFreeReward    Boolean  @default(false)
+}
+
+model Printer {
+  id        String   @id @default(cuid())
+  name      String
+  host      String
+  port      Int      @default(9100)
+  paperWidth String  @default("80")
+  isDefault Boolean  @default(false)
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model AppSettings {
+  id                     Int      @id @default(1)
+  autoPrintOnAccept      Boolean  @default(true)
+  clubPurchasesRequired  Int      @default(12)
+  clubRewardProductId    String?
+  clubRewardProductName  String   @default("Hambúrguer Grátis")
+  cashbackPercent        Float    @default(3)
+  storeName              String   @default("Burger GN")
+  storePhone             String   @default("")
+  storeAddress           String   @default("")
+  updatedAt              DateTime @updatedAt
+}
+
+model CashbackTransaction {
+  id          String   @id @default(cuid())
+  customerId  String
+  customer    Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  orderId     String?
+  type        String
+  amountCents Int
+  balanceAfterCents Int
+  description String
+  createdAt   DateTime @default(now())
+}
+
+model StampTransaction {
+  id          String   @id @default(cuid())
+  customerId  String
+  customer    Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  orderId     String?
+  delta       Int
+  stampCountAfter Int
+  freeBurgersGranted Int @default(0)
+  description String
+  createdAt   DateTime @default(now())
+}
