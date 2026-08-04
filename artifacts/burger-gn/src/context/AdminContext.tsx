@@ -4,7 +4,7 @@ import { adminMe, adminLogin as apiLogin, adminLogout as apiLogout } from "../li
 interface AdminContextType {
   isAdmin: boolean;
   loading: boolean;
-  login: (password: string) => Promise<void>;
+  login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -21,8 +21,8 @@ export function AdminProvider({ children }: { children: React.ReactNode }) {
       .finally(() => setLoading(false));
   }, []);
 
-  const login = async (password: string) => {
-    await apiLogin(password);
+  const login = async (email: string, password: string) => {
+    await apiLogin(email, password);
     setIsAdmin(true);
   };
 

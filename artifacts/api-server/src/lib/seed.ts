@@ -1,6 +1,15 @@
 import { db } from "@workspace/db";
-import { categoriesTable, productsTable, deliveryZonesTable, kmDeliveryConfigTable, kmDeliveryTiersTable, paymentSettingsTable } from "@workspace/db";
-import { count } from "drizzle-orm";
+import {
+  companiesTable,
+  categoriesTable,
+  productsTable,
+  deliveryZonesTable,
+  kmDeliveryConfigTable,
+  kmDeliveryTiersTable,
+  paymentSettingsTable,
+  whatsappSettingsTable,
+} from "@workspace/db";
+import { count, eq, or } from "drizzle-orm";
 import { logger } from "./logger";
 
 const DEFAULT_CATEGORIES = [
@@ -32,48 +41,115 @@ const DEFAULT_KM_TIERS = [
   { fromKm: "2.1", toKm: "4", fee: "8.00", displayOrder: 1 },
   { fromKm: "4.1", toKm: "6", fee: "10.00", displayOrder: 2 },
   { fromKm: "6.1", toKm: "8", fee: "12.00", displayOrder: 3 },
-  { fromKm: "8.1", toKm: null, fee: null, displayOrder: 4 }, // consult WhatsApp
+  { fromKm: "8.1", toKm: null, fee: null, displayOrder: 4 },
 ];
+
+async function resolveDefaultCompanyId(): Promise<number | null> {
+  const [company] = await db
+    .select({ id: companiesTable.id })
+    .from(companiesTable)
+    .where(
+      or(
+        eq(companiesTable.isDefaultStorefront, true),
+        eq(companiesTable.slug, "burger-gn"),
+      ),
+    )
+    .limit(1);
+
+  return company?.id ?? null;
+}
 
 export async function runSeed() {
   try {
-    const [{ value: catCount }] = await db.select({ value: count() }).from(categoriesTable);
+    const companyId = await resolveDefaultCompanyId();
+    if (!companyId) {
+      logger.warn("No default company found — run migrate-multi-tenant before seeding");
+      return;
+    }
+
+    const [{ value: catCount }] = await db
+      .select({ value: count() })
+      .from(categoriesTable)
+      .where(eq(categoriesTable.companyId, companyId));
     if (Number(catCount) === 0) {
       logger.info("Seeding default categories...");
-      await db.insert(categoriesTable).values(DEFAULT_CATEGORIES);
+      await db.insert(categoriesTable).values(
+        DEFAULT_CATEGORIES.map((c) => ({ ...c, companyId })),
+      );
     }
 
-    const [{ value: prodCount }] = await db.select({ value: count() }).from(productsTable);
+    const [{ value: prodCount }] = await db
+      .select({ value: count() })
+      .from(productsTable)
+      .where(eq(productsTable.companyId, companyId));
     if (Number(prodCount) === 0) {
       logger.info("Seeding default products...");
-      const cats = await db.select().from(categoriesTable);
-      const catMap = Object.fromEntries(cats.map(c => [c.slug, c.id]));
-      await db.insert(productsTable).values(DEFAULT_PRODUCTS.map(p => ({
-        name: p.name, description: p.description, price: p.price, image: p.image,
-        categoryId: catMap[p.categorySlug] ?? null, displayOrder: p.displayOrder,
-      })));
+      const cats = await db
+        .select()
+        .from(categoriesTable)
+        .where(eq(categoriesTable.companyId, companyId));
+      const catMap = Object.fromEntries(cats.map((c) => [c.slug, c.id]));
+      await db.insert(productsTable).values(
+        DEFAULT_PRODUCTS.map((p) => ({
+          companyId,
+          name: p.name,
+          description: p.description,
+          price: p.price,
+          image: p.image,
+          categoryId: catMap[p.categorySlug] ?? null,
+          displayOrder: p.displayOrder,
+        })),
+      );
     }
 
-    const [{ value: zoneCount }] = await db.select({ value: count() }).from(deliveryZonesTable);
+    const [{ value: zoneCount }] = await db
+      .select({ value: count() })
+      .from(deliveryZonesTable)
+      .where(eq(deliveryZonesTable.companyId, companyId));
     if (Number(zoneCount) === 0) {
       logger.info("Seeding default delivery zones...");
-      await db.insert(deliveryZonesTable).values(DEFAULT_DELIVERY_ZONES);
+      await db.insert(deliveryZonesTable).values(
+        DEFAULT_DELIVERY_ZONES.map((z) => ({ ...z, companyId })),
+      );
     }
 
-    const [{ value: kmCount }] = await db.select({ value: count() }).from(kmDeliveryConfigTable);
+    const [{ value: kmCount }] = await db
+      .select({ value: count() })
+      .from(kmDeliveryConfigTable)
+      .where(eq(kmDeliveryConfigTable.companyId, companyId));
     if (Number(kmCount) === 0) {
       logger.info("Seeding KM delivery config...");
       await db.insert(kmDeliveryConfigTable).values({
-        enabled: false, baseAddress: "", baseLat: "0", baseLng: "0",
-        minFee: "5.00", feePerKm: "2.00", maxDistanceKm: "10.00",
+        companyId,
+        enabled: false,
+        baseAddress: "",
+        baseLat: "0",
+        baseLng: "0",
+        minFee: "5.00",
+        feePerKm: "2.00",
+        maxDistanceKm: "10.00",
       });
-      await db.insert(kmDeliveryTiersTable).values(DEFAULT_KM_TIERS);
+      await db.insert(kmDeliveryTiersTable).values(
+        DEFAULT_KM_TIERS.map((t) => ({ ...t, companyId })),
+      );
     }
 
-    const [{ value: paySettingsCount }] = await db.select({ value: count() }).from(paymentSettingsTable);
+    const [{ value: paySettingsCount }] = await db
+      .select({ value: count() })
+      .from(paymentSettingsTable)
+      .where(eq(paymentSettingsTable.companyId, companyId));
     if (Number(paySettingsCount) === 0) {
       logger.info("Seeding default payment settings...");
-      await db.insert(paymentSettingsTable).values({});
+      await db.insert(paymentSettingsTable).values({ companyId });
+    }
+
+    const [{ value: waCount }] = await db
+      .select({ value: count() })
+      .from(whatsappSettingsTable)
+      .where(eq(whatsappSettingsTable.companyId, companyId));
+    if (Number(waCount) === 0) {
+      logger.info("Seeding default WhatsApp settings...");
+      await db.insert(whatsappSettingsTable).values({ companyId, number: "" });
     }
 
     logger.info("Seed complete.");

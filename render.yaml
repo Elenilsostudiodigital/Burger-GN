@@ -1,0 +1,20 @@
+# Free-tier friendly single service (API + frontend)
+services:
+  - type: web
+    name: burger-gn
+    runtime: docker
+    plan: free
+    healthCheckPath: /api/healthz
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 8080
+      - key: STATIC_DIR
+        value: /app/public
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: DATABASE_URL
+        sync: false
+      - key: ADMIN_PASSWORD
+        value: burger123
