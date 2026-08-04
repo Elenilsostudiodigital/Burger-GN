@@ -11,7 +11,7 @@ import { useLocation } from 'wouter';
 import {
   LayoutDashboard, UtensilsCrossed, Plus, Pencil, Trash2, Check, X,
   ToggleLeft, ToggleRight, Loader2, Tag, MapPin, LogOut, Navigation, Settings, Upload,
-  TrendingUp,
+  TrendingUp, Crown,
 } from 'lucide-react';
 import type { Addon } from '../../lib/api';
 import { Button } from '@/components/ui/button';
@@ -434,6 +434,12 @@ export default function MenuAdmin() {
             <div className="flex flex-col items-center gap-0.5 py-2.5 text-zinc-500 hover:text-white transition-colors">
               <Tag size={18} />
               <span className="text-[9px] font-bold uppercase">Cupons</span>
+            </div>
+          </Link>
+          <Link href="/admin/clube" className="flex-1">
+            <div className="flex flex-col items-center gap-0.5 py-2.5 text-zinc-500 hover:text-white transition-colors">
+              <Crown size={18} />
+              <span className="text-[9px] font-bold uppercase">Clube Burger</span>
             </div>
           </Link>
           <Link href="/admin/taxas" className="flex-1">

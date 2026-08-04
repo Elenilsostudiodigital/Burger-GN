@@ -6,12 +6,17 @@
   "scripts": {
     "hello": "tsx ./src/hello.ts",
     "migrate-multi-tenant": "tsx ./src/migrate-multi-tenant.ts",
+    "migrate-clube": "tsx ./src/migrate-clube.ts",
+    "db:embedded": "tsx ./src/start-embedded-pg.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
     "@workspace/db": "workspace:*",
     "bcryptjs": "^3.0.2",
     "drizzle-orm": "catalog:"
+  },
+  "optionalDependencies": {
+    "embedded-postgres": "17.6.0-beta.15"
   },
   "devDependencies": {
     "@types/node": "catalog:",

@@ -178,7 +178,8 @@ export const updateExternalLink = (id: number, d: Partial<ExternalLink>) => api.
 export const deleteExternalLink = (id: number) => api.delete(`/admin/external-links/${id}`);
 
 // ── Admin Auth ────────────────────────────────────────────────────────────────
-export const adminLogin = (password: string) => api.post("/admin/login", { password });
+export const adminLogin = (email: string, password: string) =>
+  api.post("/admin/login", { email, password });
 export const adminLogout = () => api.post("/admin/logout", {});
 export const adminMe = () => api.get("/admin/me") as Promise<{ authenticated: boolean }>;
 
@@ -226,3 +227,160 @@ export const getFinancialReport = (from?: string, to?: string) => {
   const qs = params.toString();
   return api.get(`/admin/financial-report${qs ? `?${qs}` : ""}`) as Promise<FinancialReport>;
 };
+
+// ── Clube Burger ──────────────────────────────────────────────────────────────
+export type ClubeMemberTier = "bronze" | "prata" | "ouro" | "diamante";
+export type ClubeDiscountType = "percentage" | "fixed";
+
+export interface ClubeSettings {
+  id: number;
+  companyId: number;
+  enabled: boolean;
+  clubName: string;
+  welcomeMessage: string;
+  pointsPerReal: string;
+  pointsRedeemValue: string;
+  cashbackPercent: string;
+  cashbackMinOrder: string;
+  birthdayDiscountType: ClubeDiscountType;
+  birthdayDiscountValue: string;
+  birthdayDaysBefore: number;
+  birthdayDaysAfter: number;
+  earlyAccessHours: number;
+  updatedAt: string;
+}
+
+export interface ClubeMember {
+  id: number;
+  companyId: number;
+  name: string;
+  email: string;
+  phone: string;
+  birthDate: string | null;
+  points: number;
+  cashbackBalance: string;
+  tier: ClubeMemberTier;
+  active: boolean;
+  notes: string;
+  joinedAt: string;
+  createdAt: string;
+}
+
+export interface ClubeLoyaltyReward {
+  id: number;
+  companyId: number;
+  title: string;
+  description: string;
+  pointsCost: number;
+  active: boolean;
+  createdAt: string;
+}
+
+export interface ClubeExclusiveCoupon {
+  id: number;
+  companyId: number;
+  code: string;
+  title: string;
+  description: string;
+  discountType: ClubeDiscountType;
+  discountValue: string;
+  minOrderValue: string;
+  maxUses: number | null;
+  usedCount: number;
+  active: boolean;
+  expiresAt: string | null;
+  createdAt: string;
+}
+
+export interface ClubeBirthdayBenefit {
+  id: number;
+  companyId: number;
+  title: string;
+  description: string;
+  discountType: ClubeDiscountType;
+  discountValue: string;
+  active: boolean;
+  createdAt: string;
+}
+
+export interface ClubeEarlyPromotion {
+  id: number;
+  companyId: number;
+  title: string;
+  description: string;
+  discountType: ClubeDiscountType;
+  discountValue: string;
+  earlyAccessAt: string;
+  startsAt: string;
+  endsAt: string | null;
+  active: boolean;
+  createdAt: string;
+}
+
+export interface ClubeDashboard {
+  members: number;
+  activeMembers: number;
+  totalPoints: number;
+  totalCashback: number;
+  exclusiveCoupons: number;
+  activePromos: number;
+  loyaltyRewards: number;
+  upcomingBirthdays: ClubeMember[];
+}
+
+export interface ClubeCashbackData {
+  cashbackPercent: string;
+  cashbackMinOrder: string;
+  totalBalance: number;
+  membersWithBalance: ClubeMember[];
+}
+
+export const getClubeDashboard = () => api.get("/admin/clube/dashboard") as Promise<ClubeDashboard>;
+export const getClubeSettings = () => api.get("/admin/clube/settings") as Promise<ClubeSettings>;
+export const updateClubeSettings = (d: Partial<ClubeSettings>) =>
+  api.put("/admin/clube/settings", d) as Promise<ClubeSettings>;
+
+export const getClubeMembers = () => api.get("/admin/clube/members") as Promise<ClubeMember[]>;
+export const createClubeMember = (d: Partial<ClubeMember>) =>
+  api.post("/admin/clube/members", d) as Promise<ClubeMember>;
+export const updateClubeMember = (id: number, d: Partial<ClubeMember>) =>
+  api.put(`/admin/clube/members/${id}`, d) as Promise<ClubeMember>;
+export const deleteClubeMember = (id: number) => api.delete(`/admin/clube/members/${id}`);
+
+export const getClubeLoyalty = () => api.get("/admin/clube/loyalty") as Promise<ClubeLoyaltyReward[]>;
+export const createClubeLoyalty = (d: Partial<ClubeLoyaltyReward>) =>
+  api.post("/admin/clube/loyalty", d) as Promise<ClubeLoyaltyReward>;
+export const updateClubeLoyalty = (id: number, d: Partial<ClubeLoyaltyReward>) =>
+  api.put(`/admin/clube/loyalty/${id}`, d) as Promise<ClubeLoyaltyReward>;
+export const deleteClubeLoyalty = (id: number) => api.delete(`/admin/clube/loyalty/${id}`);
+
+export const getClubeCashback = () => api.get("/admin/clube/cashback") as Promise<ClubeCashbackData>;
+export const updateClubeCashback = (d: { cashbackPercent?: string; cashbackMinOrder?: string }) =>
+  api.put("/admin/clube/cashback", d) as Promise<ClubeSettings>;
+
+export const getClubeExclusiveCoupons = () =>
+  api.get("/admin/clube/exclusive-coupons") as Promise<ClubeExclusiveCoupon[]>;
+export const createClubeExclusiveCoupon = (d: Partial<ClubeExclusiveCoupon>) =>
+  api.post("/admin/clube/exclusive-coupons", d) as Promise<ClubeExclusiveCoupon>;
+export const updateClubeExclusiveCoupon = (id: number, d: Partial<ClubeExclusiveCoupon>) =>
+  api.put(`/admin/clube/exclusive-coupons/${id}`, d) as Promise<ClubeExclusiveCoupon>;
+export const deleteClubeExclusiveCoupon = (id: number) =>
+  api.delete(`/admin/clube/exclusive-coupons/${id}`);
+
+export const getClubeBirthdayBenefits = () =>
+  api.get("/admin/clube/birthday-benefits") as Promise<ClubeBirthdayBenefit[]>;
+export const createClubeBirthdayBenefit = (d: Partial<ClubeBirthdayBenefit>) =>
+  api.post("/admin/clube/birthday-benefits", d) as Promise<ClubeBirthdayBenefit>;
+export const updateClubeBirthdayBenefit = (id: number, d: Partial<ClubeBirthdayBenefit>) =>
+  api.put(`/admin/clube/birthday-benefits/${id}`, d) as Promise<ClubeBirthdayBenefit>;
+export const deleteClubeBirthdayBenefit = (id: number) =>
+  api.delete(`/admin/clube/birthday-benefits/${id}`);
+
+export const getClubeEarlyPromotions = () =>
+  api.get("/admin/clube/early-promotions") as Promise<ClubeEarlyPromotion[]>;
+export const createClubeEarlyPromotion = (d: Partial<ClubeEarlyPromotion>) =>
+  api.post("/admin/clube/early-promotions", d) as Promise<ClubeEarlyPromotion>;
+export const updateClubeEarlyPromotion = (id: number, d: Partial<ClubeEarlyPromotion>) =>
+  api.put(`/admin/clube/early-promotions/${id}`, d) as Promise<ClubeEarlyPromotion>;
+export const deleteClubeEarlyPromotion = (id: number) =>
+  api.delete(`/admin/clube/early-promotions/${id}`);

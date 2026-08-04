@@ -7,3 +7,4 @@ export * from "./coupons";
 export * from "./delivery_zones";
 export * from "./km_delivery";
 export * from "./settings";
+export * from "./clube";

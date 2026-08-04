@@ -4,7 +4,7 @@ import { useLocation } from 'wouter';
 import * as XLSX from 'xlsx';
 import {
   LayoutDashboard, UtensilsCrossed, Tag, MapPin, Navigation, Settings, LogOut,
-  Upload, Link as LinkIcon, FileText, Loader2, Check, X, AlertTriangle, Download, TrendingUp,
+  Upload, Link as LinkIcon, FileText, Loader2, Check, X, AlertTriangle, Download, TrendingUp, Crown,
 } from 'lucide-react';
 import { useAdmin } from '../../context/AdminContext';
 import { Button } from '@/components/ui/button';
@@ -308,6 +308,12 @@ export default function ImportMenu() {
             <div className="flex flex-col items-center gap-0.5 py-2.5 text-zinc-500 hover:text-white transition-colors">
               <Tag size={18} />
               <span className="text-[9px] font-bold uppercase">Cupons</span>
+            </div>
+          </Link>
+          <Link href="/admin/clube" className="flex-1 min-w-[14%]">
+            <div className="flex flex-col items-center gap-0.5 py-2.5 text-zinc-500 hover:text-white transition-colors">
+              <Crown size={18} />
+              <span className="text-[9px] font-bold uppercase">Clube Burger</span>
             </div>
           </Link>
           <Link href="/admin/taxas" className="flex-1 min-w-[14%]">

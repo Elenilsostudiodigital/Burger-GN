@@ -15,7 +15,7 @@ import {
   LayoutDashboard, UtensilsCrossed, LogOut, Bell, BellOff,
   Printer, Clock, CheckCircle2, MessageCircle,
   Bike, ChefHat, XCircle, Tag, MapPin, Navigation, Settings, Route, Upload, TrendingUp,
-  ChevronLeft, ChevronRight, GripVertical, Ban, X,
+  ChevronLeft, ChevronRight, GripVertical, Ban, X, Crown,
 } from 'lucide-react';
 
 type ColumnStatus = 'new' | 'preparing' | 'delivery' | 'done';
@@ -589,6 +589,12 @@ export default function AdminDashboard() {
             <div className="flex flex-col items-center gap-0.5 py-2.5 text-zinc-500 hover:text-white transition-colors">
               <Tag size={18} />
               <span className="text-[9px] font-bold uppercase">Cupons</span>
+            </div>
+          </Link>
+          <Link href="/admin/clube" className="flex-1">
+            <div className="flex flex-col items-center gap-0.5 py-2.5 text-zinc-500 hover:text-white transition-colors">
+              <Crown size={18} />
+              <span className="text-[9px] font-bold uppercase">Clube Burger</span>
             </div>
           </Link>
           <Link href="/admin/taxas" className="flex-1">

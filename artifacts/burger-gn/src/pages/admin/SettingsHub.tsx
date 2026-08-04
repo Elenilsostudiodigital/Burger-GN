@@ -11,7 +11,7 @@ import {
   LayoutDashboard, UtensilsCrossed, Tag, MapPin, Navigation, Settings,
   LogOut, Plus, Pencil, Trash2, Check, X, ToggleLeft, ToggleRight,
   Loader2, CreditCard, Link as LinkIcon, ShieldAlert, ShieldCheck, Upload,
-  MessageCircle, TrendingUp,
+  MessageCircle, TrendingUp, Crown,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -23,6 +23,7 @@ function AdminNav({ active }: { active: string }) {
     { href: '/admin/cardapio', icon: <UtensilsCrossed size={17} />, label: 'Cardápio' },
     { href: '/admin/financeiro', icon: <TrendingUp size={17} />, label: 'Financeiro' },
     { href: '/admin/cupons', icon: <Tag size={17} />, label: 'Cupons' },
+    { href: '/admin/clube', icon: <Crown size={17} />, label: 'Clube Burger' },
     { href: '/admin/taxas', icon: <MapPin size={17} />, label: 'Bairros' },
     { href: '/admin/entrega-km', icon: <Navigation size={17} />, label: 'Por KM' },
     { href: '/admin/config', icon: <Settings size={17} />, label: 'Config' },
