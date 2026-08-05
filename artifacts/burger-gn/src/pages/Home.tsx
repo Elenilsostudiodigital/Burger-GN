@@ -28,7 +28,7 @@ export default function Home() {
             The Burger <span className="text-primary block mt-1">GN</span>
           </h1>
           <p className="text-zinc-400 text-lg max-w-[280px] mx-auto font-medium leading-tight">
-            Hambúrguer artesanal feito para matar sua fome de verdade.
+            Hambúrguer artesanal feito na brasa, para matar sua fome de verdade.
           </p>
         </motion.div>
 
