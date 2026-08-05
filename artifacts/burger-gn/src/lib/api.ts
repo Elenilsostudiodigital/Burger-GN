@@ -131,9 +131,49 @@ export async function geocodeAddress(address: string): Promise<{ lat: number; ln
     const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}&limit=1&countrycodes=br`;
     const res = await fetch(url, { headers: { "Accept-Language": "pt-BR", "User-Agent": "TheBurgerGN/1.0" } });
     const data = await res.json() as Array<{ lat: string; lon: string }>;
-    if (!data[0]) return null;
-    return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
+    if (!Array.isArray(data) || !data[0]) return null;
+    const lat = parseFloat(data[0].lat);
+    const lng = parseFloat(data[0].lon);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+    return { lat, lng };
   } catch { return null; }
+}
+
+export interface ReverseGeocodeResult {
+  endereco: string;
+  numero: string;
+  bairro: string;
+  displayName: string;
+}
+
+/** Resolve street/neighborhood from GPS coords for delivery checkout. */
+export async function reverseGeocode(lat: number, lng: number): Promise<ReverseGeocodeResult | null> {
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  try {
+    const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}&addressdetails=1&zoom=18`;
+    const res = await fetch(url, { headers: { "Accept-Language": "pt-BR", "User-Agent": "TheBurgerGN/1.0" } });
+    const data = await res.json() as {
+      display_name?: string;
+      address?: {
+        road?: string; pedestrian?: string; residential?: string; street?: string;
+        house_number?: string; suburb?: string; neighbourhood?: string; city_district?: string;
+        quarter?: string; village?: string;
+      };
+    };
+    const addr = data?.address;
+    if (!addr) return null;
+    const endereco = addr.road || addr.pedestrian || addr.residential || addr.street || "";
+    const numero = addr.house_number || "S/N";
+    const bairro = addr.suburb || addr.neighbourhood || addr.city_district || addr.quarter || addr.village || "";
+    return {
+      endereco,
+      numero,
+      bairro,
+      displayName: data.display_name || [endereco, numero, bairro].filter(Boolean).join(", "),
+    };
+  } catch {
+    return null;
+  }
 }
 
 // ── Orders ────────────────────────────────────────────────────────────────────
@@ -253,7 +293,11 @@ export function normalizePhoneForWhatsapp(phone: string): string {
   return digits;
 }
 
-export const ORDER_TYPE_LABELS: Record<OrderType, string> = { delivery: "Delivery", pickup: "Retirada no balcão", local: "Comer no local" };
+export const ORDER_TYPE_LABELS: Record<OrderType, string> = {
+  local: "Consumir na loja",
+  pickup: "Retirar no balcão",
+  delivery: "Receber em casa",
+};
 export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = { pix: "Pix", cash: "Dinheiro", card: "Cartão" };
 export const CARD_TYPE_LABELS: Record<CardType, string> = { credit: "Crédito", debit: "Débito" };
 export const STATUS_LABELS: Record<OrderStatus, string> = { new: "Novo Pedido", preparing: "Em Preparo", delivery: "Saiu p/ Entrega", done: "Finalizado", cancelled: "Cancelado" };

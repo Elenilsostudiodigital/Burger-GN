@@ -1,16 +1,15 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useLocation } from 'wouter';
-import { useForm } from 'react-hook-form';
 import { useCart } from '../context/CartContext';
 import { PageTransition } from '../components/PageTransition';
 import {
-  createOrder, validateCoupon, getDeliveryZones, getDeliveryFee, getKmDeliveryConfig, geocodeAddress,
-  haversineKm, findKmTier, getPaymentSettings, getWhatsappSettings,
+  createOrder, validateCoupon, getDeliveryZones, getDeliveryFee, getKmDeliveryConfig,
+  geocodeAddress, reverseGeocode, haversineKm, findKmTier, getPaymentSettings, getWhatsappSettings,
   WHATSAPP_NUMBER, ValidateCouponResult, DeliveryZone, KmDeliveryConfig, PaymentSettingsPublic,
 } from '../lib/api';
 import {
   ArrowLeft, Bike, Store, Utensils, CreditCard, Banknote, QrCode,
-  Loader2, Tag, X, CheckCircle2, MapPin, AlertCircle, ChevronDown, LocateFixed, Navigation,
+  Loader2, Tag, X, CheckCircle2, MapPin, AlertCircle, ChevronDown, LocateFixed, Navigation, Home,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -20,69 +19,93 @@ import { motion, AnimatePresence } from 'framer-motion';
 type OrderType = 'delivery' | 'pickup' | 'local';
 type PaymentMethod = 'pix' | 'cash' | 'card';
 type CardType = 'credit' | 'debit';
+type CheckoutStep = 'fulfillment' | 'contact' | 'address_method' | 'gps' | 'manual' | 'payment';
+type AddressMode = 'gps' | 'manual' | null;
 
-interface CheckoutFormData {
-  nome: string; telefone: string;
-  endereco: string; numero: string; complemento: string;
-  bairro: string; referencia: string;
-  observacoes: string; troco: string;
+interface FormState {
+  nome: string;
+  telefone: string;
+  endereco: string;
+  numero: string;
+  complemento: string;
+  bairro: string;
+  referencia: string;
+  observacoes: string;
+  troco: string;
+}
+
+const EMPTY_FORM: FormState = {
+  nome: '', telefone: '', endereco: '', numero: '', complemento: '',
+  bairro: '', referencia: '', observacoes: '', troco: '',
+};
+
+const LOCAL_PLACEHOLDER = { nome: 'Cliente na loja', telefone: '00000000000' };
+
+function formatPhone(v: string | null | undefined) {
+  const raw = String(v ?? '');
+  const n = raw.replace(/\D/g, '').slice(0, 11);
+  if (n.length <= 2) return n;
+  if (n.length <= 7) return `(${n.slice(0, 2)}) ${n.slice(2)}`;
+  return `(${n.slice(0, 2)}) ${n.slice(2, 7)}-${n.slice(7)}`;
+}
+
+function mapEmbedUrl(lat: number, lng: number) {
+  const d = 0.012;
+  return `https://www.openstreetmap.org/export/embed.html?bbox=${lng - d}%2C${lat - d}%2C${lng + d}%2C${lat + d}&layer=mapnik&marker=${lat}%2C${lng}`;
 }
 
 export default function Checkout() {
   const [, setLocation] = useLocation();
   const { cartItems, subtotal } = useCart();
-  const [orderType, setOrderType] = useState<OrderType>('delivery');
+
+  const [step, setStep] = useState<CheckoutStep>('fulfillment');
+  const [orderType, setOrderType] = useState<OrderType | null>(null);
+  const [addressMode, setAddressMode] = useState<AddressMode>(null);
+  const [form, setForm] = useState<FormState>(EMPTY_FORM);
+  const [fieldError, setFieldError] = useState('');
+
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('pix');
   const [cardType, setCardType] = useState<CardType>('credit');
   const [needsChange, setNeedsChange] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
 
-  // Delivery zones (neighborhood fallback)
   const [zones, setZones] = useState<DeliveryZone[]>([]);
-  const [deliveryFee, setDeliveryFee] = useState<number>(0);
+  const [deliveryFee, setDeliveryFee] = useState(0);
   const [feeLoading, setFeeLoading] = useState(false);
   const [feeMessage, setFeeMessage] = useState('');
   const [feeFound, setFeeFound] = useState<boolean | null>(null);
   const feeDebounce = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
-  // KM delivery (GPS/geocoding)
   const [kmConfig, setKmConfig] = useState<KmDeliveryConfig | null>(null);
   const kmEnabled = !!kmConfig?.enabled;
   const [customerCoords, setCustomerCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [distanceKm, setDistanceKm] = useState<number | null>(null);
   const [gpsLoading, setGpsLoading] = useState(false);
   const [gpsError, setGpsError] = useState('');
+  const [locationLabel, setLocationLabel] = useState('');
 
-  // Payment settings
   const [paySettings, setPaySettings] = useState<PaymentSettingsPublic | null>(null);
   const [waNumber, setWaNumber] = useState(WHATSAPP_NUMBER);
 
-  // Coupon
   const [couponInput, setCouponInput] = useState('');
   const [appliedCoupon, setAppliedCoupon] = useState<ValidateCouponResult | null>(null);
   const [couponLoading, setCouponLoading] = useState(false);
   const [couponError, setCouponError] = useState('');
 
-  const { register, handleSubmit, watch, setValue, formState: { errors } } = useForm<CheckoutFormData>({
-    defaultValues: {
-      nome: '',
-      telefone: '',
-      endereco: '',
-      numero: '',
-      complemento: '',
-      bairro: '',
-      referencia: '',
-      observacoes: '',
-      troco: '',
-    },
-  });
-  const bairroValue = watch('bairro');
-  const enderecoValue = watch('endereco');
-  const numeroValue = watch('numero');
+  const isDelivery = orderType === 'delivery';
+  const usingKm = isDelivery && kmEnabled && customerCoords !== null;
+  const discount = appliedCoupon?.discountAmount ?? 0;
+  const total = Math.max(0, subtotal + (isDelivery ? deliveryFee : 0) - discount);
+  const fmt = (v: number) => `R$ ${v.toFixed(2).replace('.', ',')}`;
+  const cashBlockedForDelivery = isDelivery && paySettings !== null && !paySettings.cashOnDeliveryEnabled;
+
+  const setField = useCallback(<K extends keyof FormState>(key: K, value: FormState[K]) => {
+    setForm(prev => ({ ...prev, [key]: value }));
+    setFieldError('');
+  }, []);
 
   useEffect(() => {
-    // Ensure leftover modal lock never blocks typing on checkout inputs.
     document.body.style.overflow = '';
     document.body.classList.remove('modal-open');
     getDeliveryZones().then(list => setZones(Array.isArray(list) ? list : [])).catch(() => setZones([]));
@@ -91,55 +114,26 @@ export default function Checkout() {
     getWhatsappSettings().then(s => setWaNumber(s?.number || WHATSAPP_NUMBER)).catch(() => {});
   }, []);
 
-  // Cash restricted for delivery unless admin allows — auto-switch away if needed
   useEffect(() => {
     if (orderType === 'delivery' && paymentMethod === 'cash' && paySettings && !paySettings.cashOnDeliveryEnabled) {
       setPaymentMethod('pix');
     }
   }, [orderType, paymentMethod, paySettings]);
 
-  // Neighborhood-based fee lookup (used only when KM mode is off, or as fallback with no GPS)
   useEffect(() => {
-    if (orderType !== 'delivery' || kmEnabled || customerCoords || !bairroValue?.trim()) {
-      if (!kmEnabled) { /* keep neighborhood flow */ } else return;
-    }
-    if (orderType !== 'delivery' || customerCoords || !bairroValue?.trim() || bairroValue === '__outro__') {
-      if (!customerCoords) { setDeliveryFee(0); setFeeMessage(''); setFeeFound(null); }
-      return;
-    }
-    clearTimeout(feeDebounce.current);
-    feeDebounce.current = setTimeout(async () => {
-      setFeeLoading(true);
-      try {
-        const result = await getDeliveryFee(bairroValue.trim());
-        if (result.found && result.fee !== null) {
-          setDeliveryFee(result.fee);
-          setFeeMessage('');
-          setFeeFound(true);
-        } else {
-          setDeliveryFee(0);
-          setFeeMessage(result.message ?? 'Consulte a taxa de entrega pelo WhatsApp.');
-          setFeeFound(false);
-        }
-      } catch {
-        setFeeFound(null);
-      } finally {
-        setFeeLoading(false);
-      }
-    }, 500);
-    return () => clearTimeout(feeDebounce.current);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bairroValue, orderType, customerCoords, kmEnabled]);
+    if (cartItems.length === 0 && !submitting) setLocation('/cardapio');
+  }, [cartItems.length, submitting, setLocation]);
 
-  const isDelivery = orderType === 'delivery';
-  const usingKm = isDelivery && kmEnabled && customerCoords !== null;
-
-  const applyCoordinates = (lat: number, lng: number) => {
+  const applyCoordinates = useCallback((lat: number, lng: number) => {
     try {
       if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
       setCustomerCoords({ lat, lng });
       setGpsError('');
-      if (!kmConfig?.enabled) return;
+
+      if (!kmConfig?.enabled) {
+        // Neighborhood fee is resolved after reverse-geocode fills `bairro`.
+        return;
+      }
 
       const baseLat = parseFloat(String(kmConfig.baseLat ?? '0'));
       const baseLng = parseFloat(String(kmConfig.baseLng ?? '0'));
@@ -180,29 +174,59 @@ export default function Checkout() {
       setFeeFound(false);
       setFeeMessage('Não foi possível calcular a taxa de entrega. Consulte pelo WhatsApp.');
     }
-  };
+  }, [kmConfig]);
 
-  const handleUseLocation = () => {
-    if (!navigator.geolocation) { setGpsError('Seu navegador não suporta localização.'); return; }
-    setGpsLoading(true); setGpsError('');
-    navigator.geolocation.getCurrentPosition(
-      pos => { applyCoordinates(pos.coords.latitude, pos.coords.longitude); setGpsLoading(false); },
-      () => { setGpsError('Não foi possível obter sua localização. Preencha o endereço manualmente.'); setGpsLoading(false); },
-      { enableHighAccuracy: true, timeout: 10000 }
-    );
-  };
-
-  // Fallback: geocode typed address when KM mode is on and user hasn't used GPS
+  // Neighborhood fee when KM coords are not driving the fee
   useEffect(() => {
-    if (!kmEnabled || !isDelivery || customerCoords || !enderecoValue?.trim() || !numeroValue?.trim() || !bairroValue?.trim() || bairroValue === '__outro__') return;
+    if (step !== 'manual' && step !== 'payment') return;
+    if (!isDelivery || customerCoords || !form.bairro?.trim() || form.bairro === '__outro__') {
+      if (!customerCoords && step === 'manual') {
+        setDeliveryFee(0);
+        setFeeMessage('');
+        setFeeFound(null);
+      }
+      return;
+    }
+    if (kmEnabled) return;
+
     clearTimeout(feeDebounce.current);
     feeDebounce.current = setTimeout(async () => {
       setFeeLoading(true);
       try {
-        const fullAddr = `${enderecoValue}, ${numeroValue}, ${bairroValue}, Lauro de Freitas, Bahia, Brasil`;
+        const result = await getDeliveryFee(form.bairro.trim());
+        if (result.found && result.fee !== null) {
+          setDeliveryFee(result.fee);
+          setFeeMessage('');
+          setFeeFound(true);
+        } else {
+          setDeliveryFee(0);
+          setFeeMessage(result.message ?? 'Consulte a taxa de entrega pelo WhatsApp.');
+          setFeeFound(false);
+        }
+      } catch {
+        setFeeFound(null);
+      } finally {
+        setFeeLoading(false);
+      }
+    }, 400);
+    return () => clearTimeout(feeDebounce.current);
+  }, [form.bairro, isDelivery, customerCoords, kmEnabled, step]);
+
+  // Geocode manual address once fields are complete (KM mode)
+  useEffect(() => {
+    if (step !== 'manual' || !kmEnabled || !isDelivery) return;
+    if (!form.endereco?.trim() || !form.numero?.trim() || !form.bairro?.trim() || form.bairro === '__outro__') return;
+
+    clearTimeout(feeDebounce.current);
+    feeDebounce.current = setTimeout(async () => {
+      setFeeLoading(true);
+      try {
+        const fullAddr = `${form.endereco}, ${form.numero}, ${form.bairro}, Lauro de Freitas, Bahia, Brasil`;
         const coords = await geocodeAddress(fullAddr);
         if (coords) applyCoordinates(coords.lat, coords.lng);
         else {
+          setCustomerCoords(null);
+          setDistanceKm(null);
           setFeeFound(false);
           setFeeMessage('Não foi possível localizar este endereço automaticamente. Consulte a taxa pelo WhatsApp.');
         }
@@ -215,24 +239,186 @@ export default function Checkout() {
       }
     }, 900);
     return () => clearTimeout(feeDebounce.current);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enderecoValue, numeroValue, bairroValue, kmEnabled, isDelivery, customerCoords]);
+  }, [form.endereco, form.numero, form.bairro, kmEnabled, isDelivery, step, applyCoordinates]);
 
-  const discount = appliedCoupon?.discountAmount ?? 0;
-  const total = Math.max(0, subtotal + (isDelivery ? deliveryFee : 0) - discount);
-  const fmt = (v: number) => `R$ ${v.toFixed(2).replace('.', ',')}`;
+  const resetDeliveryState = () => {
+    setCustomerCoords(null);
+    setDistanceKm(null);
+    setDeliveryFee(0);
+    setFeeFound(null);
+    setFeeMessage('');
+    setGpsError('');
+    setLocationLabel('');
+    setAddressMode(null);
+    setForm(prev => ({
+      ...prev,
+      endereco: '', numero: '', complemento: '', bairro: '', referencia: '',
+    }));
+  };
 
-  const formatPhone = (v: string | null | undefined) => {
-    const raw = String(v ?? '');
-    const n = raw.replace(/\D/g, '');
-    if (n.length <= 11) return n.replace(/(\d{2})(\d{5})(\d{4})/, '($1) $2-$3');
-    return raw;
+  const goBack = () => {
+    setFieldError('');
+    setSubmitError('');
+    if (step === 'fulfillment') {
+      setLocation('/carrinho');
+      return;
+    }
+    if (step === 'contact') {
+      setStep('fulfillment');
+      return;
+    }
+    if (step === 'address_method') {
+      setStep('contact');
+      return;
+    }
+    if (step === 'gps' || step === 'manual') {
+      resetDeliveryState();
+      setStep('address_method');
+      return;
+    }
+    if (step === 'payment') {
+      if (orderType === 'local') setStep('fulfillment');
+      else if (orderType === 'pickup') setStep('contact');
+      else if (addressMode === 'gps') setStep('gps');
+      else if (addressMode === 'manual') setStep('manual');
+      else setStep('address_method');
+    }
+  };
+
+  const selectOrderType = (type: OrderType) => {
+    setOrderType(type);
+    setFieldError('');
+    resetDeliveryState();
+    if (type === 'local') {
+      setForm(prev => ({ ...prev, nome: LOCAL_PLACEHOLDER.nome, telefone: LOCAL_PLACEHOLDER.telefone }));
+      setStep('payment');
+      return;
+    }
+    setForm(prev => ({
+      ...prev,
+      nome: prev.nome === LOCAL_PLACEHOLDER.nome ? '' : prev.nome,
+      telefone: prev.telefone === LOCAL_PLACEHOLDER.telefone ? '' : prev.telefone,
+    }));
+    setStep('contact');
+  };
+
+  const continueFromContact = () => {
+    const nome = form.nome.trim();
+    const phoneDigits = form.telefone.replace(/\D/g, '');
+    if (!nome) { setFieldError('Informe seu nome.'); return; }
+    if (phoneDigits.length < 10) { setFieldError('Informe um telefone válido com DDD.'); return; }
+    setFieldError('');
+    if (orderType === 'pickup') setStep('payment');
+    else setStep('address_method');
+  };
+
+  const resolveNeighborhoodFee = async (bairro: string) => {
+    if (!bairro?.trim() || bairro === '__outro__' || bairro === 'GPS') return;
+    try {
+      setFeeLoading(true);
+      const result = await getDeliveryFee(bairro.trim());
+      if (result.found && result.fee !== null) {
+        setDeliveryFee(result.fee);
+        setFeeMessage('');
+        setFeeFound(true);
+      } else {
+        setDeliveryFee(0);
+        setFeeMessage(result.message ?? 'Consulte a taxa de entrega pelo WhatsApp.');
+        setFeeFound(false);
+      }
+    } catch {
+      setFeeFound(null);
+    } finally {
+      setFeeLoading(false);
+    }
+  };
+
+  const startGps = () => {
+    setAddressMode('gps');
+    setStep('gps');
+    if (!navigator.geolocation) {
+      setGpsError('Seu navegador não suporta localização.');
+      return;
+    }
+    setGpsLoading(true);
+    setGpsError('');
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        const lat = pos.coords.latitude;
+        const lng = pos.coords.longitude;
+        applyCoordinates(lat, lng);
+        try {
+          const resolved = await reverseGeocode(lat, lng);
+          if (resolved) {
+            setLocationLabel(resolved.displayName);
+            const nextBairro = resolved.bairro || 'GPS';
+            setForm(prev => ({
+              ...prev,
+              endereco: resolved.endereco || prev.endereco || 'Localização GPS',
+              numero: resolved.numero || prev.numero || 'S/N',
+              bairro: nextBairro,
+            }));
+            if (!kmConfig?.enabled) await resolveNeighborhoodFee(nextBairro);
+          } else {
+            setLocationLabel(`${lat.toFixed(5)}, ${lng.toFixed(5)}`);
+            setForm(prev => ({
+              ...prev,
+              endereco: prev.endereco || 'Localização GPS',
+              numero: prev.numero || 'S/N',
+              bairro: prev.bairro || 'GPS',
+            }));
+            if (!kmConfig?.enabled) {
+              setFeeFound(false);
+              setFeeMessage('Não foi possível identificar o bairro. Digite o endereço ou consulte pelo WhatsApp.');
+            }
+          }
+        } catch {
+          setLocationLabel(`${lat.toFixed(5)}, ${lng.toFixed(5)}`);
+          setForm(prev => ({
+            ...prev,
+            endereco: prev.endereco || 'Localização GPS',
+            numero: prev.numero || 'S/N',
+            bairro: prev.bairro || 'GPS',
+          }));
+        } finally {
+          setGpsLoading(false);
+        }
+      },
+      () => {
+        setGpsError('Não foi possível obter sua localização. Tente digitar o endereço.');
+        setGpsLoading(false);
+      },
+      { enableHighAccuracy: true, timeout: 12000 }
+    );
+  };
+
+  const confirmGpsLocation = () => {
+    if (!customerCoords) {
+      setGpsError('Aguarde a localização ou tente novamente.');
+      return;
+    }
+    setFieldError('');
+    setStep('payment');
+  };
+
+  const continueFromManual = () => {
+    if (!form.endereco.trim()) { setFieldError('Informe a rua.'); return; }
+    if (!form.numero.trim()) { setFieldError('Informe o número.'); return; }
+    if (!form.bairro.trim() || form.bairro === '__outro__') {
+      setFieldError(form.bairro === '__outro__'
+        ? 'Consulte a taxa pelo WhatsApp ou escolha um bairro atendido.'
+        : 'Informe o bairro.');
+      return;
+    }
+    setFieldError('');
+    setStep('payment');
   };
 
   const handleApplyCoupon = async () => {
     const code = couponInput.trim();
     if (!code) return;
-    setCouponLoading(true); setCouponError('');
+    setCouponLoading(true);
+    setCouponError('');
     try {
       const result = await validateCoupon(code, subtotal);
       if (result.valid) { setAppliedCoupon(result); setCouponInput(''); }
@@ -241,43 +427,82 @@ export default function Checkout() {
     finally { setCouponLoading(false); }
   };
 
-  const onSubmit = async (data: CheckoutFormData) => {
+  const onConfirmOrder = async () => {
     if (cartItems.length === 0) { setLocation('/cardapio'); return; }
-    setSubmitting(true); setSubmitError('');
+    if (!orderType) { setStep('fulfillment'); return; }
+
+    if (orderType !== 'local') {
+      const phoneDigits = form.telefone.replace(/\D/g, '');
+      if (!form.nome.trim() || phoneDigits.length < 10) {
+        setSubmitError('Dados do cliente incompletos. Volte e preencha nome e telefone.');
+        return;
+      }
+    }
+
+    if (orderType === 'delivery') {
+      if (!form.endereco.trim() || !form.numero.trim() || !form.bairro.trim()) {
+        setSubmitError('Endereço incompleto. Volte e confirme a localização ou o endereço.');
+        return;
+      }
+    }
+
+    if (paymentMethod === 'cash' && needsChange) {
+      const troco = parseFloat(form.troco);
+      if (!Number.isFinite(troco) || troco <= total) {
+        setSubmitError('Informe um valor de troco maior que o total do pedido.');
+        return;
+      }
+    }
+
+    setSubmitting(true);
+    setSubmitError('');
     try {
+      const customerName = orderType === 'local' ? (form.nome.trim() || LOCAL_PLACEHOLDER.nome) : form.nome.trim();
+      const phone = orderType === 'local' ? (form.telefone.replace(/\D/g, '') || LOCAL_PLACEHOLDER.telefone) : form.telefone;
+
       const result = await createOrder({
-        customerName: data.nome, phone: data.telefone,
-        address: isDelivery ? data.endereco : '',
-        addressNumber: isDelivery ? data.numero : '',
-        addressComplement: isDelivery ? data.complemento : '',
-        neighborhood: isDelivery ? data.bairro : '',
-        reference: isDelivery ? data.referencia : '',
-        notes: data.observacoes,
+        customerName,
+        phone,
+        address: isDelivery ? form.endereco : '',
+        addressNumber: isDelivery ? form.numero : '',
+        addressComplement: isDelivery ? form.complemento : '',
+        neighborhood: isDelivery ? form.bairro : '',
+        reference: isDelivery ? form.referencia : '',
+        notes: form.observacoes,
         customerLat: isDelivery && customerCoords ? customerCoords.lat : undefined,
         customerLng: isDelivery && customerCoords ? customerCoords.lng : undefined,
-        orderType, paymentMethod,
-        changeFor: paymentMethod === 'cash' && needsChange && data.troco ? parseFloat(data.troco) : undefined,
+        orderType,
+        paymentMethod,
+        changeFor: paymentMethod === 'cash' && needsChange && form.troco ? parseFloat(form.troco) : undefined,
         cardType: paymentMethod === 'card' ? cardType : undefined,
         needsChange: paymentMethod === 'cash' ? needsChange : undefined,
         couponCode: appliedCoupon?.code,
         items: cartItems.map(ci => ({
-          productId: ci.item.id, productName: ci.item.name,
-          productPrice: ci.item.price, quantity: ci.quantity,
-          addons: ci.selectedAddons, notes: ci.notes,
+          productId: ci.item.id,
+          productName: ci.item.name,
+          productPrice: ci.item.price,
+          quantity: ci.quantity,
+          addons: Array.isArray(ci.selectedAddons) ? ci.selectedAddons : [],
+          notes: ci.notes,
         })),
       });
+
       const orderPayload = {
         trackingId: result.trackingId,
         orderNumber: result.orderNumber,
-        customerName: data.nome ?? '', phone: data.telefone ?? '',
-        orderType, paymentMethod,
+        customerName,
+        phone,
+        orderType,
+        paymentMethod,
         cardType: paymentMethod === 'card' ? cardType : null,
         needsChange: paymentMethod === 'cash' ? needsChange : false,
-        changeFor: paymentMethod === 'cash' && needsChange ? (data.troco || null) : null,
-        address: data.endereco ?? '', numero: data.numero ?? '',
-        complemento: data.complemento ?? '',
-        neighborhood: data.bairro ?? '', reference: data.referencia ?? '',
-        notes: data.observacoes ?? '',
+        changeFor: paymentMethod === 'cash' && needsChange ? (form.troco || null) : null,
+        address: form.endereco ?? '',
+        numero: form.numero ?? '',
+        complemento: form.complemento ?? '',
+        neighborhood: form.bairro ?? '',
+        reference: form.referencia ?? '',
+        notes: form.observacoes ?? '',
         distanceKm: result.distanceKm ?? null,
         customerLat: isDelivery && customerCoords ? customerCoords.lat : null,
         customerLng: isDelivery && customerCoords ? customerCoords.lng : null,
@@ -286,8 +511,11 @@ export default function Checkout() {
         items: cartItems.map(ci => {
           const addons = Array.isArray(ci.selectedAddons) ? ci.selectedAddons : [];
           return {
-            name: ci.item.name, quantity: ci.quantity, price: ci.item.price,
-            addons, notes: ci.notes ?? '',
+            name: ci.item.name,
+            quantity: ci.quantity,
+            price: ci.item.price,
+            addons,
+            notes: ci.notes ?? '',
             subtotal: (Number(ci.item.price) + addons.reduce((acc, a) => acc + (Number(a.price) || 0), 0)) * ci.quantity,
           };
         }),
@@ -297,31 +525,31 @@ export default function Checkout() {
         total: result.deliveryFee !== undefined
           ? parseFloat((subtotal + result.deliveryFee - (result.discountAmount ?? 0)).toFixed(2))
           : total,
+        // Prepared for future Pix gateway — currently static Pix from store settings
         pixPayment: result.pixPayment ?? null,
         paymentStatus: 'pending',
         createdAt: new Date().toISOString(),
       };
+
       try {
         sessionStorage.setItem('lastOrder', JSON.stringify(orderPayload));
       } catch (storageErr) {
         console.error('[BurgerGN] sessionStorage lastOrder failed:', storageErr);
       }
+
       if (result.cardCheckoutUrl) {
         window.location.href = result.cardCheckoutUrl;
         return;
       }
       setLocation('/confirmacao');
     } catch (err) {
-      setSubmitError(err instanceof Error && err.message ? err.message : 'Erro ao enviar pedido. Verifique a conexão e tente novamente.');
-    } finally { setSubmitting(false); }
-  };
-
-  // Never call setLocation during render — on mobile this returns null (black screen) before navigation.
-  useEffect(() => {
-    if (cartItems.length === 0 && !submitting) {
-      setLocation('/cardapio');
+      setSubmitError(err instanceof Error && err.message
+        ? err.message
+        : 'Erro ao enviar pedido. Verifique a conexão e tente novamente.');
+    } finally {
+      setSubmitting(false);
     }
-  }, [cartItems.length, submitting, setLocation]);
+  };
 
   if (cartItems.length === 0) {
     return (
@@ -333,129 +561,344 @@ export default function Checkout() {
     );
   }
 
-  const stepNum = (n: number) => (
-    <span className="w-6 h-6 rounded-full bg-amber-500/20 text-amber-500 flex items-center justify-center text-xs font-black flex-shrink-0">{n}</span>
-  );
+  const stepTitle: Record<CheckoutStep, string> = {
+    fulfillment: 'Recebimento',
+    contact: 'Seus dados',
+    address_method: 'Endereço',
+    gps: 'Localização',
+    manual: 'Endereço',
+    payment: 'Pagamento',
+  };
 
-  const cashBlockedForDelivery = isDelivery && paySettings !== null && !paySettings.cashOnDeliveryEnabled;
+  const feeBanner = (
+    <AnimatePresence>
+      {feeLoading ? (
+        <motion.div key="fee-load" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+          className="flex items-center gap-2 text-zinc-500 text-sm">
+          <Loader2 size={14} className="animate-spin" /> Calculando taxa de entrega...
+        </motion.div>
+      ) : feeFound === true ? (
+        <motion.div key="fee-ok" initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+          className="flex items-center justify-between bg-green-900/20 border border-green-800/40 rounded-xl px-4 py-3">
+          <div className="flex items-center gap-2 text-green-400">
+            <CheckCircle2 size={16} />
+            <span className="text-sm font-bold">
+              Taxa de entrega{distanceKm !== null ? ` · ${distanceKm.toFixed(1)} km` : ''}
+            </span>
+          </div>
+          <span className="text-green-400 font-black">{fmt(deliveryFee)}</span>
+        </motion.div>
+      ) : feeFound === false ? (
+        <motion.div key="fee-warn" initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+          className="flex items-start gap-2 bg-orange-900/20 border border-orange-800/40 rounded-xl px-4 py-3">
+          <AlertCircle size={16} className="text-orange-400 mt-0.5 shrink-0" />
+          <p className="text-orange-400 text-sm">
+            {feeMessage}{' '}
+            <a href={`https://wa.me/${waNumber}`} target="_blank" rel="noopener noreferrer" className="underline font-bold">
+              WhatsApp
+            </a>
+          </p>
+        </motion.div>
+      ) : null}
+    </AnimatePresence>
+  );
 
   return (
     <PageTransition className="bg-[#0a0a0a]">
-      <header className="sticky top-0 z-40 bg-zinc-950 border-b border-zinc-800 px-6 py-4">
-        <div className="max-w-md mx-auto flex items-center">
-          <button onClick={() => setLocation('/carrinho')} className="p-2 -ml-2 text-zinc-400 hover:text-white transition-colors">
+      <header className="sticky top-0 z-40 bg-zinc-950/95 border-b border-zinc-800 px-4 py-4">
+        <div className="max-w-md mx-auto flex items-center gap-2">
+          <button type="button" onClick={goBack}
+            className="p-2 -ml-1 text-zinc-400 hover:text-white transition-colors rounded-xl">
             <ArrowLeft size={24} />
           </button>
-          <h1 className="text-xl font-black text-white uppercase tracking-tight ml-2">Finalizar Pedido</h1>
+          <div className="min-w-0">
+            <p className="text-[10px] uppercase tracking-[0.2em] text-amber-500 font-bold">Checkout</p>
+            <h1 className="text-lg font-black text-white uppercase tracking-tight truncate">{stepTitle[step]}</h1>
+          </div>
         </div>
       </header>
 
-      <main className="max-w-md mx-auto px-4 py-6 pb-12">
-        <form onSubmit={handleSubmit(onSubmit)} className="space-y-8">
-
-          {/* 1 – Tipo */}
-          <section className="space-y-3">
-            <h2 className="text-white font-bold uppercase tracking-wider text-sm flex items-center gap-2">
-              {stepNum(1)} Como você quer receber?
-            </h2>
-            <div className="grid grid-cols-3 gap-2">
-              {([
-                { key: 'delivery', icon: <Bike size={22} />, label: 'Delivery' },
-                { key: 'pickup',   icon: <Store size={22} />, label: 'Retirar\nno balcão' },
-                { key: 'local',    icon: <Utensils size={22} />, label: 'Comer\nno local' },
-              ] as const).map(opt => (
-                <button key={opt.key} type="button" onClick={() => setOrderType(opt.key)}
-                  className={`p-3 rounded-xl border flex flex-col items-center gap-2 transition-all ${orderType === opt.key ? 'border-amber-500 bg-amber-500/10 text-amber-500' : 'border-zinc-800 bg-zinc-900 text-zinc-400'}`}>
-                  {opt.icon}
-                  <span className="text-[10px] uppercase font-bold text-center leading-tight whitespace-pre-line">{opt.label}</span>
-                </button>
-              ))}
-            </div>
-          </section>
-
-          {/* 2 – Dados */}
-          <section className="space-y-4">
-            <h2 className="text-white font-bold uppercase tracking-wider text-sm flex items-center gap-2">
-              {stepNum(2)} Seus Dados
-            </h2>
-            <div className="space-y-3">
-              <div className="space-y-1.5">
-                <Label className="text-zinc-400 text-sm">Nome completo *</Label>
-                <Input placeholder="Ex: João da Silva" className="bg-zinc-900 border-zinc-800 h-12 text-white focus:border-amber-500"
-                  {...register('nome', { required: 'Nome é obrigatório' })} />
-                {errors.nome && <span className="text-red-400 text-xs">{errors.nome.message}</span>}
+      <main className="max-w-md mx-auto px-4 py-6 pb-36">
+        <AnimatePresence mode="wait">
+          {/* ── 1. Fulfillment ─────────────────────────────────────────── */}
+          {step === 'fulfillment' && (
+            <motion.section key="fulfillment"
+              initial={{ opacity: 0, x: 24 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -24 }}
+              className="space-y-5">
+              <div className="space-y-2">
+                <h2 className="text-2xl font-black text-white leading-tight">
+                  Como deseja receber seu pedido?
+                </h2>
+                <p className="text-zinc-500 text-sm">Escolha a opção mais conveniente para você.</p>
               </div>
-              <div className="space-y-1.5">
-                <Label className="text-zinc-400 text-sm">Telefone (WhatsApp) *</Label>
-                <Input placeholder="(00) 00000-0000" className="bg-zinc-900 border-zinc-800 h-12 text-white focus:border-amber-500"
-                  {...register('telefone', {
-                    required: 'Telefone é obrigatório',
-                    onChange: e => {
-                      const el = e?.target;
-                      if (!el) return;
-                      el.value = formatPhone(el.value);
-                    },
-                  })} />
-                {errors.telefone && <span className="text-red-400 text-xs">{errors.telefone.message}</span>}
+
+              <div className="space-y-3">
+                {([
+                  {
+                    key: 'local' as const,
+                    icon: <Utensils size={26} />,
+                    emoji: '🍔',
+                    title: 'Consumir na loja',
+                    desc: 'Peça agora e aproveite no salão. Em breve, identificação pela mesa via QR Code.',
+                  },
+                  {
+                    key: 'pickup' as const,
+                    icon: <Store size={26} />,
+                    emoji: '🛍️',
+                    title: 'Retirar no balcão',
+                    desc: 'Seu pedido fica pronto para retirada. Só precisamos do nome e telefone.',
+                  },
+                  {
+                    key: 'delivery' as const,
+                    icon: <Bike size={26} />,
+                    emoji: '🛵',
+                    title: 'Receber em casa',
+                    desc: 'Entregamos no seu endereço com taxa calculada automaticamente.',
+                  },
+                ]).map((opt, i) => (
+                  <motion.button
+                    key={opt.key}
+                    type="button"
+                    initial={{ opacity: 0, y: 12 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.05 * i }}
+                    onClick={() => selectOrderType(opt.key)}
+                    className="w-full text-left p-4 rounded-2xl border border-zinc-800 bg-gradient-to-br from-zinc-900 to-zinc-950 hover:border-amber-500/60 hover:bg-amber-500/5 transition-all active:scale-[0.99] group"
+                  >
+                    <div className="flex items-start gap-3.5">
+                      <div className="w-12 h-12 rounded-xl bg-amber-500/10 text-amber-500 flex items-center justify-center shrink-0 group-hover:bg-amber-500/20 transition-colors">
+                        {opt.icon}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-white font-black text-base flex items-center gap-2">
+                          <span aria-hidden>{opt.emoji}</span> {opt.title}
+                        </p>
+                        <p className="text-zinc-500 text-sm mt-1 leading-snug">{opt.desc}</p>
+                      </div>
+                    </div>
+                  </motion.button>
+                ))}
               </div>
-            </div>
-          </section>
+            </motion.section>
+          )}
 
-          {/* 3 – Endereço (delivery only) */}
-          {isDelivery && (
-            <section className="space-y-4">
-              <h2 className="text-white font-bold uppercase tracking-wider text-sm flex items-center gap-2">
-                {stepNum(3)} <MapPin size={16} className="text-amber-500" /> Endereço de Entrega
-              </h2>
+          {/* ── 2. Contact ─────────────────────────────────────────────── */}
+          {step === 'contact' && (
+            <motion.section key="contact"
+              initial={{ opacity: 0, x: 24 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -24 }}
+              className="space-y-5">
+              <div className="space-y-2">
+                <h2 className="text-2xl font-black text-white leading-tight">Seus dados</h2>
+                <p className="text-zinc-500 text-sm">
+                  {orderType === 'pickup'
+                    ? 'Usamos nome e telefone para chamar quando o pedido estiver pronto.'
+                    : 'Usamos nome e telefone para confirmar a entrega.'}
+                </p>
+              </div>
 
-              {kmEnabled && (
-                <Button type="button" onClick={handleUseLocation} disabled={gpsLoading}
-                  className="w-full h-12 bg-amber-500/10 border border-amber-500/40 text-amber-500 hover:bg-amber-500/20 font-bold rounded-xl flex items-center justify-center gap-2">
-                  {gpsLoading ? <Loader2 size={18} className="animate-spin" /> : <LocateFixed size={18} />}
-                  Usar minha localização
-                </Button>
+              <div className="space-y-3">
+                <div className="space-y-1.5">
+                  <Label className="text-zinc-400 text-sm">Nome *</Label>
+                  <Input
+                    value={form.nome}
+                    onChange={e => setField('nome', e.target.value)}
+                    placeholder="Ex: João da Silva"
+                    autoComplete="name"
+                    className="bg-zinc-900 border-zinc-800 h-12 text-white focus:border-amber-500"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-zinc-400 text-sm">Telefone (WhatsApp) *</Label>
+                  <Input
+                    value={form.telefone}
+                    onChange={e => setField('telefone', formatPhone(e.target.value))}
+                    placeholder="(00) 00000-0000"
+                    inputMode="tel"
+                    autoComplete="tel"
+                    className="bg-zinc-900 border-zinc-800 h-12 text-white focus:border-amber-500"
+                  />
+                </div>
+              </div>
+
+              {fieldError && (
+                <p className="text-red-400 text-sm flex items-center gap-1.5"><AlertCircle size={14} /> {fieldError}</p>
               )}
-              {gpsError && <p className="text-orange-400 text-xs flex items-center gap-1.5"><AlertCircle size={13} /> {gpsError}</p>}
-              {usingKm && distanceKm !== null && (
-                <div className="flex items-center gap-2 bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-2.5 text-sm">
-                  <Navigation size={15} className="text-amber-500" />
-                  <span className="text-zinc-300">Distância até você: <span className="text-amber-500 font-bold">{distanceKm.toFixed(1)} km</span></span>
+
+              <Button type="button" onClick={continueFromContact} size="lg"
+                className="w-full min-h-[52px] font-bold tracking-wider rounded-xl bg-amber-500 hover:bg-amber-400 text-zinc-950">
+                Continuar
+              </Button>
+            </motion.section>
+          )}
+
+          {/* ── 3. Address method ──────────────────────────────────────── */}
+          {step === 'address_method' && (
+            <motion.section key="address_method"
+              initial={{ opacity: 0, x: 24 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -24 }}
+              className="space-y-5">
+              <div className="space-y-2">
+                <h2 className="text-2xl font-black text-white leading-tight">Onde entregar?</h2>
+                <p className="text-zinc-500 text-sm">Use sua localização ou digite o endereço manualmente.</p>
+              </div>
+
+              <div className="space-y-3">
+                <button type="button" onClick={startGps}
+                  className="w-full text-left p-4 rounded-2xl border border-amber-500/40 bg-amber-500/10 hover:bg-amber-500/15 transition-all active:scale-[0.99]">
+                  <div className="flex items-start gap-3.5">
+                    <div className="w-12 h-12 rounded-xl bg-amber-500 text-zinc-950 flex items-center justify-center shrink-0">
+                      <LocateFixed size={24} />
+                    </div>
+                    <div>
+                      <p className="text-amber-400 font-black text-base">📍 Usar minha localização atual</p>
+                      <p className="text-zinc-400 text-sm mt-1">Pedimos permissão do GPS, mostramos o mapa e calculamos a taxa.</p>
+                    </div>
+                  </div>
+                </button>
+
+                <button type="button" onClick={() => { setAddressMode('manual'); setStep('manual'); setCustomerCoords(null); }}
+                  className="w-full text-left p-4 rounded-2xl border border-zinc-800 bg-zinc-900 hover:border-amber-500/50 transition-all active:scale-[0.99]">
+                  <div className="flex items-start gap-3.5">
+                    <div className="w-12 h-12 rounded-xl bg-zinc-800 text-amber-500 flex items-center justify-center shrink-0">
+                      <Home size={24} />
+                    </div>
+                    <div>
+                      <p className="text-white font-black text-base">🏠 Digitar endereço manualmente</p>
+                      <p className="text-zinc-500 text-sm mt-1">Rua, número, bairro, complemento e referência.</p>
+                    </div>
+                  </div>
+                </button>
+              </div>
+            </motion.section>
+          )}
+
+          {/* ── 4. GPS confirm ─────────────────────────────────────────── */}
+          {step === 'gps' && (
+            <motion.section key="gps"
+              initial={{ opacity: 0, x: 24 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -24 }}
+              className="space-y-4">
+              <div className="space-y-2">
+                <h2 className="text-2xl font-black text-white leading-tight">Confirme sua localização</h2>
+                <p className="text-zinc-500 text-sm">Verifique o marcador no mapa e a taxa de entrega antes de continuar.</p>
+              </div>
+
+              {gpsLoading && (
+                <div className="flex flex-col items-center justify-center py-16 gap-3 text-zinc-400">
+                  <Loader2 size={32} className="animate-spin text-amber-500" />
+                  <p className="text-sm">Obtendo sua localização...</p>
                 </div>
               )}
 
-              <div className="space-y-3 bg-zinc-900 p-4 rounded-xl border border-zinc-800">
-                {/* Street + Number in one row */}
+              {gpsError && !gpsLoading && (
+                <div className="space-y-3">
+                  <div className="flex items-start gap-2 bg-orange-900/20 border border-orange-800/40 rounded-xl px-4 py-3">
+                    <AlertCircle size={16} className="text-orange-400 mt-0.5 shrink-0" />
+                    <p className="text-orange-400 text-sm">{gpsError}</p>
+                  </div>
+                  <Button type="button" onClick={startGps} variant="outline"
+                    className="w-full h-12 border-zinc-700 text-white rounded-xl">
+                    Tentar novamente
+                  </Button>
+                  <Button type="button" onClick={() => { setAddressMode('manual'); setStep('manual'); }}
+                    className="w-full h-12 bg-zinc-800 hover:bg-zinc-700 text-white rounded-xl">
+                    Digitar endereço manualmente
+                  </Button>
+                </div>
+              )}
+
+              {!gpsLoading && customerCoords && (
+                <>
+                  <div className="rounded-2xl overflow-hidden border border-zinc-800 bg-zinc-900">
+                    <iframe
+                      title="Mapa da entrega"
+                      src={mapEmbedUrl(customerCoords.lat, customerCoords.lng)}
+                      className="w-full h-56 border-0"
+                      loading="lazy"
+                      referrerPolicy="no-referrer-when-downgrade"
+                    />
+                    <div className="px-4 py-3 space-y-1 border-t border-zinc-800">
+                      <div className="flex items-center gap-2 text-amber-500 text-xs font-bold uppercase tracking-wider">
+                        <MapPin size={14} /> Local detectado
+                      </div>
+                      <p className="text-zinc-300 text-sm leading-snug">{locationLabel || `${customerCoords.lat.toFixed(5)}, ${customerCoords.lng.toFixed(5)}`}</p>
+                      {distanceKm !== null && (
+                        <p className="text-zinc-500 text-xs flex items-center gap-1.5">
+                          <Navigation size={12} /> Distância aproximada: {distanceKm.toFixed(1)} km
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  {feeBanner}
+
+                  <div className="space-y-1.5">
+                    <Label className="text-zinc-400 text-xs">Complemento (opcional)</Label>
+                    <Input
+                      value={form.complemento}
+                      onChange={e => setField('complemento', e.target.value)}
+                      placeholder="Apto, bloco, casa..."
+                      className="bg-zinc-900 border-zinc-800 h-11 text-white text-sm focus:border-amber-500"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-zinc-400 text-xs">Ponto de referência (opcional)</Label>
+                    <Input
+                      value={form.referencia}
+                      onChange={e => setField('referencia', e.target.value)}
+                      placeholder="Ex: Próximo ao mercado"
+                      className="bg-zinc-900 border-zinc-800 h-11 text-white text-sm focus:border-amber-500"
+                    />
+                  </div>
+
+                  <Button type="button" onClick={confirmGpsLocation} size="lg"
+                    className="w-full min-h-[52px] font-bold tracking-wider rounded-xl bg-amber-500 hover:bg-amber-400 text-zinc-950">
+                    Confirmar localização
+                  </Button>
+                </>
+              )}
+            </motion.section>
+          )}
+
+          {/* ── 5. Manual address ──────────────────────────────────────── */}
+          {step === 'manual' && (
+            <motion.section key="manual"
+              initial={{ opacity: 0, x: 24 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -24 }}
+              className="space-y-4">
+              <div className="space-y-2">
+                <h2 className="text-2xl font-black text-white leading-tight">Endereço de entrega</h2>
+                <p className="text-zinc-500 text-sm">Preencha os dados para calcularmos a taxa automaticamente.</p>
+              </div>
+
+              <div className="space-y-3 bg-zinc-900/80 p-4 rounded-2xl border border-zinc-800">
                 <div className="grid grid-cols-3 gap-2">
                   <div className="col-span-2 space-y-1.5">
-                    <Label className="text-zinc-400 text-xs">Rua / Logradouro *</Label>
-                    <Input placeholder="Ex: Rua das Flores" className="bg-zinc-950 border-zinc-800 h-11 text-white text-sm focus:border-amber-500"
-                      {...register('endereco', { required: 'Endereço é obrigatório' })} />
-                    {errors.endereco && <span className="text-red-400 text-xs">{errors.endereco.message}</span>}
+                    <Label className="text-zinc-400 text-xs">Rua *</Label>
+                    <Input
+                      value={form.endereco}
+                      onChange={e => setField('endereco', e.target.value)}
+                      placeholder="Ex: Rua das Flores"
+                      autoComplete="street-address"
+                      className="bg-zinc-950 border-zinc-800 h-11 text-white text-sm focus:border-amber-500"
+                    />
                   </div>
                   <div className="space-y-1.5">
                     <Label className="text-zinc-400 text-xs">Número *</Label>
-                    <Input placeholder="123" className="bg-zinc-950 border-zinc-800 h-11 text-white text-sm focus:border-amber-500"
-                      {...register('numero', { required: 'Número obrigatório' })} />
-                    {errors.numero && <span className="text-red-400 text-xs">{errors.numero.message}</span>}
+                    <Input
+                      value={form.numero}
+                      onChange={e => setField('numero', e.target.value)}
+                      placeholder="123"
+                      className="bg-zinc-950 border-zinc-800 h-11 text-white text-sm focus:border-amber-500"
+                    />
                   </div>
                 </div>
 
-                {/* Complement */}
-                <div className="space-y-1.5">
-                  <Label className="text-zinc-400 text-xs">Complemento</Label>
-                  <Input placeholder="Ex: Apto 12, Bloco B, Casa dos fundos" className="bg-zinc-950 border-zinc-800 h-11 text-white text-sm focus:border-amber-500"
-                    {...register('complemento')} />
-                </div>
-
-                {/* Neighborhood with zone select */}
                 <div className="space-y-1.5">
                   <Label className="text-zinc-400 text-xs">Bairro *</Label>
                   {zones.length > 0 && !kmEnabled ? (
                     <div className="relative">
                       <select
+                        value={form.bairro}
+                        onChange={e => setField('bairro', e.target.value)}
                         className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 h-11 text-white text-sm focus:border-amber-500 focus:outline-none appearance-none pr-8"
-                        {...register('bairro', { required: 'Bairro é obrigatório' })}
-                        defaultValue=""
                       >
                         <option value="" disabled>Selecione seu bairro</option>
                         {zones.map(z => (
@@ -466,276 +909,246 @@ export default function Checkout() {
                       <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" />
                     </div>
                   ) : (
-                    <Input placeholder="Ex: Centro" className="bg-zinc-950 border-zinc-800 h-11 text-white text-sm focus:border-amber-500"
-                      {...register('bairro', { required: 'Bairro é obrigatório' })} />
+                    <Input
+                      value={form.bairro}
+                      onChange={e => setField('bairro', e.target.value)}
+                      placeholder="Ex: Centro"
+                      className="bg-zinc-950 border-zinc-800 h-11 text-white text-sm focus:border-amber-500"
+                    />
                   )}
-                  {errors.bairro && <span className="text-red-400 text-xs">{errors.bairro.message}</span>}
                 </div>
 
-                {/* Fee indicator */}
-                <AnimatePresence>
-                  {bairroValue && bairroValue !== '__outro__' && (
-                    <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
-                      {feeLoading ? (
-                        <div className="flex items-center gap-2 text-zinc-500 text-sm">
-                          <Loader2 size={14} className="animate-spin" /> Calculando taxa de entrega...
-                        </div>
-                      ) : feeFound === true ? (
-                        <div className="flex items-center justify-between bg-green-900/20 border border-green-800/40 rounded-xl px-4 py-2.5">
-                          <div className="flex items-center gap-2 text-green-400">
-                            <CheckCircle2 size={16} />
-                            <span className="text-sm font-bold">Taxa de entrega{usingKm ? '' : ` para ${bairroValue}`}</span>
-                          </div>
-                          <span className="text-green-400 font-black">{fmt(deliveryFee)}</span>
-                        </div>
-                      ) : feeFound === false ? (
-                        <div className="flex items-start gap-2 bg-orange-900/20 border border-orange-800/40 rounded-xl px-4 py-2.5">
-                          <AlertCircle size={16} className="text-orange-400 mt-0.5 shrink-0" />
-                          <p className="text-orange-400 text-sm">
-                            {feeMessage}{' '}
-                            <a href={`https://wa.me/${waNumber}`} target="_blank" rel="noopener noreferrer" className="underline font-bold">
-                              Chamar no WhatsApp
-                            </a>
-                          </p>
-                        </div>
-                      ) : null}
-                    </motion.div>
-                  )}
-                  {bairroValue === '__outro__' && (
-                    <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
-                      <div className="flex items-start gap-2 bg-orange-900/20 border border-orange-800/40 rounded-xl px-4 py-2.5">
-                        <AlertCircle size={16} className="text-orange-400 mt-0.5 shrink-0" />
-                        <p className="text-orange-400 text-sm">
-                          Consulte a taxa de entrega pelo{' '}
-                          <a href={`https://wa.me/${waNumber}`} target="_blank" rel="noopener noreferrer" className="underline font-bold">
-                            WhatsApp
-                          </a>
-                        </p>
-                      </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-
-                {/* Reference */}
                 <div className="space-y-1.5">
-                  <Label className="text-zinc-400 text-xs">Ponto de Referência</Label>
-                  <Input placeholder="Ex: Próximo ao mercado" className="bg-zinc-950 border-zinc-800 h-11 text-white text-sm focus:border-amber-500"
-                    {...register('referencia')} />
+                  <Label className="text-zinc-400 text-xs">Complemento</Label>
+                  <Input
+                    value={form.complemento}
+                    onChange={e => setField('complemento', e.target.value)}
+                    placeholder="Apto, bloco, casa..."
+                    className="bg-zinc-950 border-zinc-800 h-11 text-white text-sm focus:border-amber-500"
+                  />
                 </div>
+
+                <div className="space-y-1.5">
+                  <Label className="text-zinc-400 text-xs">Ponto de referência</Label>
+                  <Input
+                    value={form.referencia}
+                    onChange={e => setField('referencia', e.target.value)}
+                    placeholder="Ex: Próximo ao mercado"
+                    className="bg-zinc-950 border-zinc-800 h-11 text-white text-sm focus:border-amber-500"
+                  />
+                </div>
+
+                {feeBanner}
               </div>
-            </section>
+
+              {fieldError && (
+                <p className="text-red-400 text-sm flex items-center gap-1.5"><AlertCircle size={14} /> {fieldError}</p>
+              )}
+
+              <Button type="button" onClick={continueFromManual} size="lg"
+                className="w-full min-h-[52px] font-bold tracking-wider rounded-xl bg-amber-500 hover:bg-amber-400 text-zinc-950">
+                Continuar para pagamento
+              </Button>
+            </motion.section>
           )}
 
-          {/* 4 – Observações */}
-          <section className="space-y-3">
-            <h2 className="text-white font-bold uppercase tracking-wider text-sm flex items-center gap-2">
-              {stepNum(isDelivery ? 4 : 3)} Observações do Pedido
-            </h2>
-            <textarea placeholder="Ex: Sem cebola, ponto bem passado..."
-              className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 text-white text-sm resize-none focus:border-amber-500 focus:outline-none h-20 placeholder:text-zinc-600"
-              {...register('observacoes')} />
-          </section>
-
-          {/* 5 – Pagamento */}
-          <section className="space-y-4">
-            <h2 className="text-white font-bold uppercase tracking-wider text-sm flex items-center gap-2">
-              {stepNum(isDelivery ? 5 : 4)} Forma de Pagamento
-            </h2>
-            <div className="grid grid-cols-3 gap-2">
-              {([
-                { key: 'pix', icon: <QrCode size={22} />, label: 'Pix' },
-                { key: 'cash', icon: <Banknote size={22} />, label: 'Dinheiro', blocked: cashBlockedForDelivery },
-                { key: 'card', icon: <CreditCard size={22} />, label: 'Cartão' },
-              ] as const).map(opt => (
-                <button key={opt.key} type="button" disabled={'blocked' in opt && opt.blocked}
-                  onClick={() => setPaymentMethod(opt.key)}
-                  className={`p-3 rounded-xl border flex flex-col items-center gap-2 transition-all relative ${
-                    'blocked' in opt && opt.blocked
-                      ? 'border-zinc-900 bg-zinc-950 text-zinc-700 cursor-not-allowed opacity-50'
-                      : paymentMethod === opt.key ? 'border-amber-500 bg-amber-500/10 text-amber-500' : 'border-zinc-800 bg-zinc-900 text-zinc-400'
-                  }`}>
-                  {opt.icon}
-                  <span className="text-[10px] uppercase font-bold">{opt.label}</span>
-                </button>
-              ))}
-            </div>
-            {cashBlockedForDelivery && (
-              <p className="text-zinc-600 text-xs flex items-center gap-1.5">
-                <AlertCircle size={12} /> Dinheiro disponível apenas para retirada no balcão.
-              </p>
-            )}
-            {paymentMethod === 'pix' && (
-              <div className="p-4 bg-zinc-900 border border-zinc-800 rounded-xl space-y-1">
-                <p className="text-zinc-300 text-sm font-medium">Após confirmar, você verá o QR Code Pix e a chave copia e cola.</p>
-                <p className="text-zinc-600 text-xs">
-                  {paySettings?.pixConfigured
-                    ? `Chave configurada: ${paySettings.pixKeyPreview}`
-                    : 'Configure a chave Pix em Admin → Config → Pagamento para gerar o QR automaticamente.'}
+          {/* ── 6. Payment ─────────────────────────────────────────────── */}
+          {step === 'payment' && (
+            <motion.section key="payment"
+              initial={{ opacity: 0, x: 24 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -24 }}
+              className="space-y-6">
+              <div className="space-y-2">
+                <h2 className="text-2xl font-black text-white leading-tight">Forma de pagamento</h2>
+                <p className="text-zinc-500 text-sm">
+                  {orderType === 'local' && 'Consumo na loja — identificação por QR da mesa em breve.'}
+                  {orderType === 'pickup' && `Retirada no balcão · ${form.nome}`}
+                  {orderType === 'delivery' && `Entrega · ${form.endereco}, ${form.numero}`}
                 </p>
               </div>
-            )}
-            {paymentMethod === 'card' && (
-              <div className="space-y-2 p-4 bg-zinc-900 border border-zinc-800 rounded-xl">
-                <Label className="text-zinc-400 text-sm">Tipo do cartão</Label>
-                <div className="grid grid-cols-2 gap-2">
-                  {([
-                    { key: 'credit' as const, label: 'Crédito' },
-                    { key: 'debit' as const, label: 'Débito' },
-                  ]).map(opt => (
-                    <button key={opt.key} type="button" onClick={() => setCardType(opt.key)}
-                      className={`h-11 rounded-xl border text-sm font-bold uppercase tracking-wider transition-all ${
-                        cardType === opt.key ? 'border-amber-500 bg-amber-500/10 text-amber-500' : 'border-zinc-800 bg-zinc-950 text-zinc-400'
-                      }`}>
-                      {opt.label}
-                    </button>
-                  ))}
-                </div>
-                <p className="text-zinc-600 text-xs">Pagamento na entrega/retirada com a maquininha.</p>
-              </div>
-            )}
-            {paymentMethod === 'cash' && (
-              <div className="space-y-3 p-4 bg-zinc-900 border border-zinc-800 rounded-xl">
-                <Label className="text-zinc-400 text-sm">Precisa de troco?</Label>
-                <div className="grid grid-cols-2 gap-2">
-                  <button type="button" onClick={() => setNeedsChange(true)}
-                    className={`h-11 rounded-xl border text-sm font-bold uppercase tracking-wider transition-all ${
-                      needsChange ? 'border-amber-500 bg-amber-500/10 text-amber-500' : 'border-zinc-800 bg-zinc-950 text-zinc-400'
-                    }`}>
-                    Sim
-                  </button>
-                  <button type="button" onClick={() => { setNeedsChange(false); setValue('troco', ''); }}
-                    className={`h-11 rounded-xl border text-sm font-bold uppercase tracking-wider transition-all ${
-                      !needsChange ? 'border-amber-500 bg-amber-500/10 text-amber-500' : 'border-zinc-800 bg-zinc-950 text-zinc-400'
-                    }`}>
-                    Não
-                  </button>
-                </div>
-                {needsChange && (
-                  <div className="space-y-1.5">
-                    <Label className="text-zinc-400 text-sm">Troco para quanto?</Label>
-                    <Input placeholder="Ex: 100" className="bg-zinc-950 border-zinc-800 h-12 text-white focus:border-amber-500"
-                      {...register('troco', { required: needsChange ? 'Informe o valor do troco' : false })} />
-                    {errors.troco && <span className="text-red-400 text-xs">{errors.troco.message}</span>}
-                  </div>
-                )}
-              </div>
-            )}
-          </section>
 
-          {/* 6 – Cupom */}
-          <section className="space-y-3">
-            <h2 className="text-white font-bold uppercase tracking-wider text-sm flex items-center gap-2">
-              {stepNum(isDelivery ? 6 : 5)} Cupom de Desconto
-            </h2>
-            <AnimatePresence mode="wait">
-              {appliedCoupon ? (
-                <motion.div key="applied" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
-                  className="flex items-center justify-between bg-green-900/20 border border-green-800/50 rounded-xl px-4 py-3">
-                  <div className="flex items-center gap-3">
-                    <CheckCircle2 size={18} className="text-green-400 shrink-0" />
+              {isDelivery && feeBanner}
+
+              <div className="grid grid-cols-1 gap-2">
+                {([
+                  { key: 'pix' as const, icon: <QrCode size={22} />, label: 'Pix', hint: 'QR Code e copia e cola após confirmar', blocked: false },
+                  { key: 'card' as const, icon: <CreditCard size={22} />, label: 'Cartão na maquininha', hint: 'Crédito ou débito no momento do recebimento', blocked: false },
+                  { key: 'cash' as const, icon: <Banknote size={22} />, label: 'Dinheiro', hint: 'Informe se precisa de troco', blocked: cashBlockedForDelivery },
+                ]).map(opt => (
+                  <button key={opt.key} type="button" disabled={opt.blocked}
+                    onClick={() => setPaymentMethod(opt.key)}
+                    className={`p-4 rounded-2xl border flex items-center gap-3.5 text-left transition-all ${
+                      opt.blocked
+                        ? 'border-zinc-900 bg-zinc-950 text-zinc-700 cursor-not-allowed opacity-50'
+                        : paymentMethod === opt.key
+                          ? 'border-amber-500 bg-amber-500/10 text-amber-500'
+                          : 'border-zinc-800 bg-zinc-900 text-zinc-300'
+                    }`}>
+                    <div className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 ${
+                      paymentMethod === opt.key && !opt.blocked ? 'bg-amber-500 text-zinc-950' : 'bg-zinc-800 text-current'
+                    }`}>
+                      {opt.icon}
+                    </div>
                     <div>
-                      <p className="text-green-400 font-black text-sm uppercase">{appliedCoupon.code}</p>
-                      <p className="text-green-600 text-xs">
-                        {appliedCoupon.discountType === 'percentage' ? `${appliedCoupon.discountValue}%` : fmt(appliedCoupon.discountValue ?? 0)} de desconto
-                        {' — '}<span className="font-bold text-green-400">-{fmt(appliedCoupon.discountAmount ?? 0)}</span>
+                      <p className="font-black text-sm uppercase tracking-wide">{opt.label}</p>
+                      <p className={`text-xs mt-0.5 ${paymentMethod === opt.key && !opt.blocked ? 'text-amber-500/80' : 'text-zinc-500'}`}>
+                        {opt.hint}
                       </p>
                     </div>
-                  </div>
-                  <button type="button" onClick={() => { setAppliedCoupon(null); setCouponError(''); }}
-                    className="p-1.5 text-zinc-500 hover:text-red-400 transition-colors rounded-lg hover:bg-red-900/20">
-                    <X size={18} />
+                    {paymentMethod === opt.key && !opt.blocked && <CheckCircle2 size={18} className="ml-auto shrink-0" />}
                   </button>
-                </motion.div>
-              ) : (
-                <motion.div key="input" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-2">
-                  <div className="flex gap-2">
-                    <div className="relative flex-1">
-                      <Tag size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
-                      <Input value={couponInput}
-                        onChange={e => { setCouponInput(e.target.value.toUpperCase()); setCouponError(''); }}
-                        onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), handleApplyCoupon())}
-                        placeholder="CÓDIGO DO CUPOM"
-                        className="bg-zinc-900 border-zinc-800 h-12 pl-9 text-white font-mono tracking-wider focus:border-amber-500 placeholder:normal-case placeholder:tracking-normal placeholder:font-sans" />
+                ))}
+              </div>
+
+              {cashBlockedForDelivery && (
+                <p className="text-zinc-600 text-xs flex items-center gap-1.5">
+                  <AlertCircle size={12} /> Dinheiro disponível apenas para retirada ou consumo na loja.
+                </p>
+              )}
+
+              {paymentMethod === 'pix' && (
+                <div className="p-4 bg-zinc-900 border border-zinc-800 rounded-2xl space-y-2">
+                  <div className="flex items-center gap-2 text-amber-500">
+                    <QrCode size={16} />
+                    <p className="text-sm font-bold uppercase tracking-wide">Pix</p>
+                  </div>
+                  <p className="text-zinc-300 text-sm">
+                    Após confirmar, você verá o QR Code e a chave copia e cola na tela de confirmação.
+                  </p>
+                  <p className="text-zinc-600 text-xs">
+                    Estrutura pronta para integração futura com gateway Pix.
+                    {paySettings?.pixConfigured
+                      ? ` Chave atual: ${paySettings.pixKeyPreview}`
+                      : ' Configure a chave em Admin → Pagamento para gerar o QR automaticamente.'}
+                  </p>
+                </div>
+              )}
+
+              {paymentMethod === 'card' && (
+                <div className="space-y-3 p-4 bg-zinc-900 border border-zinc-800 rounded-2xl">
+                  <Label className="text-zinc-400 text-sm">Tipo do cartão</Label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {([
+                      { key: 'credit' as const, label: 'Crédito' },
+                      { key: 'debit' as const, label: 'Débito' },
+                    ]).map(opt => (
+                      <button key={opt.key} type="button" onClick={() => setCardType(opt.key)}
+                        className={`h-11 rounded-xl border text-sm font-bold uppercase tracking-wider transition-all ${
+                          cardType === opt.key ? 'border-amber-500 bg-amber-500/10 text-amber-500' : 'border-zinc-800 bg-zinc-950 text-zinc-400'
+                        }`}>
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {paymentMethod === 'cash' && (
+                <div className="space-y-3 p-4 bg-zinc-900 border border-zinc-800 rounded-2xl">
+                  <Label className="text-zinc-400 text-sm">Precisa de troco?</Label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button type="button" onClick={() => setNeedsChange(true)}
+                      className={`h-11 rounded-xl border text-sm font-bold uppercase tracking-wider transition-all ${
+                        needsChange ? 'border-amber-500 bg-amber-500/10 text-amber-500' : 'border-zinc-800 bg-zinc-950 text-zinc-400'
+                      }`}>
+                      Sim
+                    </button>
+                    <button type="button" onClick={() => { setNeedsChange(false); setField('troco', ''); }}
+                      className={`h-11 rounded-xl border text-sm font-bold uppercase tracking-wider transition-all ${
+                        !needsChange ? 'border-amber-500 bg-amber-500/10 text-amber-500' : 'border-zinc-800 bg-zinc-950 text-zinc-400'
+                      }`}>
+                      Não
+                    </button>
+                  </div>
+                  {needsChange && (
+                    <div className="space-y-1.5">
+                      <Label className="text-zinc-400 text-sm">Troco para R$</Label>
+                      <Input
+                        value={form.troco}
+                        onChange={e => setField('troco', e.target.value.replace(/[^\d.,]/g, ''))}
+                        placeholder="Ex: 100"
+                        inputMode="decimal"
+                        className="bg-zinc-950 border-zinc-800 h-12 text-white focus:border-amber-500"
+                      />
                     </div>
+                  )}
+                </div>
+              )}
+
+              <div className="space-y-2">
+                <Label className="text-zinc-400 text-sm">Observações do pedido</Label>
+                <textarea
+                  value={form.observacoes}
+                  onChange={e => setField('observacoes', e.target.value)}
+                  placeholder="Ex: Sem cebola, ponto bem passado..."
+                  className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 text-white text-sm resize-none focus:border-amber-500 focus:outline-none h-20 placeholder:text-zinc-600"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label className="text-zinc-400 text-sm flex items-center gap-1.5"><Tag size={14} /> Cupom</Label>
+                {appliedCoupon ? (
+                  <div className="flex items-center justify-between bg-green-900/20 border border-green-800/50 rounded-xl px-4 py-3">
+                    <div>
+                      <p className="text-green-400 font-black text-sm uppercase">{appliedCoupon.code}</p>
+                      <p className="text-green-600 text-xs">-{fmt(appliedCoupon.discountAmount ?? 0)}</p>
+                    </div>
+                    <button type="button" onClick={() => { setAppliedCoupon(null); setCouponError(''); }}
+                      className="p-1.5 text-zinc-500 hover:text-red-400 transition-colors rounded-lg">
+                      <X size={18} />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex gap-2">
+                    <Input
+                      value={couponInput}
+                      onChange={e => { setCouponInput(e.target.value.toUpperCase()); setCouponError(''); }}
+                      onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), handleApplyCoupon())}
+                      placeholder="CÓDIGO"
+                      className="bg-zinc-900 border-zinc-800 h-12 text-white font-mono tracking-wider focus:border-amber-500"
+                    />
                     <Button type="button" onClick={handleApplyCoupon} disabled={couponLoading || !couponInput.trim()}
-                      className="h-12 px-5 bg-zinc-800 hover:bg-amber-500 hover:text-zinc-950 text-zinc-300 font-bold rounded-xl transition-all">
+                      className="h-12 px-5 bg-zinc-800 hover:bg-amber-500 hover:text-zinc-950 text-zinc-300 font-bold rounded-xl">
                       {couponLoading ? <Loader2 size={16} className="animate-spin" /> : 'Aplicar'}
                     </Button>
                   </div>
-                  {couponError && (
-                    <motion.p initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }}
-                      className="text-red-400 text-xs flex items-center gap-1.5 px-1">
-                      <X size={12} /> {couponError}
-                    </motion.p>
-                  )}
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </section>
+                )}
+                {couponError && <p className="text-red-400 text-xs">{couponError}</p>}
+              </div>
 
-          {submitError && (
-            <div className="bg-red-900/30 border border-red-800 rounded-xl p-4 text-red-400 text-sm text-center">{submitError}</div>
+              {submitError && (
+                <div className="bg-red-900/30 border border-red-800 rounded-xl p-4 text-red-400 text-sm text-center">{submitError}</div>
+              )}
+            </motion.section>
           )}
-
-          {/* Sticky summary */}
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 sticky bottom-4 z-10 shadow-2xl">
-            <div className="space-y-1.5 mb-4 text-sm">
-              {cartItems.map((ci, idx) => {
-                const addons = Array.isArray(ci.selectedAddons) ? ci.selectedAddons : [];
-                const line = (Number(ci.item.price) + addons.reduce((acc, a) => acc + (Number(a.price) || 0), 0)) * ci.quantity;
-                return (
-                <div key={ci.lineId || idx}>
-                  <div className="flex justify-between text-zinc-400">
-                    <span>{ci.quantity}x {ci.item.name}</span>
-                    <span>{fmt(line)}</span>
-                  </div>
-                  {addons.length > 0 && (
-                    <p className="text-zinc-600 text-xs pl-3">+ {addons.map(a => a.name).join(', ')}</p>
-                  )}
-                  {ci.notes && (
-                    <p className="text-zinc-600 text-xs pl-3 italic">Obs: {ci.notes}</p>
-                  )}
-                </div>
-                );
-              })}
-              <div className="flex justify-between text-zinc-500 text-xs pt-1">
-                <span>Subtotal</span><span className="text-zinc-300">{fmt(subtotal)}</span>
-              </div>
-              {isDelivery && (
-                <div className="flex justify-between text-zinc-500 text-xs">
-                  <span>Taxa de entrega {usingKm && distanceKm !== null ? `(${distanceKm.toFixed(1)}km)` : ''}</span>
-                  <span className={feeFound === true ? 'text-zinc-300' : 'text-orange-400'}>
-                    {feeFound === true ? fmt(deliveryFee) : feeFound === false ? 'A consultar' : 'A calcular'}
-                  </span>
-                </div>
-              )}
-              {discount > 0 && (
-                <div className="flex justify-between text-green-400 text-sm font-bold">
-                  <span className="flex items-center gap-1"><Tag size={12} /> {appliedCoupon?.code}</span>
-                  <span>-{fmt(discount)}</span>
-                </div>
-              )}
-              <div className="flex justify-between text-zinc-500 text-xs">
-                <span>Pagamento</span>
-                <span className="text-zinc-300">
-                  {paymentMethod === 'pix' ? 'Pix' : paymentMethod === 'cash' ? 'Dinheiro' : `Cartão (${cardType === 'credit' ? 'Crédito' : 'Débito'})`}
-                </span>
-              </div>
-              <div className="border-t border-zinc-800 pt-2 flex justify-between font-bold text-white">
-                <span>Total</span>
-                <span className="text-amber-500 text-xl">{fmt(total)}</span>
-              </div>
-            </div>
-            <Button type="submit" disabled={submitting} size="lg"
-              className="w-full min-h-[56px] font-bold tracking-wider rounded-xl bg-amber-500 hover:bg-amber-400 text-zinc-950 text-base">
-              {submitting ? <><Loader2 size={20} className="animate-spin mr-2" /> Enviando...</> : 'CONFIRMAR PEDIDO'}
-            </Button>
-            <p className="text-xs text-zinc-600 text-center mt-2">
-              {paymentMethod === 'pix' ? 'Na próxima tela você paga via Pix e pode enviar o comprovante.' : 'Pedido enviado ao painel da loja.'}
-            </p>
-          </div>
-        </form>
+        </AnimatePresence>
       </main>
+
+      {/* Sticky footer summary — payment step */}
+      {step === 'payment' && (
+        <div className="fixed bottom-0 inset-x-0 z-40 bg-zinc-950/95 border-t border-zinc-800 px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+          <div className="max-w-md mx-auto space-y-3">
+            <div className="flex justify-between text-sm text-zinc-400">
+              <span>
+                {cartItems.length} {cartItems.length === 1 ? 'item' : 'itens'}
+                {isDelivery && usingKm && distanceKm !== null ? ` · ${distanceKm.toFixed(1)}km` : ''}
+              </span>
+              <span className="text-amber-500 font-black text-lg">{fmt(total)}</span>
+            </div>
+            {isDelivery && (
+              <div className="flex justify-between text-xs text-zinc-500 -mt-1">
+                <span>Taxa de entrega</span>
+                <span>{feeFound === true ? fmt(deliveryFee) : feeFound === false ? 'A consultar' : '—'}</span>
+              </div>
+            )}
+            <Button type="button" onClick={onConfirmOrder} disabled={submitting} size="lg"
+              className="w-full min-h-[52px] font-bold tracking-wider rounded-xl bg-amber-500 hover:bg-amber-400 text-zinc-950 text-base">
+              {submitting
+                ? <><Loader2 size={20} className="animate-spin mr-2" /> Enviando...</>
+                : 'CONFIRMAR PEDIDO'}
+            </Button>
+          </div>
+        </div>
+      )}
     </PageTransition>
   );
 }
