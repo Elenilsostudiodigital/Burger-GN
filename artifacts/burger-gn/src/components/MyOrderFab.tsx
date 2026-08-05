@@ -1,7 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useLocation } from 'wouter';
 import { motion, AnimatePresence } from 'framer-motion';
-import { getMyOrder, MyOrderRef } from '../lib/myOrder';
+import {
+  getMyOrder, MyOrderRef, archiveMyOrder, markDeliveredPromptStarted,
+  DELIVERY_CONFIRM_TIMEOUT_MS,
+} from '../lib/myOrder';
+import { trackOrder } from '../lib/api';
 
 /** Fixed "Meu Pedido" entry — survives navigation via localStorage. */
 export function MyOrderFab() {
@@ -19,9 +23,40 @@ export function MyOrderFab() {
     };
   }, [location]);
 
+  // Background: if delivered and 60s elapsed without answer, archive + hide FAB.
+  useEffect(() => {
+    if (!myOrder?.trackingId) return;
+    let cancelled = false;
+
+    const check = async () => {
+      try {
+        const order = await trackOrder(myOrder.trackingId);
+        if (cancelled) return;
+        if (order.status === 'cancelled') {
+          archiveMyOrder('manual');
+          return;
+        }
+        if (order.status !== 'done') return;
+        if (order.review) {
+          archiveMyOrder('reviewed');
+          return;
+        }
+        const promptAt = markDeliveredPromptStarted(order.trackingId)
+          || order.deliveredAt
+          || new Date().toISOString();
+        if (Date.now() - new Date(promptAt).getTime() >= DELIVERY_CONFIRM_TIMEOUT_MS) {
+          archiveMyOrder('timeout');
+        }
+      } catch { /* ignore */ }
+    };
+
+    check();
+    const id = setInterval(check, 10000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [myOrder?.trackingId]);
+
   if (!myOrder) return null;
 
-  // Hide on admin and while already viewing the order screens.
   if (
     location.startsWith('/admin') ||
     location.startsWith('/checkout') ||

@@ -206,8 +206,31 @@ export interface Order {
   receiptDataUrl?: string | null;
   receiptUploadedAt?: string | null;
   rejectReason?: string | null;
+  review?: OrderReview | null;
+  deliveredAt?: string | null;
   history?: StatusHistoryEntry[];
   customerNotifyMessage?: string | null;
+}
+
+export interface OrderReview {
+  stars: number;
+  comment: string;
+  deliveredOk: boolean;
+  createdAt: string;
+  orderNumber: number;
+}
+
+export interface AdminReviewRow {
+  orderId: number;
+  orderNumber: number;
+  trackingId: string;
+  customerName: string;
+  phone: string;
+  stars: number;
+  comment: string;
+  deliveredOk: boolean;
+  createdAt: string;
+  orderCreatedAt: string;
 }
 export interface CreateOrderPayload {
   customerName: string; phone: string;
@@ -237,6 +260,11 @@ export const updateOrderWorkflow = (
   api.patch(`/orders/${id}/status`, { workflow, rejectReason: opts?.rejectReason }) as Promise<Order>;
 export const uploadOrderReceipt = (trackingId: string, receiptDataUrl: string) =>
   api.post(`/orders/track/${trackingId}/receipt`, { receiptDataUrl }) as Promise<Order>;
+export const submitOrderReview = (
+  trackingId: string,
+  d: { deliveredOk: boolean; stars?: number; comment?: string },
+) => api.post(`/orders/track/${trackingId}/review`, d) as Promise<Order & { alreadyReviewed?: boolean }>;
+export const getAdminReviews = () => api.get("/admin/reviews") as Promise<AdminReviewRow[]>;
 export const updateOrderPaymentStatus = (id: number, paymentStatus: PaymentStatus) =>
   api.patch(`/orders/${id}/payment-status`, { paymentStatus }) as Promise<Order>;
 export const getPopularProducts = () =>

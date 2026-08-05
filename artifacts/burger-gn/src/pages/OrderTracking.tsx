@@ -1,18 +1,23 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useParams, Link, useLocation } from 'wouter';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
-  trackOrder, getPaymentSettings, Order, ORDER_TYPE_LABELS, PAYMENT_METHOD_LABELS, PAYMENT_STATUS_LABELS,
+  trackOrder, getPaymentSettings, submitOrderReview, Order,
+  ORDER_TYPE_LABELS, PAYMENT_METHOD_LABELS, PAYMENT_STATUS_LABELS,
 } from '../lib/api';
-import { getMyOrder, clearMyOrder, saveMyOrder } from '../lib/myOrder';
+import {
+  getMyOrder, clearMyOrder, saveMyOrder, archiveMyOrder,
+  markDeliveredPromptStarted, DELIVERY_CONFIRM_TIMEOUT_MS,
+} from '../lib/myOrder';
 import { notifyOrderStatusChange } from '../lib/pushNotifications';
-import { ArrowLeft, Clock, Home, AlertCircle, Timer } from 'lucide-react';
+import { buildPostDeliverySurveyMessage, sendPostDeliverySurveyWhenReady } from '../lib/whatsappFuture';
+import { ArrowLeft, Clock, Home, AlertCircle, Timer, Star, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { PageTransition } from '../components/PageTransition';
 import { BottomNav } from '../components/BottomNav';
-import { MyOrderFab } from '../components/MyOrderFab';
 
 type TimelineKey = 'received' | 'accepted' | 'preparing' | 'ready' | 'out' | 'done';
+type DeliveryPhase = 'confirm' | 'rate' | 'thanks' | null;
 
 const TIMELINE: Array<{ key: TimelineKey; label: string; emoji: string }> = [
   { key: 'received', label: 'Pedido Recebido', emoji: '🟡' },
@@ -29,8 +34,8 @@ function resolveTimelineIndex(order: Order): number {
   if (wf === 'done' || order.status === 'done') return 5;
   if (wf === 'out' || order.status === 'delivery') return 4;
   if (wf === 'ready') return 3;
-  if (wf === 'preparing') return 2; // Aceito + Em preparo: highlight Em Preparo
-  return 0; // Pendente / new
+  if (wf === 'preparing') return 2;
+  return 0;
 }
 
 function fmt(val: string) {
@@ -45,6 +50,14 @@ function OrderTimelineView({ trackingId }: { trackingId: string }) {
   const [prepMax, setPrepMax] = useState(45);
   const lastWorkflow = useRef<string | null>(null);
 
+  const [deliveryPhase, setDeliveryPhase] = useState<DeliveryPhase>(null);
+  const [stars, setStars] = useState(0);
+  const [comment, setComment] = useState('');
+  const [submittingReview, setSubmittingReview] = useState(false);
+  const [reviewError, setReviewError] = useState('');
+  const [secondsLeft, setSecondsLeft] = useState<number | null>(null);
+  const closedRef = useRef(false);
+
   useEffect(() => {
     getPaymentSettings()
       .then(s => {
@@ -54,12 +67,20 @@ function OrderTimelineView({ trackingId }: { trackingId: string }) {
       .catch(() => {});
   }, []);
 
+  const closeAndArchive = (reason: 'reviewed' | 'declined' | 'timeout') => {
+    if (closedRef.current) return;
+    closedRef.current = true;
+    archiveMyOrder(reason);
+    setDeliveryPhase(null);
+    setLocation('/cardapio');
+  };
+
   useEffect(() => {
     let alive = true;
     const fetchOrder = async () => {
       try {
         const data = await trackOrder(trackingId);
-        if (!alive) return;
+        if (!alive || closedRef.current) return;
         setOrder(data);
         setError(false);
         saveMyOrder({
@@ -81,8 +102,32 @@ function OrderTimelineView({ trackingId }: { trackingId: string }) {
         }
         lastWorkflow.current = String(wf);
 
-        if (data.status === 'done' || data.status === 'cancelled') {
-          // Keep ref so customer can still reopen history until they clear it.
+        if (data.status === 'done') {
+          // Queue future WhatsApp survey (never sends until API exists).
+          void sendPostDeliverySurveyWhenReady({
+            phone: data.phone,
+            orderNumber: data.orderNumber,
+            customerName: data.customerName,
+            trackingId: data.trackingId,
+            message: buildPostDeliverySurveyMessage(data.orderNumber, data.customerName),
+          });
+
+          if (data.review) {
+            // Already reviewed — end Meu Pedido cycle.
+            closeAndArchive('reviewed');
+            return;
+          }
+
+          const promptAt = markDeliveredPromptStarted(data.trackingId)
+            || data.deliveredAt
+            || new Date().toISOString();
+          const elapsed = Date.now() - new Date(promptAt).getTime();
+          if (elapsed >= DELIVERY_CONFIRM_TIMEOUT_MS) {
+            closeAndArchive('timeout');
+            return;
+          }
+
+          setDeliveryPhase(prev => prev ?? 'confirm');
         }
       } catch {
         if (alive) setError(true);
@@ -91,7 +136,58 @@ function OrderTimelineView({ trackingId }: { trackingId: string }) {
     fetchOrder();
     const interval = setInterval(fetchOrder, 8000);
     return () => { alive = false; clearInterval(interval); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [trackingId]);
+
+  // 60s auto-close while confirmation/rating is open
+  useEffect(() => {
+    if (deliveryPhase !== 'confirm' && deliveryPhase !== 'rate') return;
+    const ref = getMyOrder();
+    const started = ref?.deliveredPromptAt ? new Date(ref.deliveredPromptAt).getTime() : Date.now();
+
+    const tick = () => {
+      const left = Math.max(0, DELIVERY_CONFIRM_TIMEOUT_MS - (Date.now() - started));
+      setSecondsLeft(Math.ceil(left / 1000));
+      if (left <= 0) closeAndArchive('timeout');
+    };
+    tick();
+    const id = setInterval(tick, 250);
+    return () => clearInterval(id);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deliveryPhase]);
+
+  const handleDeliveredOk = (ok: boolean) => {
+    if (!ok) {
+      setSubmittingReview(true);
+      submitOrderReview(trackingId, { deliveredOk: false, stars: 0, comment: '' })
+        .catch(() => {})
+        .finally(() => {
+          setSubmittingReview(false);
+          closeAndArchive('declined');
+        });
+      return;
+    }
+    setDeliveryPhase('rate');
+  };
+
+  const handleSubmitReview = async () => {
+    if (stars < 1) { setReviewError('Escolha de 1 a 5 estrelas.'); return; }
+    setSubmittingReview(true);
+    setReviewError('');
+    try {
+      await submitOrderReview(trackingId, {
+        deliveredOk: true,
+        stars,
+        comment,
+      });
+      setDeliveryPhase('thanks');
+      setTimeout(() => closeAndArchive('reviewed'), 1600);
+    } catch (err) {
+      setReviewError(err instanceof Error ? err.message : 'Erro ao enviar avaliação');
+    } finally {
+      setSubmittingReview(false);
+    }
+  };
 
   if (error) {
     return (
@@ -115,7 +211,8 @@ function OrderTimelineView({ trackingId }: { trackingId: string }) {
 
   const cancelled = order.status === 'cancelled';
   const current = resolveTimelineIndex(order);
-  const acceptedOrFurther = current >= 2;
+  const acceptedOrFurther = current >= 2 && current < 5;
+  const delivered = order.status === 'done';
 
   return (
     <PageTransition className="bg-[#0a0a0a]">
@@ -133,33 +230,108 @@ function OrderTimelineView({ trackingId }: { trackingId: string }) {
       </header>
 
       <main className="max-w-md mx-auto px-4 py-6 pb-28 space-y-5">
-        <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
-          className="rounded-3xl border border-zinc-800 bg-gradient-to-b from-zinc-900 to-zinc-950 p-5 text-center">
-          {cancelled ? (
-            <>
-              <p className="text-4xl mb-2">❌</p>
-              <h2 className="text-red-400 font-black text-xl uppercase">Pedido Recusado</h2>
-              {order.rejectReason && (
-                <div className="mt-3 flex items-start gap-2 text-left bg-red-950/40 border border-red-900/50 rounded-xl px-3 py-2.5">
-                  <AlertCircle size={16} className="text-red-400 mt-0.5 shrink-0" />
-                  <p className="text-red-200 text-sm"><span className="font-bold">Motivo: </span>{order.rejectReason}</p>
-                </div>
+        {/* Post-delivery confirmation / rating */}
+        <AnimatePresence mode="wait">
+          {delivered && deliveryPhase === 'confirm' && (
+            <motion.div key="confirm" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
+              className="rounded-3xl border border-amber-500/40 bg-gradient-to-b from-amber-500/15 to-zinc-950 p-6 text-center space-y-5">
+              <p className="text-4xl">🎉</p>
+              <div>
+                <h2 className="text-white font-black text-xl uppercase tracking-tight">Seu pedido foi entregue.</h2>
+                <p className="text-zinc-300 text-sm mt-2">Seu pedido chegou corretamente?</p>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <button type="button" disabled={submittingReview} onClick={() => handleDeliveredOk(true)}
+                  className="h-12 rounded-xl bg-emerald-500 text-zinc-950 font-black uppercase text-sm hover:bg-emerald-400">
+                  Sim
+                </button>
+                <button type="button" disabled={submittingReview} onClick={() => handleDeliveredOk(false)}
+                  className="h-12 rounded-xl bg-zinc-800 text-zinc-200 font-black uppercase text-sm hover:bg-zinc-700 border border-zinc-700">
+                  Não
+                </button>
+              </div>
+              {secondsLeft !== null && (
+                <p className="text-zinc-500 text-xs">Esta tela fecha em {secondsLeft}s</p>
               )}
-            </>
-          ) : (
-            <>
-              <p className="text-zinc-500 text-xs uppercase tracking-wider mb-1">Status atual</p>
-              <h2 className="text-amber-400 font-black text-xl uppercase">
-                {TIMELINE[Math.max(0, current)]?.emoji} {TIMELINE[Math.max(0, current)]?.label}
-              </h2>
-              <p className="text-zinc-600 text-xs mt-2 flex items-center justify-center gap-1">
-                <Clock size={12} /> Atualiza automaticamente
-              </p>
-            </>
+            </motion.div>
           )}
-        </motion.div>
 
-        {!cancelled && acceptedOrFurther && (
+          {delivered && deliveryPhase === 'rate' && (
+            <motion.div key="rate" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
+              className="rounded-3xl border border-zinc-800 bg-zinc-900 p-6 space-y-5">
+              <div className="text-center">
+                <h2 className="text-white font-black text-lg uppercase">Como foi sua experiência?</h2>
+                <p className="text-zinc-500 text-xs mt-1">Pedido #{order.orderNumber}</p>
+              </div>
+              <div className="flex justify-center gap-2">
+                {[1, 2, 3, 4, 5].map(n => (
+                  <button key={n} type="button" onClick={() => { setStars(n); setReviewError(''); }}
+                    className="p-1 transition-transform active:scale-90" aria-label={`${n} estrelas`}>
+                    <Star size={36}
+                      className={n <= stars ? 'fill-amber-400 text-amber-400' : 'text-zinc-700'}
+                    />
+                  </button>
+                ))}
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-zinc-500 text-xs">Comentário (opcional)</label>
+                <textarea
+                  value={comment}
+                  onChange={e => setComment(e.target.value)}
+                  placeholder="Conte como foi..."
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-white text-sm resize-none h-24 focus:border-amber-500 focus:outline-none"
+                />
+              </div>
+              {reviewError && <p className="text-red-400 text-sm text-center">{reviewError}</p>}
+              <Button type="button" disabled={submittingReview} onClick={handleSubmitReview}
+                className="w-full h-12 rounded-xl bg-amber-500 hover:bg-amber-400 text-zinc-950 font-black uppercase">
+                {submittingReview ? <Loader2 className="animate-spin" size={18} /> : 'Enviar Avaliação'}
+              </Button>
+              {secondsLeft !== null && (
+                <p className="text-zinc-600 text-xs text-center">Fecha automaticamente em {secondsLeft}s</p>
+              )}
+            </motion.div>
+          )}
+
+          {delivered && deliveryPhase === 'thanks' && (
+            <motion.div key="thanks" initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }}
+              className="rounded-3xl border border-emerald-500/40 bg-emerald-500/10 p-8 text-center space-y-2">
+              <p className="text-4xl">⭐</p>
+              <h2 className="text-emerald-400 font-black text-xl uppercase">Obrigado!</h2>
+              <p className="text-zinc-400 text-sm">Sua avaliação foi registrada.</p>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {(!delivered || !deliveryPhase) && (
+          <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
+            className="rounded-3xl border border-zinc-800 bg-gradient-to-b from-zinc-900 to-zinc-950 p-5 text-center">
+            {cancelled ? (
+              <>
+                <p className="text-4xl mb-2">❌</p>
+                <h2 className="text-red-400 font-black text-xl uppercase">Pedido Recusado</h2>
+                {order.rejectReason && (
+                  <div className="mt-3 flex items-start gap-2 text-left bg-red-950/40 border border-red-900/50 rounded-xl px-3 py-2.5">
+                    <AlertCircle size={16} className="text-red-400 mt-0.5 shrink-0" />
+                    <p className="text-red-200 text-sm"><span className="font-bold">Motivo: </span>{order.rejectReason}</p>
+                  </div>
+                )}
+              </>
+            ) : (
+              <>
+                <p className="text-zinc-500 text-xs uppercase tracking-wider mb-1">Status atual</p>
+                <h2 className="text-amber-400 font-black text-xl uppercase">
+                  {TIMELINE[Math.max(0, current)]?.emoji} {TIMELINE[Math.max(0, current)]?.label}
+                </h2>
+                <p className="text-zinc-600 text-xs mt-2 flex items-center justify-center gap-1">
+                  <Clock size={12} /> Atualiza automaticamente
+                </p>
+              </>
+            )}
+          </motion.div>
+        )}
+
+        {!cancelled && acceptedOrFurther && !delivered && (
           <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
             className="rounded-3xl border border-amber-500/30 bg-amber-500/10 p-5 space-y-2">
             <p className="text-amber-300 font-bold text-sm">
@@ -183,7 +355,6 @@ function OrderTimelineView({ trackingId }: { trackingId: string }) {
               {TIMELINE.map((step, idx) => {
                 const done = idx < current || (idx === current && current === 5);
                 const active = idx === current && current < 5;
-                // When preparing (index 2), mark accepted (1) as done/green too
                 const completed = idx < current || (current >= 2 && idx === 1) || done;
                 const isFuture = !completed && !active;
 
@@ -199,7 +370,7 @@ function OrderTimelineView({ trackingId }: { trackingId: string }) {
                       </div>
                       {idx < TIMELINE.length - 1 && (
                         <div className={`w-0.5 flex-1 min-h-[28px] my-1 ${
-                          idx < current || (current >= 2 && idx === 0) ? 'bg-emerald-500' : 'bg-zinc-800'
+                          idx < current ? 'bg-emerald-500' : 'bg-zinc-800'
                         }`} />
                       )}
                     </div>
@@ -209,12 +380,8 @@ function OrderTimelineView({ trackingId }: { trackingId: string }) {
                       }`}>
                         {step.label}
                       </p>
-                      {active && (
-                        <p className="text-amber-500/80 text-xs mt-0.5 font-medium">Etapa atual</p>
-                      )}
-                      {completed && !active && (
-                        <p className="text-emerald-600 text-xs mt-0.5">Concluído</p>
-                      )}
+                      {active && <p className="text-amber-500/80 text-xs mt-0.5 font-medium">Etapa atual</p>}
+                      {completed && !active && <p className="text-emerald-600 text-xs mt-0.5">Concluído</p>}
                     </div>
                   </div>
                 );
@@ -263,7 +430,6 @@ function OrderTimelineView({ trackingId }: { trackingId: string }) {
   );
 }
 
-/** /meu-pedido — loads tracking id from localStorage */
 export function MyOrderPage() {
   const [, setLocation] = useLocation();
   const ref = getMyOrder();
@@ -282,7 +448,6 @@ export function MyOrderPage() {
           </Button>
         </div>
         <BottomNav />
-        <MyOrderFab />
       </PageTransition>
     );
   }

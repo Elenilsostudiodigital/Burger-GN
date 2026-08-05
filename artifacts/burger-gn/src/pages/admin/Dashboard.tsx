@@ -16,7 +16,7 @@ import {
   LayoutDashboard, UtensilsCrossed, LogOut, Bell, BellOff,
   Printer, Clock, MessageCircle, History,
   XCircle, Tag, MapPin, Navigation, Settings, Route, Upload, TrendingUp,
-  ChevronLeft, ChevronRight, GripVertical, X, Crown, Filter, ImageIcon, CheckCircle2, Check, Ban,
+  ChevronLeft, ChevronRight, GripVertical, X, Crown, Filter, ImageIcon, CheckCircle2, Check, Ban, Star,
 } from 'lucide-react';
 
 /** Board columns — pending orders never auto-advance. */
@@ -771,6 +771,7 @@ export default function AdminDashboard() {
         <div className="max-w-[1800px] mx-auto flex overflow-x-auto no-scrollbar">
           {[
             { href: '/admin', icon: LayoutDashboard, label: 'Pedidos', active: true },
+            { href: '/admin/avaliacoes', icon: Star, label: 'Avaliações', active: false },
             { href: '/admin/cardapio', icon: UtensilsCrossed, label: 'Cardápio' },
             { href: '/admin/financeiro', icon: TrendingUp, label: 'Financeiro' },
             { href: '/admin/cupons', icon: Tag, label: 'Cupons' },

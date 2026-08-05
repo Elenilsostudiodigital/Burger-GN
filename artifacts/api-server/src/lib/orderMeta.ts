@@ -9,6 +9,14 @@ export interface StatusHistoryEntry {
   at: string;
 }
 
+export interface OrderReview {
+  stars: number;
+  comment: string;
+  deliveredOk: boolean;
+  createdAt: string;
+  orderNumber: number;
+}
+
 export interface OrderMeta {
   workflow?: WorkflowStage;
   cardType?: CardType;
@@ -20,6 +28,10 @@ export interface OrderMeta {
   pixKey?: string;
   /** Present when the order was refused by an attendant. */
   rejectReason?: string;
+  /** Customer review after delivery confirmation. */
+  review?: OrderReview;
+  /** When admin marked as delivered (ISO). Used for post-delivery UX timing. */
+  deliveredAt?: string;
 }
 
 export const WORKFLOW_LABELS: Record<WorkflowStage | "cancelled", string> = {
@@ -69,6 +81,8 @@ export function serializeOrderNotes(publicNotes: string, meta: OrderMeta): strin
   if (meta.pixCopyPaste) cleanMeta.pixCopyPaste = meta.pixCopyPaste;
   if (meta.pixKey) cleanMeta.pixKey = meta.pixKey;
   if (meta.rejectReason) cleanMeta.rejectReason = meta.rejectReason;
+  if (meta.review) cleanMeta.review = meta.review;
+  if (meta.deliveredAt) cleanMeta.deliveredAt = meta.deliveredAt;
 
   const hasMeta = Object.keys(cleanMeta).length > 0;
   const body = (publicNotes || "").trim();
@@ -133,4 +147,14 @@ export function buildCustomerNotifyMessage(
     default:
       return `Olá ${name}! Recebemos seu pedido #${orderNumber} e ele está pendente de confirmação. — The Burger GN`;
   }
+}
+
+/** Future WhatsApp post-delivery survey — not sent until WA API is integrated. */
+export function buildPostDeliverySurveyMessage(orderNumber: number, customerName: string): string {
+  const name = (customerName || "cliente").trim().split(/\s+/)[0] || "cliente";
+  return (
+    `Olá ${name}! Seu pedido #${orderNumber} foi entregue. 🎉\n\n` +
+    `Como foi sua experiência com a The Burger GN?\n` +
+    `Responda com uma nota de 1 a 5 estrelas e, se quiser, um comentário.`
+  );
 }

@@ -9,8 +9,8 @@ import { calcDiscount } from "./coupons";
 import { haversineKm, findKmTier } from "./km_delivery";
 import {
   parseOrderNotes, serializeOrderNotes, appendHistory, resolveWorkflow, WORKFLOW_TO_STATUS,
-  buildCustomerNotifyMessage,
-  type WorkflowStage, type CardType, type OrderMeta,
+  buildCustomerNotifyMessage, buildPostDeliverySurveyMessage,
+  type WorkflowStage, type CardType, type OrderMeta, type OrderReview,
 } from "../lib/orderMeta";
 import { buildStaticPixPayload, decodePixSettings } from "../lib/staticPix";
 import crypto from "node:crypto";
@@ -32,6 +32,8 @@ function enrichOrder<T extends { notes: string; status: string }>(order: T) {
     receiptDataUrl: meta.receiptDataUrl ?? null,
     receiptUploadedAt: meta.receiptUploadedAt ?? null,
     rejectReason: meta.rejectReason ?? null,
+    review: meta.review ?? null,
+    deliveredAt: meta.deliveredAt ?? null,
     history: meta.history ?? [],
   };
 }
@@ -393,6 +395,9 @@ router.patch("/orders/:id/status", requireCompanyAuth, async (req, res) => {
       nextMeta = appendHistory(nextMeta, wf);
       nextMeta.workflow = wf;
       notifyStage = wf;
+      if (wf === "done" && !nextMeta.deliveredAt) {
+        nextMeta.deliveredAt = new Date().toISOString();
+      }
     } else if (body.status && ["new", "preparing", "delivery", "done"].includes(body.status)) {
       nextStatus = body.status;
       const mapped: WorkflowStage =
@@ -401,6 +406,9 @@ router.patch("/orders/:id/status", requireCompanyAuth, async (req, res) => {
         body.status === "delivery" ? "out" : "done";
       nextMeta = appendHistory(nextMeta, mapped);
       notifyStage = mapped;
+      if (mapped === "done" && !nextMeta.deliveredAt) {
+        nextMeta.deliveredAt = new Date().toISOString();
+      }
     } else {
       res.status(400).json({ error: "Invalid status" }); return;
     }
@@ -424,6 +432,12 @@ router.patch("/orders/:id/status", requireCompanyAuth, async (req, res) => {
         )
       : null;
 
+    // Future WhatsApp: post-delivery survey message is prepared but NOT sent (no API yet).
+    const futureWhatsappSurvey =
+      notifyStage === "done"
+        ? buildPostDeliverySurveyMessage(order.orderNumber, order.customerName)
+        : null;
+
     broadcastSSE(req.companyId!, "order_status", {
       id: order.id,
       trackingId: order.trackingId,
@@ -431,14 +445,111 @@ router.patch("/orders/:id/status", requireCompanyAuth, async (req, res) => {
       workflow: enriched.workflow,
       rejectReason: nextMeta.rejectReason ?? null,
       customerNotifyMessage,
+      futureWhatsappSurvey,
     });
     res.json({
       ...enriched,
       items: (await getOrderWithItems(order.id))?.items ?? [],
       customerNotifyMessage,
+      futureWhatsappSurvey,
     });
   } catch (err) {
     req.log.error({ err }, "Failed to update order status");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Public: submit delivery confirmation / review
+router.post("/orders/track/:trackingId/review", async (req, res) => {
+  try {
+    const { trackingId } = req.params as { trackingId: string };
+    const body = req.body as {
+      deliveredOk?: boolean;
+      stars?: number;
+      comment?: string;
+    };
+
+    const [existing] = await db.select().from(ordersTable).where(eq(ordersTable.trackingId, trackingId));
+    if (!existing) { res.status(404).json({ error: "Order not found" }); return; }
+    if (existing.status !== "done") {
+      res.status(400).json({ error: "Avaliação disponível apenas após a entrega." }); return;
+    }
+
+    const { publicNotes, meta } = parseOrderNotes(existing.notes);
+    if (meta.review) {
+      res.json({ ...enrichOrder(existing), alreadyReviewed: true });
+      return;
+    }
+
+    const deliveredOk = body.deliveredOk !== false;
+    let stars = Number(body.stars);
+    if (deliveredOk) {
+      if (!Number.isFinite(stars) || stars < 1 || stars > 5) {
+        res.status(400).json({ error: "Informe uma nota de 1 a 5 estrelas." }); return;
+      }
+      stars = Math.round(stars);
+    } else {
+      stars = 0;
+    }
+
+    const review: OrderReview = {
+      stars,
+      comment: typeof body.comment === "string" ? body.comment.trim().slice(0, 1000) : "",
+      deliveredOk,
+      createdAt: new Date().toISOString(),
+      orderNumber: existing.orderNumber,
+    };
+
+    const nextMeta: OrderMeta = { ...meta, review };
+    const [order] = await db.update(ordersTable)
+      .set({ notes: serializeOrderNotes(publicNotes, nextMeta), updatedAt: new Date() })
+      .where(eq(ordersTable.id, existing.id))
+      .returning();
+
+    broadcastSSE(existing.companyId, "order_review", {
+      id: order.id,
+      trackingId: order.trackingId,
+      orderNumber: order.orderNumber,
+      review,
+    });
+
+    res.json(enrichOrder(order));
+  } catch (err) {
+    req.log.error({ err }, "Failed to save review");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Admin: list customer reviews
+router.get("/admin/reviews", requireCompanyAuth, async (req, res) => {
+  try {
+    const orders = await db.select().from(ordersTable)
+      .where(eq(ordersTable.companyId, req.companyId!))
+      .orderBy(desc(ordersTable.createdAt));
+
+    const reviews = orders
+      .map(o => {
+        const enriched = enrichOrder(o);
+        if (!enriched.review) return null;
+        return {
+          orderId: o.id,
+          orderNumber: o.orderNumber,
+          trackingId: o.trackingId,
+          customerName: o.customerName,
+          phone: o.phone,
+          stars: enriched.review.stars,
+          comment: enriched.review.comment,
+          deliveredOk: enriched.review.deliveredOk,
+          createdAt: enriched.review.createdAt,
+          orderCreatedAt: o.createdAt,
+        };
+      })
+      .filter((r): r is NonNullable<typeof r> => !!r)
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+    res.json(reviews);
+  } catch (err) {
+    req.log.error({ err }, "Failed to list reviews");
     res.status(500).json({ error: "Internal server error" });
   }
 });
