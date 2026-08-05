@@ -386,10 +386,66 @@ export function buildCustomerNotifyMessage(
   }
 }
 
+/**
+ * TEMP (dev/test): all external WhatsApp communication is OFF.
+ * Structure kept for future official WhatsApp Business API reactivation.
+ * Flip to `true` only when the API integration is ready.
+ */
+export const WHATSAPP_EXTERNAL_ENABLED = false;
+
+/** Opens WhatsApp (wa.me). No-op while WHATSAPP_EXTERNAL_ENABLED is false. */
 export function openCustomerWhatsapp(phone: string, message: string) {
+  if (!WHATSAPP_EXTERNAL_ENABLED) return;
   const number = normalizePhoneForWhatsapp(phone);
   if (!number || number === "5500000000000" || number.replace(/\D/g, "").replace(/^55/, "").length < 10) return;
   window.open(`https://wa.me/${number}?text=${encodeURIComponent(message)}`, "_blank");
+}
+
+/** Short in-app labels for Meu Pedido status banners. */
+export function customerInAppStatusMessage(
+  workflow: string,
+  opts?: { paymentStatus?: PaymentStatus; rejectReason?: string | null; receiptRejectReason?: string | null },
+): { title: string; body: string } {
+  if (workflow === "cancelled") {
+    return {
+      title: "Pedido recusado",
+      body: opts?.rejectReason ? `Motivo: ${opts.rejectReason}` : "A loja recusou este pedido.",
+    };
+  }
+  if (opts?.paymentStatus === "paid" && (workflow === "new" || workflow === "payment_confirmed")) {
+    return {
+      title: "Pagamento confirmado",
+      body: "Seu pedido foi enviado para análise da loja.",
+    };
+  }
+  if (opts?.paymentStatus === "failed" || opts?.receiptRejectReason) {
+    return {
+      title: "Comprovante recusado",
+      body: opts.receiptRejectReason
+        ? `Motivo: ${opts.receiptRejectReason}. Você pode reenviar pelo app.`
+        : "Envie um novo comprovante pelo app.",
+    };
+  }
+  switch (workflow) {
+    case "awaiting_payment":
+      return {
+        title: "Pagamento aguardando conferência",
+        body: "Seu comprovante foi recebido e será analisado pela equipe.",
+      };
+    case "new":
+      return { title: "Pedido recebido", body: "Aguardando a loja confirmar seu pedido." };
+    case "accepted":
+    case "preparing":
+      return { title: "Pedido aceito", body: "Seu pedido já está em preparo." };
+    case "ready":
+      return { title: "Pedido pronto", body: "Seu pedido está pronto!" };
+    case "out":
+      return { title: "Saiu para entrega", body: "Seu pedido está a caminho." };
+    case "done":
+      return { title: "Entregue", body: "Bom apetite! Avalie sua experiência quando quiser." };
+    default:
+      return { title: "Atualização do pedido", body: "Status atualizado. Acompanhe em Meu Pedido." };
+  }
 }
 
 export const REJECT_REASON_SUGGESTIONS = [

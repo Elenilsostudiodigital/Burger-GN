@@ -4,8 +4,8 @@ import { useCart } from '../context/CartContext';
 import { PageTransition } from '../components/PageTransition';
 import {
   createOrder, validateCoupon, getDeliveryZones, getDeliveryFee, getKmDeliveryConfig,
-  geocodeAddress, reverseGeocode, haversineKm, findKmTier, getPaymentSettings, getWhatsappSettings,
-  WHATSAPP_NUMBER, ValidateCouponResult, DeliveryZone, KmDeliveryConfig, PaymentSettingsPublic,
+  geocodeAddress, reverseGeocode, haversineKm, findKmTier, getPaymentSettings,
+  WHATSAPP_EXTERNAL_ENABLED, ValidateCouponResult, DeliveryZone, KmDeliveryConfig, PaymentSettingsPublic,
 } from '../lib/api';
 import { saveMyOrder } from '../lib/myOrder';
 import { ErrorBoundary } from '../components/ErrorBoundary';
@@ -88,7 +88,6 @@ export default function Checkout() {
   const [locationLabel, setLocationLabel] = useState('');
 
   const [paySettings, setPaySettings] = useState<PaymentSettingsPublic | null>(null);
-  const [waNumber, setWaNumber] = useState(WHATSAPP_NUMBER);
 
   const [couponInput, setCouponInput] = useState('');
   const [appliedCoupon, setAppliedCoupon] = useState<ValidateCouponResult | null>(null);
@@ -113,7 +112,6 @@ export default function Checkout() {
     getDeliveryZones().then(list => setZones(Array.isArray(list) ? list : [])).catch(() => setZones([]));
     getKmDeliveryConfig().then(setKmConfig).catch(() => setKmConfig(null));
     getPaymentSettings().then(setPaySettings).catch(() => {});
-    getWhatsappSettings().then(s => setWaNumber(s?.number || WHATSAPP_NUMBER)).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -141,14 +139,14 @@ export default function Checkout() {
       const baseLng = parseFloat(String(kmConfig.baseLng ?? '0'));
       if (!Number.isFinite(baseLat) || !Number.isFinite(baseLng) || (baseLat === 0 && baseLng === 0)) {
         setFeeFound(false);
-        setFeeMessage('Local da loja não configurado para cálculo por KM. Consulte pelo WhatsApp.');
+        setFeeMessage('Local da loja não configurado para cálculo por KM. Consulte a taxa com a loja.');
         return;
       }
 
       const dist = haversineKm(baseLat, baseLng, lat, lng);
       if (!Number.isFinite(dist)) {
         setFeeFound(false);
-        setFeeMessage('Não foi possível calcular a distância. Consulte pelo WhatsApp.');
+        setFeeMessage('Não foi possível calcular a distância. Consulte a taxa com a loja.');
         return;
       }
 
@@ -157,7 +155,7 @@ export default function Checkout() {
       if (Number.isFinite(maxDist) && maxDist > 0 && dist > maxDist) {
         setDeliveryFee(0);
         setFeeFound(false);
-        setFeeMessage(`Distância de ${dist.toFixed(1)}km excede o raio de entrega (${maxDist}km). Consulte pelo WhatsApp.`);
+        setFeeMessage(`Distância de ${dist.toFixed(1)}km excede o raio de entrega (${maxDist}km). Consulte a taxa com a loja.`);
         return;
       }
 
@@ -169,12 +167,12 @@ export default function Checkout() {
       } else {
         setDeliveryFee(0);
         setFeeFound(false);
-        setFeeMessage('Distância fora das faixas cadastradas. Consulte pelo WhatsApp.');
+        setFeeMessage('Distância fora das faixas cadastradas. Consulte a taxa com a loja.');
       }
     } catch (err) {
       console.error('[BurgerGN] applyCoordinates failed:', err);
       setFeeFound(false);
-      setFeeMessage('Não foi possível calcular a taxa de entrega. Consulte pelo WhatsApp.');
+      setFeeMessage('Não foi possível calcular a taxa de entrega. Consulte a taxa com a loja.');
     }
   }, [kmConfig]);
 
@@ -202,7 +200,7 @@ export default function Checkout() {
           setFeeFound(true);
         } else {
           setDeliveryFee(0);
-          setFeeMessage(result.message ?? 'Consulte a taxa de entrega pelo WhatsApp.');
+          setFeeMessage(result.message ?? 'Consulte a taxa de entrega com a loja.');
           setFeeFound(false);
         }
       } catch {
@@ -230,12 +228,12 @@ export default function Checkout() {
           setCustomerCoords(null);
           setDistanceKm(null);
           setFeeFound(false);
-          setFeeMessage('Não foi possível localizar este endereço automaticamente. Consulte a taxa pelo WhatsApp.');
+          setFeeMessage('Não foi possível localizar este endereço automaticamente. Consulte a taxa com a loja.');
         }
       } catch (err) {
         console.error('[BurgerGN] geocode effect failed:', err);
         setFeeFound(false);
-        setFeeMessage('Não foi possível localizar este endereço automaticamente. Consulte a taxa pelo WhatsApp.');
+        setFeeMessage('Não foi possível localizar este endereço automaticamente. Consulte a taxa com a loja.');
       } finally {
         setFeeLoading(false);
       }
@@ -325,7 +323,7 @@ export default function Checkout() {
         setFeeFound(true);
       } else {
         setDeliveryFee(0);
-        setFeeMessage(result.message ?? 'Consulte a taxa de entrega pelo WhatsApp.');
+        setFeeMessage(result.message ?? 'Consulte a taxa de entrega com a loja.');
         setFeeFound(false);
       }
     } catch {
@@ -371,7 +369,7 @@ export default function Checkout() {
             }));
             if (!kmConfig?.enabled) {
               setFeeFound(false);
-              setFeeMessage('Não foi possível identificar o bairro. Digite o endereço ou consulte pelo WhatsApp.');
+              setFeeMessage('Não foi possível identificar o bairro. Digite o endereço ou Consulte a taxa com a loja.');
             }
           }
         } catch {
@@ -408,7 +406,7 @@ export default function Checkout() {
     if (!form.numero.trim()) { setFieldError('Informe o número.'); return; }
     if (!form.bairro.trim() || form.bairro === '__outro__') {
       setFieldError(form.bairro === '__outro__'
-        ? 'Consulte a taxa pelo WhatsApp ou escolha um bairro atendido.'
+        ? 'Consulte a taxa com a loja ou escolha um bairro atendido.'
         : 'Informe o bairro.');
       return;
     }
@@ -622,10 +620,8 @@ export default function Checkout() {
           className="flex items-start gap-2 bg-orange-900/20 border border-orange-800/40 rounded-xl px-4 py-3">
           <AlertCircle size={16} className="text-orange-400 mt-0.5 shrink-0" />
           <p className="text-orange-400 text-sm">
-            {feeMessage}{' '}
-            <a href={`https://wa.me/${waNumber}`} target="_blank" rel="noopener noreferrer" className="underline font-bold">
-              WhatsApp
-            </a>
+            {feeMessage}
+            {WHATSAPP_EXTERNAL_ENABLED ? null : ' Ajuste o endereço ou escolha outra forma de retirada.'}
           </p>
         </motion.div>
       ) : null}

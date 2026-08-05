@@ -1,7 +1,12 @@
 /**
  * Future WhatsApp Business API integration surface.
  * Do NOT call any WhatsApp API from here yet.
+ *
+ * TEMP: external WhatsApp is fully disabled in the UI via WHATSAPP_EXTERNAL_ENABLED.
+ * This queue remains so reactivation only needs the official API + the flag.
  */
+
+import { WHATSAPP_EXTERNAL_ENABLED } from './api';
 
 export interface FutureWhatsappSurveyPayload {
   phone: string;
@@ -46,6 +51,8 @@ export function isWhatsappApiIntegrated(): boolean {
 
 /** Placeholder for future automatic send after delivery. */
 export async function sendPostDeliverySurveyWhenReady(payload: FutureWhatsappSurveyPayload) {
+  // TEMP: do not even enqueue while external WhatsApp is disabled for testing.
+  if (!WHATSAPP_EXTERNAL_ENABLED) return { queued: false, sent: false };
   queueFutureWhatsappSurvey(payload);
   if (!isWhatsappApiIntegrated()) return { queued: true, sent: false };
   // Future: await whatsappApi.sendText(payload.phone, payload.message);

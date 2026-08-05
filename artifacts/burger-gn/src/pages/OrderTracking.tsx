@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   trackOrder, getPaymentSettings, submitOrderReview, uploadOrderReceipt, Order,
   ORDER_TYPE_LABELS, PAYMENT_METHOD_LABELS, PAYMENT_STATUS_LABELS, WORKFLOW_LABELS,
-  isAllowedReceiptFile, RECEIPT_ACCEPT,
+  isAllowedReceiptFile, RECEIPT_ACCEPT, customerInAppStatusMessage,
 } from '../lib/api';
 import {
   getMyOrder, clearMyOrder, saveMyOrder, archiveMyOrder,
@@ -86,8 +86,10 @@ function OrderTimelineView({ trackingId }: { trackingId: string }) {
   const [uploadingReceipt, setUploadingReceipt] = useState(false);
   const [receiptError, setReceiptError] = useState('');
   const [receiptOk, setReceiptOk] = useState(false);
+  const [statusToast, setStatusToast] = useState<{ title: string; body: string } | null>(null);
   const galleryRef = useRef<HTMLInputElement>(null);
   const cameraRef = useRef<HTMLInputElement>(null);
+  const lastPaymentKey = useRef<string | null>(null);
 
   useEffect(() => {
     getPaymentSettings()
@@ -121,20 +123,30 @@ function OrderTimelineView({ trackingId }: { trackingId: string }) {
         });
 
         const wf = data.status === 'cancelled' ? 'cancelled' : (data.workflow || data.status);
-        if (lastWorkflow.current && lastWorkflow.current !== wf) {
+        const payKey = `${data.paymentStatus}:${data.receiptRejectReason || ''}:${data.receiptUploadedAt || ''}`;
+        const statusChanged = lastWorkflow.current && lastWorkflow.current !== wf;
+        const paymentChanged = lastPaymentKey.current && lastPaymentKey.current !== payKey;
+
+        if (statusChanged || paymentChanged) {
+          const msg = customerInAppStatusMessage(String(wf), {
+            paymentStatus: data.paymentStatus,
+            rejectReason: data.rejectReason,
+            receiptRejectReason: data.receiptRejectReason,
+          });
+          setStatusToast(msg);
           notifyOrderStatusChange({
             trackingId: data.trackingId,
             workflow: String(wf),
-            title: `Pedido #${data.orderNumber}`,
-            body: data.status === 'cancelled'
-              ? `Pedido recusado${data.rejectReason ? `: ${data.rejectReason}` : ''}`
-              : `Status atualizado: ${wf}`,
+            title: `Pedido #${data.orderNumber} — ${msg.title}`,
+            body: msg.body,
           });
+          window.setTimeout(() => setStatusToast(null), 6000);
         }
         lastWorkflow.current = String(wf);
+        lastPaymentKey.current = payKey;
 
         if (data.status === 'done') {
-          // Queue future WhatsApp survey (never sends until API exists).
+          // Survey copy stays in-app (avaliação). External WhatsApp queue gated off.
           void sendPostDeliverySurveyWhenReady({
             phone: data.phone,
             orderNumber: data.orderNumber,
@@ -318,6 +330,21 @@ function OrderTimelineView({ trackingId }: { trackingId: string }) {
       </header>
 
       <main className="max-w-md mx-auto px-4 py-6 pb-28 space-y-5">
+        <AnimatePresence>
+          {statusToast && (
+            <motion.div
+              key={`${statusToast.title}-${statusToast.body}`}
+              initial={{ opacity: 0, y: -12 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              className="rounded-2xl border border-amber-500/40 bg-amber-500/15 px-4 py-3 text-left"
+            >
+              <p className="text-amber-300 font-black text-sm uppercase tracking-wide">🍔 {statusToast.title}</p>
+              <p className="text-zinc-200 text-sm mt-1">{statusToast.body}</p>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         {/* Post-delivery confirmation / rating */}
         <AnimatePresence mode="wait">
           {delivered && deliveryPhase === 'confirm' && (

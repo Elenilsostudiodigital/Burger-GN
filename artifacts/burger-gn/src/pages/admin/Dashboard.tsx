@@ -8,7 +8,7 @@ import {
 import { useAdmin } from '../../context/AdminContext';
 import {
   getOrders, updateOrderWorkflow, updateOrderPaymentStatus,
-  openCustomerWhatsapp, buildCustomerNotifyMessage,
+  openCustomerWhatsapp, buildCustomerNotifyMessage, WHATSAPP_EXTERNAL_ENABLED,
   REJECT_REASON_SUGGESTIONS, RECEIPT_REJECT_SUGGESTIONS,
   Order, WorkflowStage,
   ORDER_TYPE_LABELS, PAYMENT_METHOD_LABELS, PAYMENT_STATUS_LABELS, CARD_TYPE_LABELS, WORKFLOW_LABELS,
@@ -116,9 +116,13 @@ function notifyCustomer(
   rejectReason?: string | null,
   apiMessage?: string | null,
 ) {
+  // TEMP: external WhatsApp disabled — message stays in-app only (Meu Pedido).
+  // Structure kept: when WHATSAPP_EXTERNAL_ENABLED is true, opens wa.me again.
   const message = apiMessage
     || buildCustomerNotifyMessage(order.orderNumber, order.customerName, workflow, rejectReason);
-  openCustomerWhatsapp(order.phone, message);
+  if (WHATSAPP_EXTERNAL_ENABLED) {
+    openCustomerWhatsapp(order.phone, message);
+  }
 }
 
 function buildReceiptHTML(order: Order): string {
@@ -358,11 +362,13 @@ function OrderCard({ order, highlight, dragging, onAccept, onRefuse, onAdvance, 
 
       {!isPending && column !== 'cancelled' && (
         <div className="p-3 pt-2 flex items-center gap-1.5 flex-wrap">
-          <button onClick={() => {
-            openCustomerWhatsapp(order.phone, `Olá ${order.customerName.split(' ')[0] || ''}! Pedido #${order.orderNumber} — The Burger GN.`);
-          }} className="p-2 bg-[#25D366]/15 text-[#25D366] hover:bg-[#25D366]/25 rounded-lg" title="WhatsApp">
-            <MessageCircle size={15} />
-          </button>
+          {WHATSAPP_EXTERNAL_ENABLED && (
+            <button onClick={() => {
+              openCustomerWhatsapp(order.phone, `Olá ${order.customerName.split(' ')[0] || ''}! Pedido #${order.orderNumber} — The Burger GN.`);
+            }} className="p-2 bg-[#25D366]/15 text-[#25D366] hover:bg-[#25D366]/25 rounded-lg" title="WhatsApp">
+              <MessageCircle size={15} />
+            </button>
+          )}
           <button onClick={() => {
             const win = window.open('', '_blank', 'width=350,height=600');
             if (!win) return;
@@ -399,11 +405,13 @@ function OrderCard({ order, highlight, dragging, onAccept, onRefuse, onAdvance, 
 
       {isPending && (
         <div className="px-3 pb-3 flex items-center gap-1.5">
-          <button onClick={() => {
-            openCustomerWhatsapp(order.phone, `Olá ${order.customerName.split(' ')[0]}! Pedido #${order.orderNumber} — The Burger GN.`);
-          }} className="p-2 bg-[#25D366]/15 text-[#25D366] hover:bg-[#25D366]/25 rounded-lg" title="WhatsApp">
-            <MessageCircle size={15} />
-          </button>
+          {WHATSAPP_EXTERNAL_ENABLED && (
+            <button onClick={() => {
+              openCustomerWhatsapp(order.phone, `Olá ${order.customerName.split(' ')[0]}! Pedido #${order.orderNumber} — The Burger GN.`);
+            }} className="p-2 bg-[#25D366]/15 text-[#25D366] hover:bg-[#25D366]/25 rounded-lg" title="WhatsApp">
+              <MessageCircle size={15} />
+            </button>
+          )}
           <button onClick={() => {
             const win = window.open('', '_blank', 'width=350,height=600');
             if (!win) return;
@@ -533,16 +541,41 @@ export default function AdminDashboard() {
       setOrders(prev => [order, ...prev.filter(o => o.id !== order.id)]);
       setNewOrderIds(prev => new Set([...prev, order.id]));
       const label = needsPaymentConference(order)
-        ? `🟡 Comprovante Pix #${order.orderNumber} — aguardando conferência`
-        : `🟡 Novo pedido pendente #${order.orderNumber} de ${order.customerName}`;
+        ? `🔔 Novo comprovante enviado — #${order.orderNumber} aguardando conferência`
+        : order.workflow === 'new' && order.paymentStatus === 'paid'
+          ? `🔔 Pedido aguardando confirmação #${order.orderNumber} de ${order.customerName}`
+          : `🔔 Novo pedido #${order.orderNumber} de ${order.customerName}`;
       setNotification(label);
       setTimeout(() => setNotification(null), 6000);
       setTimeout(() => setNewOrderIds(prev => { const s = new Set(prev); s.delete(order.id); return s; }), 30000);
     });
 
-    es.addEventListener('order_status', () => { fetchOrders(); });
-    es.addEventListener('order_receipt', () => { fetchOrders(); });
-    es.addEventListener('order_payment', () => { fetchOrders(); });
+    es.addEventListener('order_status', (e) => {
+      fetchOrders();
+      try {
+        const data = JSON.parse((e as MessageEvent).data) as {
+          workflow?: string; id?: number; orderNumber?: number;
+        };
+        const wf = data.workflow;
+        if (wf === 'ready') setNotification('🔔 Pedido pronto para entrega');
+        else if (wf === 'out') setNotification('🔔 Pedido saiu para entrega');
+        else if (wf === 'preparing') setNotification('🔔 Pedido em preparo');
+        else if (wf === 'new') setNotification('🔔 Pedido aguardando confirmação');
+        else if (wf === 'cancelled') setNotification('🔔 Pedido recusado');
+        else if (wf === 'done') setNotification('🔔 Pedido entregue');
+        if (wf) setTimeout(() => setNotification(null), 5000);
+      } catch { /* ignore */ }
+    });
+    es.addEventListener('order_receipt', () => {
+      fetchOrders();
+      setNotification('🔔 Novo comprovante enviado');
+      setTimeout(() => setNotification(null), 5000);
+    });
+    es.addEventListener('order_payment', () => {
+      fetchOrders();
+      setNotification('🔔 Status de pagamento atualizado');
+      setTimeout(() => setNotification(null), 4000);
+    });
 
     return () => es.close();
   }, [fetchOrders]);
@@ -831,7 +864,7 @@ export default function AdminDashboard() {
                 <h2 className="text-white font-black uppercase text-sm">Recusar pedido #{refuseOrder.orderNumber}</h2>
                 <button type="button" disabled={refuseSaving} onClick={() => setRefuseOrder(null)} className="text-zinc-500 hover:text-white"><X size={18} /></button>
               </div>
-              <p className="text-zinc-500 text-sm">Informe o motivo. O cliente receberá a justificativa no WhatsApp.</p>
+              <p className="text-zinc-500 text-sm">Informe o motivo. O cliente verá a justificativa em Meu Pedido.</p>
               <div className="space-y-2">
                 {REJECT_REASON_SUGGESTIONS.map(reason => (
                   <button key={reason} type="button" onClick={() => { setRejectReason(reason); setRefuseError(''); }}
@@ -883,7 +916,7 @@ export default function AdminDashboard() {
                   className="text-zinc-500 hover:text-white"><X size={18} /></button>
               </div>
               <p className="text-zinc-500 text-sm">
-                Informe o motivo. O cliente será notificado e poderá reenviar o comprovante.
+                Informe o motivo. O cliente verá o aviso em Meu Pedido e poderá reenviar o comprovante.
               </p>
               <div className="space-y-2">
                 {RECEIPT_REJECT_SUGGESTIONS.map(reason => (

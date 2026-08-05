@@ -419,7 +419,9 @@ function WhatsappTab() {
     <div className="space-y-5">
       <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
         <p className="text-zinc-500 text-xs leading-relaxed">
-          Cadastre o número oficial de WhatsApp da loja. Após finalizar o pedido, o cliente é redirecionado automaticamente para este número com a mensagem completa do pedido.
+          Cadastre o número oficial de WhatsApp da loja (estrutura preparada para a API oficial).
+          Temporariamente, durante testes, nenhuma mensagem é enviada nem aberta no WhatsApp —
+          as notificações acontecem apenas dentro do sistema (Meu Pedido e painel admin).
         </p>
       </div>
 
