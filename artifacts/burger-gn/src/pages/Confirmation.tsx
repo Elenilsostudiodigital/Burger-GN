@@ -1,12 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Link } from 'wouter';
 import { motion } from 'framer-motion';
-import { CheckCircle2, Home, ExternalLink, Copy, Check, QrCode, Upload, Loader2, ImageIcon } from 'lucide-react';
+import { CheckCircle2, Home, ExternalLink, Copy, Check, QrCode, Upload, Loader2, ImageIcon, AlertCircle } from 'lucide-react';
 import { PageTransition } from '../components/PageTransition';
 import { useCart } from '../context/CartContext';
 import {
   ORDER_TYPE_LABELS, PAYMENT_METHOD_LABELS, CARD_TYPE_LABELS,
-  PaymentStatus, PixPaymentResult, uploadOrderReceipt, CardType,
+  PaymentStatus, PixPaymentResult, uploadOrderReceipt, CardType, WorkflowStage,
 } from '../lib/api';
 import { Button } from '@/components/ui/button';
 
@@ -16,6 +16,7 @@ interface StoredOrder {
   orderType: 'delivery' | 'pickup' | 'local';
   paymentMethod: 'pix' | 'cash' | 'card';
   paymentStatus: PaymentStatus;
+  workflow?: WorkflowStage;
   cardType: CardType | null;
   needsChange: boolean;
   changeFor: string | null;
@@ -27,6 +28,8 @@ interface StoredOrder {
   items: Array<{ name: string; quantity: number; price: number; addons?: Array<{ name: string; price: number }>; notes?: string; subtotal: number }>;
   subtotal: number; deliveryFee: number; discount: number; total: number;
   pixPayment: PixPaymentResult | null;
+  pixConfigured?: boolean;
+  pixUnavailableReason?: string | null;
   createdAt: string;
 }
 
@@ -51,6 +54,10 @@ function compressImage(file: File, maxWidth = 1200, quality = 0.72): Promise<str
     };
     reader.readAsDataURL(file);
   });
+}
+
+function hasValidPixQr(pix: PixPaymentResult | null | undefined): pix is PixPaymentResult {
+  return !!pix?.qrCode && pix.qrCode.trim().length > 20;
 }
 
 export default function Confirmation() {
@@ -86,7 +93,7 @@ export default function Confirmation() {
   }, []);
 
   const handleCopyPix = async () => {
-    if (!order?.pixPayment) return;
+    if (!hasValidPixQr(order?.pixPayment)) return;
     try {
       await navigator.clipboard.writeText(order.pixPayment.qrCode);
       setCopied(true);
@@ -126,6 +133,9 @@ export default function Confirmation() {
       : PAYMENT_METHOD_LABELS[order.paymentMethod]
     : '';
 
+  const showPixQr = hasValidPixQr(order?.pixPayment);
+  const showPixMissing = order?.paymentMethod === 'pix' && !showPixQr;
+
   return (
     <PageTransition className="bg-[#0a0a0a] min-h-screen flex flex-col items-center p-6 text-center pb-16">
       <motion.div initial={{ scale: 0, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
@@ -139,12 +149,15 @@ export default function Confirmation() {
 
       <motion.h1 initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}
         className="text-3xl font-black text-white uppercase tracking-tighter mb-2">
-        Pedido Confirmado!
+        Pedido Enviado!
       </motion.h1>
 
       {order && (
-        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }} className="mb-4 space-y-1">
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }} className="mb-4 space-y-2">
           <p className="text-amber-500 font-black text-2xl">#{order.orderNumber}</p>
+          <span className="inline-block bg-amber-500/10 text-amber-400 border border-amber-500/30 rounded-full px-4 py-1.5 text-xs font-black uppercase tracking-wider">
+            🟡 Pendente de confirmação
+          </span>
           <p className="text-zinc-400 text-sm">
             {ORDER_TYPE_LABELS[order.orderType]} · {paymentLabel}
             {order.paymentMethod === 'cash' && order.needsChange && order.changeFor
@@ -152,10 +165,32 @@ export default function Confirmation() {
               : ''}
           </p>
           <p className="text-zinc-500 text-sm">Total: <span className="text-white font-bold">R$ {order.total.toFixed(2).replace('.', ',')}</span></p>
+          <p className="text-zinc-600 text-xs max-w-sm mx-auto">
+            Seu pedido aguarda a loja aceitar. Mesmo com Pix ou comprovante, ele só avança após confirmação do atendente.
+          </p>
         </motion.div>
       )}
 
-      {order?.pixPayment && (
+      {showPixMissing && (
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.35 }}
+          className="w-full max-w-sm bg-orange-950/30 border border-orange-800/50 rounded-2xl p-5 mb-4 text-left space-y-2">
+          <div className="flex items-start gap-2">
+            <AlertCircle size={18} className="text-orange-400 mt-0.5 shrink-0" />
+            <div>
+              <h3 className="text-orange-300 font-black uppercase tracking-wide text-sm">Pix indisponível</h3>
+              <p className="text-orange-200/90 text-sm mt-1">
+                {order?.pixUnavailableReason
+                  || 'A chave Pix da loja precisa ser cadastrada. Não foi gerado QR Code para evitar pagamento inválido.'}
+              </p>
+              <p className="text-zinc-500 text-xs mt-2">
+                Seu pedido continua pendente. A loja será avisada e poderá orientar outra forma de pagamento.
+              </p>
+            </div>
+          </div>
+        </motion.div>
+      )}
+
+      {showPixQr && order?.pixPayment && (
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }}
           className="w-full max-w-sm bg-zinc-900 border border-zinc-800 rounded-2xl p-5 mb-4 text-left space-y-4">
           <div className="flex items-center gap-2 justify-center">
@@ -211,6 +246,9 @@ export default function Confirmation() {
             <p className="text-zinc-300 text-sm font-bold flex items-center gap-2">
               <Upload size={16} className="text-amber-500" /> Enviar comprovante
             </p>
+            <p className="text-zinc-600 text-xs">
+              Enviar o comprovante não aprova o pedido. Ele permanece pendente até a loja confirmar.
+            </p>
             <input ref={fileRef} type="file" accept="image/*" className="hidden"
               onChange={e => handleReceipt(e.target.files?.[0] ?? null)} />
             <button type="button" disabled={uploading}
@@ -226,7 +264,7 @@ export default function Confirmation() {
             )}
             {uploadOk && (
               <p className="text-green-400 text-xs flex items-center gap-1.5 justify-center">
-                <CheckCircle2 size={14} /> Comprovante enviado ao painel da loja
+                <CheckCircle2 size={14} /> Comprovante enviado — aguardando confirmação da loja
               </p>
             )}
             {uploadError && <p className="text-red-400 text-xs text-center">{uploadError}</p>}

@@ -525,9 +525,12 @@ export default function Checkout() {
         total: result.deliveryFee !== undefined
           ? parseFloat((subtotal + result.deliveryFee - (result.discountAmount ?? 0)).toFixed(2))
           : total,
-        // Prepared for future Pix gateway — currently static Pix from store settings
-        pixPayment: result.pixPayment ?? null,
+        // Pix QR only when store key is configured — never invent an invalid QR.
+        pixPayment: result.pixPayment?.qrCode ? result.pixPayment : null,
+        pixConfigured: !!result.pixConfigured && !!result.pixPayment?.qrCode,
+        pixUnavailableReason: result.pixUnavailableReason ?? null,
         paymentStatus: 'pending',
+        workflow: 'new',
         createdAt: new Date().toISOString(),
       };
 

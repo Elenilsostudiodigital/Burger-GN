@@ -18,22 +18,24 @@ export interface OrderMeta {
   history?: StatusHistoryEntry[];
   pixCopyPaste?: string;
   pixKey?: string;
+  /** Present when the order was refused by an attendant. */
+  rejectReason?: string;
 }
 
 export const WORKFLOW_LABELS: Record<WorkflowStage | "cancelled", string> = {
-  new: "Novo Pedido",
-  accepted: "Pedido Aceito",
+  new: "Pendente",
+  accepted: "Em Preparo", // legacy stage — treated as preparing
   preparing: "Em Preparo",
   ready: "Pronto",
   out: "Saiu para Entrega",
-  done: "Finalizado",
-  cancelled: "Cancelado",
+  done: "Entregue",
+  cancelled: "Recusado",
 };
 
 /** Maps UI workflow to existing DB `order_status` enum values. */
 export const WORKFLOW_TO_STATUS: Record<WorkflowStage, "new" | "preparing" | "delivery" | "done"> = {
   new: "new",
-  accepted: "new",
+  accepted: "preparing",
   preparing: "preparing",
   ready: "preparing",
   out: "delivery",
@@ -66,6 +68,7 @@ export function serializeOrderNotes(publicNotes: string, meta: OrderMeta): strin
   if (meta.history?.length) cleanMeta.history = meta.history;
   if (meta.pixCopyPaste) cleanMeta.pixCopyPaste = meta.pixCopyPaste;
   if (meta.pixKey) cleanMeta.pixKey = meta.pixKey;
+  if (meta.rejectReason) cleanMeta.rejectReason = meta.rejectReason;
 
   const hasMeta = Object.keys(cleanMeta).length > 0;
   const body = (publicNotes || "").trim();
@@ -78,6 +81,8 @@ export function resolveWorkflow(
   meta: OrderMeta,
 ): WorkflowStage | "cancelled" {
   if (status === "cancelled") return "cancelled";
+  // Legacy "accepted" folds into preparing — accept jumps straight to kitchen.
+  if (meta.workflow === "accepted") return "preparing";
   if (meta.workflow && meta.workflow in WORKFLOW_TO_STATUS) return meta.workflow;
   if (status === "preparing") return "preparing";
   if (status === "delivery") return "out";
@@ -85,15 +90,47 @@ export function resolveWorkflow(
   return "new";
 }
 
-export function appendHistory(meta: OrderMeta, stage: WorkflowStage | "cancelled"): OrderMeta {
+export function appendHistory(
+  meta: OrderMeta,
+  stage: WorkflowStage | "cancelled",
+  labelOverride?: string,
+): OrderMeta {
   const entry: StatusHistoryEntry = {
     stage,
-    label: WORKFLOW_LABELS[stage],
+    label: labelOverride || WORKFLOW_LABELS[stage],
     at: new Date().toISOString(),
   };
   const history = [...(meta.history ?? [])];
   const last = history[history.length - 1];
-  if (last?.stage === stage) return meta;
+  if (last?.stage === stage && last.label === entry.label) return meta;
   history.push(entry);
   return { ...meta, history, workflow: stage === "cancelled" ? meta.workflow : stage };
+}
+
+/** Customer WhatsApp / in-app notification copy for each status change. */
+export function buildCustomerNotifyMessage(
+  orderNumber: number,
+  customerName: string,
+  workflow: WorkflowStage | "cancelled",
+  rejectReason?: string | null,
+): string {
+  const name = (customerName || "cliente").trim().split(/\s+/)[0] || "cliente";
+  switch (workflow) {
+    case "preparing":
+    case "accepted":
+      return `Olá ${name}! Seu pedido #${orderNumber} foi aceito e já está sendo preparado. — The Burger GN`;
+    case "ready":
+      return `Olá ${name}! Seu pedido #${orderNumber} está pronto! — The Burger GN`;
+    case "out":
+      return `Olá ${name}! Seu pedido #${orderNumber} saiu para entrega. — The Burger GN`;
+    case "done":
+      return `Olá ${name}! Seu pedido #${orderNumber} foi entregue. Bom apetite! — The Burger GN`;
+    case "cancelled":
+      return `Olá ${name}! Infelizmente seu pedido #${orderNumber} foi recusado.${
+        rejectReason ? ` Motivo: ${rejectReason}.` : ""
+      } — The Burger GN`;
+    case "new":
+    default:
+      return `Olá ${name}! Recebemos seu pedido #${orderNumber} e ele está pendente de confirmação. — The Burger GN`;
+  }
 }

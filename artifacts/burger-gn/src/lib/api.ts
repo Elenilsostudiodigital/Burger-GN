@@ -9,7 +9,12 @@ async function request(method: string, path: string, body?: unknown) {
   });
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(text || `HTTP ${res.status}`);
+    let message = text || `HTTP ${res.status}`;
+    try {
+      const parsed = JSON.parse(text) as { error?: string };
+      if (parsed?.error) message = parsed.error;
+    } catch { /* keep raw text */ }
+    throw new Error(message);
   }
   return res.json();
 }
@@ -200,7 +205,9 @@ export interface Order {
   needsChange?: boolean | null;
   receiptDataUrl?: string | null;
   receiptUploadedAt?: string | null;
+  rejectReason?: string | null;
   history?: StatusHistoryEntry[];
+  customerNotifyMessage?: string | null;
 }
 export interface CreateOrderPayload {
   customerName: string; phone: string;
@@ -216,13 +223,18 @@ export interface PixPaymentResult { paymentId: string; qrCode: string; qrCodeBas
 export const createOrder = (d: CreateOrderPayload) => api.post("/orders", d) as Promise<{
   ok: boolean; trackingId: string; orderNumber: number; orderId: number;
   deliveryFee: number; distanceKm: number | null; discountAmount: number; couponCode: string | null;
-  pixPayment: PixPaymentResult | null; cardCheckoutUrl: string | null;
+  pixPayment: PixPaymentResult | null; pixConfigured?: boolean; pixUnavailableReason?: string | null;
+  cardCheckoutUrl: string | null; paymentStatus?: PaymentStatus; workflow?: WorkflowStage;
 }>;
 export const getOrders = () => api.get("/orders") as Promise<Order[]>;
 export const trackOrder = (trackingId: string) => api.get(`/orders/track/${trackingId}`) as Promise<Order>;
 export const updateOrderStatus = (id: number, status: OrderStatus) => api.patch(`/orders/${id}/status`, { status }) as Promise<Order>;
-export const updateOrderWorkflow = (id: number, workflow: WorkflowStage | "cancelled") =>
-  api.patch(`/orders/${id}/status`, { workflow }) as Promise<Order>;
+export const updateOrderWorkflow = (
+  id: number,
+  workflow: WorkflowStage | "cancelled",
+  opts?: { rejectReason?: string },
+) =>
+  api.patch(`/orders/${id}/status`, { workflow, rejectReason: opts?.rejectReason }) as Promise<Order>;
 export const uploadOrderReceipt = (trackingId: string, receiptDataUrl: string) =>
   api.post(`/orders/track/${trackingId}/receipt`, { receiptDataUrl }) as Promise<Order>;
 export const updateOrderPaymentStatus = (id: number, paymentStatus: PaymentStatus) =>
@@ -293,6 +305,45 @@ export function normalizePhoneForWhatsapp(phone: string): string {
   return digits;
 }
 
+export function buildCustomerNotifyMessage(
+  orderNumber: number,
+  customerName: string,
+  workflow: WorkflowStage | "cancelled",
+  rejectReason?: string | null,
+): string {
+  const name = (customerName || "cliente").trim().split(/\s+/)[0] || "cliente";
+  switch (workflow) {
+    case "preparing":
+    case "accepted":
+      return `Olá ${name}! Seu pedido #${orderNumber} foi aceito e já está sendo preparado. — The Burger GN`;
+    case "ready":
+      return `Olá ${name}! Seu pedido #${orderNumber} está pronto! — The Burger GN`;
+    case "out":
+      return `Olá ${name}! Seu pedido #${orderNumber} saiu para entrega. — The Burger GN`;
+    case "done":
+      return `Olá ${name}! Seu pedido #${orderNumber} foi entregue. Bom apetite! — The Burger GN`;
+    case "cancelled":
+      return `Olá ${name}! Infelizmente seu pedido #${orderNumber} foi recusado.${
+        rejectReason ? ` Motivo: ${rejectReason}.` : ""
+      } — The Burger GN`;
+    default:
+      return `Olá ${name}! Recebemos seu pedido #${orderNumber} e ele está pendente de confirmação. — The Burger GN`;
+  }
+}
+
+export function openCustomerWhatsapp(phone: string, message: string) {
+  const number = normalizePhoneForWhatsapp(phone);
+  if (!number || number === "5500000000000" || number.replace(/\D/g, "").replace(/^55/, "").length < 10) return;
+  window.open(`https://wa.me/${number}?text=${encodeURIComponent(message)}`, "_blank");
+}
+
+export const REJECT_REASON_SUGGESTIONS = [
+  "Produto esgotado",
+  "Fora da área de entrega",
+  "Loja fechando",
+  "Pagamento não confirmado",
+] as const;
+
 export const ORDER_TYPE_LABELS: Record<OrderType, string> = {
   local: "Consumir na loja",
   pickup: "Retirar no balcão",
@@ -300,15 +351,21 @@ export const ORDER_TYPE_LABELS: Record<OrderType, string> = {
 };
 export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = { pix: "Pix", cash: "Dinheiro", card: "Cartão" };
 export const CARD_TYPE_LABELS: Record<CardType, string> = { credit: "Crédito", debit: "Débito" };
-export const STATUS_LABELS: Record<OrderStatus, string> = { new: "Novo Pedido", preparing: "Em Preparo", delivery: "Saiu p/ Entrega", done: "Finalizado", cancelled: "Cancelado" };
+export const STATUS_LABELS: Record<OrderStatus, string> = {
+  new: "Pendente",
+  preparing: "Em Preparo",
+  delivery: "Saiu p/ Entrega",
+  done: "Entregue",
+  cancelled: "Recusado",
+};
 export const WORKFLOW_LABELS: Record<WorkflowStage | "cancelled", string> = {
-  new: "Novo Pedido",
-  accepted: "Pedido Aceito",
+  new: "Pendente",
+  accepted: "Em Preparo",
   preparing: "Em Preparo",
   ready: "Pronto",
   out: "Saiu para Entrega",
-  done: "Finalizado",
-  cancelled: "Cancelado",
+  done: "Entregue",
+  cancelled: "Recusado",
 };
 export const PAYMENT_STATUS_LABELS: Record<PaymentStatus, string> = { pending: "Pendente", paid: "Pago", failed: "Falhou" };
 

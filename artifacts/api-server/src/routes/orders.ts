@@ -9,6 +9,7 @@ import { calcDiscount } from "./coupons";
 import { haversineKm, findKmTier } from "./km_delivery";
 import {
   parseOrderNotes, serializeOrderNotes, appendHistory, resolveWorkflow, WORKFLOW_TO_STATUS,
+  buildCustomerNotifyMessage,
   type WorkflowStage, type CardType, type OrderMeta,
 } from "../lib/orderMeta";
 import { buildStaticPixPayload, decodePixSettings } from "../lib/staticPix";
@@ -30,6 +31,7 @@ function enrichOrder<T extends { notes: string; status: string }>(order: T) {
     needsChange: meta.needsChange ?? null,
     receiptDataUrl: meta.receiptDataUrl ?? null,
     receiptUploadedAt: meta.receiptUploadedAt ?? null,
+    rejectReason: meta.rejectReason ?? null,
     history: meta.history ?? [],
   };
 }
@@ -210,11 +212,13 @@ router.post("/orders", resolvePublicCompany, async (req, res) => {
     const [{ maxNum }] = await db.select({ maxNum: sql<number>`COALESCE(MAX(order_number), 0)` }).from(ordersTable).where(eq(ordersTable.companyId, companyId));
     const orderNumber = (Number(maxNum) || 0) + 1;
 
-    // Static PIX (no Mercado Pago) — prepared for future gateway swap
+    // Orders always start PENDING — never auto-accepted, even after Pix/receipt.
     let pixPayment: { paymentId: string; qrCode: string; qrCodeBase64: string; pixKey: string } | null = null;
+    let pixConfigured = false;
+    let pixUnavailableReason: string | null = null;
     let meta: OrderMeta = {
       workflow: "new",
-      history: [{ stage: "new", label: "Novo Pedido", at: new Date().toISOString() }],
+      history: [{ stage: "new", label: "Pendente", at: new Date().toISOString() }],
     };
     if (body.paymentMethod === "card" && body.cardType) meta.cardType = body.cardType;
     if (body.paymentMethod === "cash") meta.needsChange = !!body.needsChange || !!body.changeFor;
@@ -226,22 +230,32 @@ router.post("/orders", resolvePublicCompany, async (req, res) => {
           ? { key: paySettings.mercadoPagoPublicKey, name: "THE BURGER GN", city: "LAURO DE FREITAS" }
           : null);
 
-      if (pixCfg?.key) {
+      const pixKey = pixCfg?.key?.trim() || "";
+      if (pixKey) {
+        pixConfigured = true;
         const qrCode = buildStaticPixPayload({
-          key: pixCfg.key,
-          merchantName: pixCfg.name,
-          merchantCity: pixCfg.city,
+          key: pixKey,
+          merchantName: pixCfg!.name,
+          merchantCity: pixCfg!.city,
           amount: total,
           txid: `BGN${orderNumber}`,
         });
-        pixPayment = {
-          paymentId: `static_${trackingId}`,
-          qrCode,
-          qrCodeBase64: "", // frontend renders QR from payload
-          pixKey: pixCfg.key,
-        };
-        meta.pixCopyPaste = qrCode;
-        meta.pixKey = pixCfg.key;
+        // Never return an empty/invalid payload as a QR.
+        if (qrCode && qrCode.length > 20) {
+          pixPayment = {
+            paymentId: `static_${trackingId}`,
+            qrCode,
+            qrCodeBase64: "",
+            pixKey,
+          };
+          meta.pixCopyPaste = qrCode;
+          meta.pixKey = pixKey;
+        } else {
+          pixConfigured = false;
+          pixUnavailableReason = "Não foi possível gerar o QR Code Pix. Verifique a chave cadastrada no painel.";
+        }
+      } else {
+        pixUnavailableReason = "A chave Pix da loja precisa ser cadastrada em Admin → Config → Pagamento.";
       }
     }
 
@@ -290,10 +304,13 @@ router.post("/orders", resolvePublicCompany, async (req, res) => {
     broadcastSSE(companyId, "new_order", fullOrder);
 
     // cardCheckoutUrl kept null — Mercado Pago intentionally not wired yet (future-ready)
+    // paymentStatus stays DB default "pending"; Pix/receipt never auto-accepts the order.
     res.status(201).json({
       ok: true, trackingId, orderNumber, orderId: result.id,
       deliveryFee, distanceKm: customerDistanceKm, discountAmount, couponCode: validatedCouponCode,
-      pixPayment, cardCheckoutUrl: null,
+      pixPayment, pixConfigured, pixUnavailableReason, cardCheckoutUrl: null,
+      paymentStatus: "pending",
+      workflow: "new",
     });
   } catch (err) {
     req.log.error({ err }, "Failed to create order");
@@ -341,6 +358,8 @@ router.patch("/orders/:id/status", requireCompanyAuth, async (req, res) => {
     const body = req.body as {
       status?: "new" | "preparing" | "delivery" | "done" | "cancelled";
       workflow?: WorkflowStage | "cancelled";
+      /** Required when refusing / cancelling. */
+      rejectReason?: string;
     };
 
     const [existing] = await db.select().from(ordersTable)
@@ -350,14 +369,30 @@ router.patch("/orders/:id/status", requireCompanyAuth, async (req, res) => {
     const { publicNotes, meta } = parseOrderNotes(existing.notes);
     let nextStatus = existing.status as "new" | "preparing" | "delivery" | "done" | "cancelled";
     let nextMeta = { ...meta };
+    let notifyStage: WorkflowStage | "cancelled" | null = null;
 
-    if (body.workflow === "cancelled" || body.status === "cancelled") {
+    // Accepting a pending order jumps straight to "Em preparo" (no auto-accept on create).
+    let requestedWorkflow = body.workflow;
+    if (requestedWorkflow === "accepted") {
+      requestedWorkflow = "preparing";
+    }
+
+    if (requestedWorkflow === "cancelled" || body.status === "cancelled") {
+      const reason = typeof body.rejectReason === "string" ? body.rejectReason.trim() : "";
+      if (!reason) {
+        res.status(400).json({ error: "Informe o motivo da recusa do pedido." });
+        return;
+      }
       nextStatus = "cancelled";
-      nextMeta = appendHistory(nextMeta, "cancelled");
-    } else if (body.workflow && WORKFLOW_VALUES.includes(body.workflow)) {
-      nextStatus = WORKFLOW_TO_STATUS[body.workflow];
-      nextMeta = appendHistory(nextMeta, body.workflow);
-      nextMeta.workflow = body.workflow;
+      nextMeta.rejectReason = reason;
+      nextMeta = appendHistory(nextMeta, "cancelled", `Recusado: ${reason}`);
+      notifyStage = "cancelled";
+    } else if (requestedWorkflow && WORKFLOW_VALUES.includes(requestedWorkflow)) {
+      const wf = requestedWorkflow as WorkflowStage;
+      nextStatus = WORKFLOW_TO_STATUS[wf];
+      nextMeta = appendHistory(nextMeta, wf);
+      nextMeta.workflow = wf;
+      notifyStage = wf;
     } else if (body.status && ["new", "preparing", "delivery", "done"].includes(body.status)) {
       nextStatus = body.status;
       const mapped: WorkflowStage =
@@ -365,6 +400,7 @@ router.patch("/orders/:id/status", requireCompanyAuth, async (req, res) => {
         body.status === "preparing" ? "preparing" :
         body.status === "delivery" ? "out" : "done";
       nextMeta = appendHistory(nextMeta, mapped);
+      notifyStage = mapped;
     } else {
       res.status(400).json({ error: "Invalid status" }); return;
     }
@@ -379,10 +415,28 @@ router.patch("/orders/:id/status", requireCompanyAuth, async (req, res) => {
       .returning();
 
     const enriched = enrichOrder(order);
+    const customerNotifyMessage = notifyStage
+      ? buildCustomerNotifyMessage(
+          order.orderNumber,
+          order.customerName,
+          notifyStage,
+          nextMeta.rejectReason,
+        )
+      : null;
+
     broadcastSSE(req.companyId!, "order_status", {
-      id: order.id, trackingId: order.trackingId, status: order.status, workflow: enriched.workflow,
+      id: order.id,
+      trackingId: order.trackingId,
+      status: order.status,
+      workflow: enriched.workflow,
+      rejectReason: nextMeta.rejectReason ?? null,
+      customerNotifyMessage,
     });
-    res.json({ ...enriched, items: (await getOrderWithItems(order.id))?.items ?? [] });
+    res.json({
+      ...enriched,
+      items: (await getOrderWithItems(order.id))?.items ?? [],
+      customerNotifyMessage,
+    });
   } catch (err) {
     req.log.error({ err }, "Failed to update order status");
     res.status(500).json({ error: "Internal server error" });
@@ -411,6 +465,8 @@ router.post("/orders/track/:trackingId/receipt", async (req, res) => {
       receiptUploadedAt: new Date().toISOString(),
     };
 
+    // Receipt upload does NOT mark payment as paid and does NOT accept the order.
+    // Order stays PENDING (workflow new) until an admin accepts it.
     const [order] = await db.update(ordersTable)
       .set({ notes: serializeOrderNotes(publicNotes, nextMeta), updatedAt: new Date() })
       .where(eq(ordersTable.id, existing.id))
@@ -420,7 +476,7 @@ router.post("/orders/track/:trackingId/receipt", async (req, res) => {
       id: order.id, trackingId: order.trackingId, receiptUploadedAt: nextMeta.receiptUploadedAt,
     });
 
-    res.json(enrichOrder(order));
+    res.json({ ...enrichOrder(order), paymentStatus: order.paymentStatus });
   } catch (err) {
     req.log.error({ err }, "Failed to upload receipt");
     res.status(500).json({ error: "Internal server error" });

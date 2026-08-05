@@ -7,7 +7,8 @@ import {
 } from '@dnd-kit/core';
 import { useAdmin } from '../../context/AdminContext';
 import {
-  getOrders, updateOrderWorkflow, updateOrderPaymentStatus, normalizePhoneForWhatsapp,
+  getOrders, updateOrderWorkflow, updateOrderPaymentStatus,
+  openCustomerWhatsapp, buildCustomerNotifyMessage, REJECT_REASON_SUGGESTIONS,
   Order, WorkflowStage, PaymentStatus,
   ORDER_TYPE_LABELS, PAYMENT_METHOD_LABELS, PAYMENT_STATUS_LABELS, CARD_TYPE_LABELS, WORKFLOW_LABELS,
 } from '../../lib/api';
@@ -15,10 +16,11 @@ import {
   LayoutDashboard, UtensilsCrossed, LogOut, Bell, BellOff,
   Printer, Clock, MessageCircle, History,
   XCircle, Tag, MapPin, Navigation, Settings, Route, Upload, TrendingUp,
-  ChevronLeft, ChevronRight, GripVertical, Ban, X, Crown, Filter, ImageIcon, CheckCircle2,
+  ChevronLeft, ChevronRight, GripVertical, X, Crown, Filter, ImageIcon, CheckCircle2, Check, Ban,
 } from 'lucide-react';
 
-type ColumnKey = WorkflowStage;
+/** Board columns — pending orders never auto-advance. */
+type ColumnKey = 'new' | 'preparing' | 'ready' | 'out' | 'done';
 
 interface ColumnDef {
   key: ColumnKey;
@@ -29,12 +31,11 @@ interface ColumnDef {
 }
 
 const COLUMNS: ColumnDef[] = [
-  { key: 'new', label: 'Novo Pedido', headerClass: 'border-amber-500/40 bg-amber-500/[0.07]', badgeClass: 'bg-amber-500 text-zinc-950', btnClass: 'bg-amber-500 text-zinc-950' },
-  { key: 'accepted', label: 'Pedido Aceito', headerClass: 'border-sky-500/40 bg-sky-500/[0.07]', badgeClass: 'bg-sky-500 text-zinc-950', btnClass: 'bg-sky-500 text-zinc-950' },
+  { key: 'new', label: 'Novos Pedidos', headerClass: 'border-amber-500/40 bg-amber-500/[0.07]', badgeClass: 'bg-amber-500 text-zinc-950', btnClass: 'bg-amber-500 text-zinc-950' },
   { key: 'preparing', label: 'Em Preparo', headerClass: 'border-orange-500/40 bg-orange-500/[0.07]', badgeClass: 'bg-orange-500 text-zinc-950', btnClass: 'bg-orange-500 text-zinc-950' },
   { key: 'ready', label: 'Pronto', headerClass: 'border-emerald-500/40 bg-emerald-500/[0.07]', badgeClass: 'bg-emerald-500 text-zinc-950', btnClass: 'bg-emerald-500 text-zinc-950' },
   { key: 'out', label: 'Saiu para Entrega', headerClass: 'border-violet-500/40 bg-violet-500/[0.07]', badgeClass: 'bg-violet-500 text-zinc-950', btnClass: 'bg-violet-500 text-zinc-950' },
-  { key: 'done', label: 'Finalizado', headerClass: 'border-zinc-500/40 bg-zinc-600/[0.07]', badgeClass: 'bg-zinc-500 text-zinc-950', btnClass: 'bg-zinc-600 text-white' },
+  { key: 'done', label: 'Entregue', headerClass: 'border-zinc-500/40 bg-zinc-600/[0.07]', badgeClass: 'bg-zinc-500 text-zinc-950', btnClass: 'bg-zinc-600 text-white' },
 ];
 
 const COLUMN_ORDER: ColumnKey[] = COLUMNS.map(c => c.key);
@@ -71,13 +72,20 @@ function playBeep() {
   } catch { /* ignore */ }
 }
 
-function getWorkflow(order: Order): WorkflowStage | 'cancelled' {
+function getBoardColumn(order: Order): ColumnKey | 'cancelled' {
   if (order.status === 'cancelled') return 'cancelled';
-  if (order.workflow && order.workflow !== 'cancelled') return order.workflow;
+  const wf = order.workflow === 'accepted' ? 'preparing' : order.workflow;
+  if (wf === 'preparing' || wf === 'ready' || wf === 'out' || wf === 'done' || wf === 'new') return wf;
   if (order.status === 'preparing') return 'preparing';
   if (order.status === 'delivery') return 'out';
   if (order.status === 'done') return 'done';
   return 'new';
+}
+
+function notifyCustomer(order: Order, workflow: WorkflowStage | 'cancelled', rejectReason?: string | null, apiMessage?: string | null) {
+  const message = apiMessage
+    || buildCustomerNotifyMessage(order.orderNumber, order.customerName, workflow, rejectReason);
+  openCustomerWhatsapp(order.phone, message);
 }
 
 function buildReceiptHTML(order: Order): string {
@@ -112,31 +120,35 @@ function buildReceiptHTML(order: Order): string {
   </body></html>`;
 }
 
-function OrderCard({ order, highlight, dragging, onWorkflowChange, onPaymentStatus }: {
+function OrderCard({ order, highlight, dragging, onAccept, onRefuse, onAdvance, onBack, onPaymentStatus }: {
   order: Order; highlight: boolean; dragging?: boolean;
-  onWorkflowChange: (id: number, workflow: WorkflowStage | 'cancelled') => void;
+  onAccept: (order: Order) => void;
+  onRefuse: (order: Order) => void;
+  onAdvance: (order: Order, workflow: ColumnKey) => void;
+  onBack: (order: Order, workflow: ColumnKey) => void;
   onPaymentStatus: (id: number, status: PaymentStatus) => void;
 }) {
   const [updating, setUpdating] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [showReceipt, setShowReceipt] = useState(false);
-  const workflow = getWorkflow(order);
-  const colIndex = COLUMN_ORDER.indexOf(workflow as ColumnKey);
+  const column = getBoardColumn(order);
+  const colIndex = column === 'cancelled' ? -1 : COLUMN_ORDER.indexOf(column);
   const prevStatus = colIndex > 0 ? COLUMN_ORDER[colIndex - 1] : null;
   const nextStatus = colIndex >= 0 && colIndex < COLUMN_ORDER.length - 1 ? COLUMN_ORDER[colIndex + 1] : null;
   const lastChange = order.history?.length ? order.history[order.history.length - 1] : null;
+  const isPending = column === 'new';
 
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: `order-${order.id}`,
-    data: { orderId: order.id, workflow },
+    data: { orderId: order.id, workflow: column },
+    disabled: column === 'cancelled',
   });
 
   const style = transform ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)` } : undefined;
 
-  const move = async (wf: WorkflowStage | 'cancelled') => {
+  const run = async (fn: () => Promise<void> | void) => {
     setUpdating(true);
-    await onWorkflowChange(order.id, wf);
-    setUpdating(false);
+    try { await fn(); } finally { setUpdating(false); }
   };
 
   return (
@@ -151,19 +163,23 @@ function OrderCard({ order, highlight, dragging, onWorkflowChange, onPaymentStat
       } ${dragging ? 'shadow-2xl ring-2 ring-amber-500/60' : ''}`}
     >
       <div className="p-3 pb-2 flex items-start gap-2">
-        <button {...attributes} {...listeners}
-          className="mt-0.5 p-1.5 -ml-1 text-zinc-600 hover:text-zinc-300 cursor-grab active:cursor-grabbing shrink-0 touch-none"
-          title="Arrastar">
-          <GripVertical size={16} />
-        </button>
+        {column !== 'cancelled' && (
+          <button {...attributes} {...listeners}
+            className="mt-0.5 p-1.5 -ml-1 text-zinc-600 hover:text-zinc-300 cursor-grab active:cursor-grabbing shrink-0 touch-none"
+            title="Arrastar">
+            <GripVertical size={16} />
+          </button>
+        )}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1 flex-wrap">
             <span className="text-amber-500 font-black text-lg">#{order.orderNumber}</span>
             <span className="text-zinc-500 text-xs flex items-center gap-1">
               <Clock size={11} /> {formatTime(order.createdAt)} · {timeAgo(order.createdAt)}
             </span>
-            {highlight && (
-              <span className="bg-amber-500 text-zinc-950 text-[9px] font-black uppercase px-1.5 py-0.5 rounded animate-pulse">NOVO</span>
+            {isPending && (
+              <span className="bg-amber-500 text-zinc-950 text-[9px] font-black uppercase px-1.5 py-0.5 rounded animate-pulse">
+                🟡 Pendente
+              </span>
             )}
           </div>
           <p className="text-white font-bold truncate">{order.customerName}</p>
@@ -171,6 +187,9 @@ function OrderCard({ order, highlight, dragging, onWorkflowChange, onPaymentStat
             <p className="text-zinc-600 text-[10px] mt-0.5">
               {lastChange.label} às {formatTime(lastChange.at)}
             </p>
+          )}
+          {order.rejectReason && (
+            <p className="text-red-400 text-[11px] mt-1">Motivo: {order.rejectReason}</p>
           )}
         </div>
       </div>
@@ -190,7 +209,7 @@ function OrderCard({ order, highlight, dragging, onWorkflowChange, onPaymentStat
             order.paymentStatus === 'paid' ? 'bg-green-500/15 text-green-400' :
             order.paymentStatus === 'failed' ? 'bg-red-500/15 text-red-400' : 'bg-zinc-700/40 text-zinc-400'
           }`}
-          title="Alternar status do pagamento"
+          title="Confirmar pagamento (não aceita o pedido automaticamente)"
         >
           {PAYMENT_STATUS_LABELS[order.paymentStatus]}
         </button>
@@ -255,47 +274,83 @@ function OrderCard({ order, highlight, dragging, onWorkflowChange, onPaymentStat
         </div>
       )}
 
-      <div className="p-3 pt-2 flex items-center gap-1.5 flex-wrap">
-        <button onClick={() => {
-          const number = normalizePhoneForWhatsapp(order.phone);
-          if (number) window.open(`https://wa.me/${number}?text=${encodeURIComponent(`Olá ${order.customerName}! Pedido #${order.orderNumber} — The Burger GN.`)}`, '_blank');
-        }} className="p-2 bg-[#25D366]/15 text-[#25D366] hover:bg-[#25D366]/25 rounded-lg" title="WhatsApp (manual)">
-          <MessageCircle size={15} />
-        </button>
-        <button onClick={() => {
-          const win = window.open('', '_blank', 'width=350,height=600');
-          if (!win) return;
-          win.document.write(buildReceiptHTML(order));
-          win.document.close();
-        }} className="p-2 text-zinc-500 hover:text-white bg-zinc-800 rounded-lg" title="Imprimir">
-          <Printer size={15} />
-        </button>
-        <button onClick={() => setShowHistory(v => !v)}
-          className={`p-2 rounded-lg transition-colors ${showHistory ? 'text-amber-500 bg-amber-500/10' : 'text-zinc-500 hover:text-white bg-zinc-800'}`}
-          title="Histórico">
-          <History size={15} />
-        </button>
-        {order.status !== 'cancelled' && (
-          <button onClick={() => move('cancelled')} disabled={updating}
-            className="p-2 text-red-500/70 hover:text-red-400 bg-red-950/30 rounded-lg" title="Cancelar">
+      {/* Pending: Accept / Refuse */}
+      {isPending && (
+        <div className="p-3 pt-2 grid grid-cols-2 gap-2">
+          <button type="button" disabled={updating} onClick={() => run(() => onRefuse(order))}
+            className="h-11 rounded-xl bg-red-950/50 border border-red-800/50 text-red-400 font-black text-xs uppercase tracking-wide flex items-center justify-center gap-1.5 hover:bg-red-900/40">
+            <Ban size={15} /> Recusar
+          </button>
+          <button type="button" disabled={updating} onClick={() => run(() => onAccept(order))}
+            className="h-11 rounded-xl bg-green-500 text-zinc-950 font-black text-xs uppercase tracking-wide flex items-center justify-center gap-1.5 hover:bg-green-400">
+            <Check size={15} /> Aceitar
+          </button>
+        </div>
+      )}
+
+      {!isPending && column !== 'cancelled' && (
+        <div className="p-3 pt-2 flex items-center gap-1.5 flex-wrap">
+          <button onClick={() => {
+            openCustomerWhatsapp(order.phone, `Olá ${order.customerName.split(' ')[0] || ''}! Pedido #${order.orderNumber} — The Burger GN.`);
+          }} className="p-2 bg-[#25D366]/15 text-[#25D366] hover:bg-[#25D366]/25 rounded-lg" title="WhatsApp">
+            <MessageCircle size={15} />
+          </button>
+          <button onClick={() => {
+            const win = window.open('', '_blank', 'width=350,height=600');
+            if (!win) return;
+            win.document.write(buildReceiptHTML(order));
+            win.document.close();
+          }} className="p-2 text-zinc-500 hover:text-white bg-zinc-800 rounded-lg" title="Imprimir">
+            <Printer size={15} />
+          </button>
+          <button onClick={() => setShowHistory(v => !v)}
+            className={`p-2 rounded-lg transition-colors ${showHistory ? 'text-amber-500 bg-amber-500/10' : 'text-zinc-500 hover:text-white bg-zinc-800'}`}
+            title="Histórico">
+            <History size={15} />
+          </button>
+          <button onClick={() => onRefuse(order)} disabled={updating}
+            className="p-2 text-red-500/70 hover:text-red-400 bg-red-950/30 rounded-lg" title="Recusar">
             <Ban size={15} />
           </button>
-        )}
-        <div className="flex-1" />
-        {prevStatus && (
-          <button onClick={() => move(prevStatus)} disabled={updating}
-            className="p-2 text-zinc-500 hover:text-white bg-zinc-800 rounded-lg" title={WORKFLOW_LABELS[prevStatus]}>
-            <ChevronLeft size={15} />
+          <div className="flex-1" />
+          {prevStatus && prevStatus !== 'new' && (
+            <button onClick={() => run(() => onBack(order, prevStatus))} disabled={updating}
+              className="p-2 text-zinc-500 hover:text-white bg-zinc-800 rounded-lg" title={WORKFLOW_LABELS[prevStatus]}>
+              <ChevronLeft size={15} />
+            </button>
+          )}
+          {nextStatus && (
+            <button onClick={() => run(() => onAdvance(order, nextStatus))} disabled={updating}
+              className={`px-2.5 py-2 rounded-lg font-bold text-xs uppercase tracking-wide flex items-center gap-1 ${COLUMNS.find(c => c.key === nextStatus)?.btnClass ?? 'bg-amber-500 text-zinc-950'}`}
+              title={WORKFLOW_LABELS[nextStatus]}>
+              {WORKFLOW_LABELS[nextStatus].split(' ')[0]} <ChevronRight size={14} />
+            </button>
+          )}
+        </div>
+      )}
+
+      {isPending && (
+        <div className="px-3 pb-3 flex items-center gap-1.5">
+          <button onClick={() => {
+            openCustomerWhatsapp(order.phone, `Olá ${order.customerName.split(' ')[0]}! Pedido #${order.orderNumber} — The Burger GN.`);
+          }} className="p-2 bg-[#25D366]/15 text-[#25D366] hover:bg-[#25D366]/25 rounded-lg" title="WhatsApp">
+            <MessageCircle size={15} />
           </button>
-        )}
-        {nextStatus && (
-          <button onClick={() => move(nextStatus)} disabled={updating}
-            className={`px-2.5 py-2 rounded-lg font-bold text-xs uppercase tracking-wide flex items-center gap-1 ${COLUMNS.find(c => c.key === nextStatus)?.btnClass ?? 'bg-amber-500 text-zinc-950'}`}
-            title={WORKFLOW_LABELS[nextStatus]}>
-            {WORKFLOW_LABELS[nextStatus].split(' ')[0]} <ChevronRight size={14} />
+          <button onClick={() => {
+            const win = window.open('', '_blank', 'width=350,height=600');
+            if (!win) return;
+            win.document.write(buildReceiptHTML(order));
+            win.document.close();
+          }} className="p-2 text-zinc-500 hover:text-white bg-zinc-800 rounded-lg" title="Imprimir">
+            <Printer size={15} />
           </button>
-        )}
-      </div>
+          <button onClick={() => setShowHistory(v => !v)}
+            className={`p-2 rounded-lg transition-colors ${showHistory ? 'text-amber-500 bg-amber-500/10' : 'text-zinc-500 hover:text-white bg-zinc-800'}`}
+            title="Histórico">
+            <History size={15} />
+          </button>
+        </div>
+      )}
 
       <AnimatePresence>
         {showReceipt && order.receiptDataUrl && (
@@ -308,10 +363,13 @@ function OrderCard({ order, highlight, dragging, onWorkflowChange, onPaymentStat
                 <button onClick={() => setShowReceipt(false)} className="text-zinc-500 hover:text-white"><X size={18} /></button>
               </div>
               <img src={order.receiptDataUrl} alt="Comprovante" className="w-full rounded-xl max-h-[70vh] object-contain bg-zinc-900" />
+              <p className="text-zinc-500 text-[11px] mt-2 text-center">
+                Comprovante não aceita o pedido automaticamente. Confirme o pagamento e depois aceite o pedido.
+              </p>
               {order.paymentStatus !== 'paid' && (
                 <button type="button" onClick={() => { onPaymentStatus(order.id, 'paid'); setShowReceipt(false); }}
                   className="mt-3 w-full h-11 rounded-xl bg-green-500 text-zinc-950 font-bold text-sm flex items-center justify-center gap-2">
-                  <CheckCircle2 size={16} /> Marcar como pago
+                  <CheckCircle2 size={16} /> Marcar pagamento como pago
                 </button>
               )}
             </div>
@@ -322,9 +380,12 @@ function OrderCard({ order, highlight, dragging, onWorkflowChange, onPaymentStat
   );
 }
 
-function Column({ col, orders, newOrderIds, onWorkflowChange, onPaymentStatus }: {
+function Column({ col, orders, newOrderIds, onAccept, onRefuse, onAdvance, onBack, onPaymentStatus }: {
   col: ColumnDef; orders: Order[]; newOrderIds: Set<number>;
-  onWorkflowChange: (id: number, workflow: WorkflowStage | 'cancelled') => void;
+  onAccept: (order: Order) => void;
+  onRefuse: (order: Order) => void;
+  onAdvance: (order: Order, workflow: ColumnKey) => void;
+  onBack: (order: Order, workflow: ColumnKey) => void;
   onPaymentStatus: (id: number, status: PaymentStatus) => void;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: col.key });
@@ -345,7 +406,8 @@ function Column({ col, orders, newOrderIds, onWorkflowChange, onPaymentStatus }:
             <div className="text-center py-10"><p className="text-zinc-700 text-xs font-medium">Nenhum pedido</p></div>
           ) : orders.map(order => (
             <OrderCard key={order.id} order={order} highlight={newOrderIds.has(order.id)}
-              onWorkflowChange={onWorkflowChange} onPaymentStatus={onPaymentStatus} />
+              onAccept={onAccept} onRefuse={onRefuse} onAdvance={onAdvance} onBack={onBack}
+              onPaymentStatus={onPaymentStatus} />
           ))}
         </AnimatePresence>
       </div>
@@ -363,6 +425,11 @@ export default function AdminDashboard() {
   const [activeDragOrder, setActiveDragOrder] = useState<Order | null>(null);
   const [showCancelled, setShowCancelled] = useState(false);
   const [filter, setFilter] = useState<'all' | ColumnKey>('all');
+  const [refuseOrder, setRefuseOrder] = useState<Order | null>(null);
+  const [rejectReason, setRejectReason] = useState('');
+  const [rejectCustom, setRejectCustom] = useState('');
+  const [refuseError, setRefuseError] = useState('');
+  const [refuseSaving, setRefuseSaving] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState<boolean>(() => {
     const stored = localStorage.getItem(SOUND_STORAGE_KEY);
     return stored === null ? true : stored === 'true';
@@ -385,19 +452,12 @@ export default function AdminDashboard() {
       if (soundEnabledRef.current) playBeep();
       setOrders(prev => [order, ...prev.filter(o => o.id !== order.id)]);
       setNewOrderIds(prev => new Set([...prev, order.id]));
-      setNotification(`Novo pedido #${order.orderNumber} de ${order.customerName}!`);
+      setNotification(`🟡 Novo pedido pendente #${order.orderNumber} de ${order.customerName}`);
       setTimeout(() => setNotification(null), 6000);
       setTimeout(() => setNewOrderIds(prev => { const s = new Set(prev); s.delete(order.id); return s; }), 30000);
     });
 
-    es.addEventListener('order_status', (e) => {
-      const data = JSON.parse(e.data) as { id: number; status: Order['status']; workflow?: WorkflowStage };
-      setOrders(prev => prev.map(o => o.id === data.id
-        ? { ...o, status: data.status, workflow: data.workflow ?? o.workflow }
-        : o));
-      fetchOrders();
-    });
-
+    es.addEventListener('order_status', () => { fetchOrders(); });
     es.addEventListener('order_receipt', () => { fetchOrders(); });
     es.addEventListener('order_payment', (e) => {
       const data = JSON.parse(e.data) as { id: number; paymentStatus: PaymentStatus };
@@ -407,17 +467,71 @@ export default function AdminDashboard() {
     return () => es.close();
   }, [fetchOrders]);
 
-  const handleWorkflowChange = async (id: number, workflow: WorkflowStage | 'cancelled') => {
-    setNewOrderIds(prev => { const s = new Set(prev); s.delete(id); return s; });
+  const applyUpdated = (id: number, updated: Order) => {
+    setOrders(prev => prev.map(o => o.id === id ? { ...o, ...updated, items: updated.items?.length ? updated.items : o.items } : o));
+  };
+
+  const handleAccept = async (order: Order) => {
+    setNewOrderIds(prev => { const s = new Set(prev); s.delete(order.id); return s; });
     try {
-      const updated = await updateOrderWorkflow(id, workflow);
-      setOrders(prev => prev.map(o => o.id === id ? { ...o, ...updated, items: updated.items?.length ? updated.items : o.items } : o));
+      const updated = await updateOrderWorkflow(order.id, 'preparing');
+      applyUpdated(order.id, updated);
+      notifyCustomer(order, 'preparing', null, updated.customerNotifyMessage);
     } catch {
       fetchOrders();
     }
   };
 
+  const handleAdvance = async (order: Order, workflow: ColumnKey) => {
+    try {
+      const updated = await updateOrderWorkflow(order.id, workflow);
+      applyUpdated(order.id, updated);
+      notifyCustomer(order, workflow, null, updated.customerNotifyMessage);
+    } catch {
+      fetchOrders();
+    }
+  };
+
+  const handleBack = async (order: Order, workflow: ColumnKey) => {
+    try {
+      const updated = await updateOrderWorkflow(order.id, workflow);
+      applyUpdated(order.id, updated);
+    } catch {
+      fetchOrders();
+    }
+  };
+
+  const openRefuse = (order: Order) => {
+    setRefuseOrder(order);
+    setRejectReason('');
+    setRejectCustom('');
+    setRefuseError('');
+  };
+
+  const confirmRefuse = async () => {
+    if (!refuseOrder) return;
+    const reason = rejectReason === '__other__' ? rejectCustom.trim() : rejectReason.trim();
+    if (!reason) {
+      setRefuseError('Selecione ou informe o motivo da recusa.');
+      return;
+    }
+    setRefuseSaving(true);
+    setRefuseError('');
+    try {
+      const updated = await updateOrderWorkflow(refuseOrder.id, 'cancelled', { rejectReason: reason });
+      applyUpdated(refuseOrder.id, updated);
+      notifyCustomer(refuseOrder, 'cancelled', reason, updated.customerNotifyMessage);
+      setRefuseOrder(null);
+    } catch (err) {
+      setRefuseError(err instanceof Error ? err.message : 'Não foi possível recusar o pedido.');
+      fetchOrders();
+    } finally {
+      setRefuseSaving(false);
+    }
+  };
+
   const handlePaymentStatus = async (id: number, paymentStatus: PaymentStatus) => {
+    // Payment confirmation never changes workflow / never auto-accepts.
     setOrders(prev => prev.map(o => o.id === id ? { ...o, paymentStatus } : o));
     try { await updateOrderPaymentStatus(id, paymentStatus); }
     catch { fetchOrders(); }
@@ -433,17 +547,27 @@ export default function AdminDashboard() {
     const { active, over } = event;
     if (!over) return;
     const orderId = active.data.current?.orderId as number | undefined;
-    const from = active.data.current?.workflow as WorkflowStage | undefined;
+    const from = active.data.current?.workflow as ColumnKey | undefined;
     const to = over.id as ColumnKey;
     if (!orderId || !from || !COLUMN_ORDER.includes(to) || to === from) return;
-    handleWorkflowChange(orderId, to);
+    const order = orders.find(o => o.id === orderId);
+    if (!order) return;
+
+    // From pending: only allow drop onto Em Preparo (= accept)
+    if (from === 'new') {
+      if (to === 'preparing') handleAccept(order);
+      return;
+    }
+    // Cannot drag back into Novos Pedidos
+    if (to === 'new') return;
+    handleAdvance(order, to);
   };
 
   const ordersByColumn = useMemo(() => {
-    const map: Record<ColumnKey, Order[]> = { new: [], accepted: [], preparing: [], ready: [], out: [], done: [] };
+    const map: Record<ColumnKey, Order[]> = { new: [], preparing: [], ready: [], out: [], done: [] };
     for (const o of orders) {
-      const wf = getWorkflow(o);
-      if (wf !== 'cancelled' && wf in map) map[wf].push(o);
+      const col = getBoardColumn(o);
+      if (col !== 'cancelled' && col in map) map[col].push(o);
     }
     return map;
   }, [orders]);
@@ -460,7 +584,7 @@ export default function AdminDashboard() {
         {notification && (
           <motion.div initial={{ y: -60 }} animate={{ y: 0 }} exit={{ y: -60 }}
             className="fixed top-0 left-0 right-0 z-50 bg-amber-500 text-zinc-950 text-center font-bold text-sm py-3 px-4 shadow-lg">
-            🔔 {notification}
+            {notification}
           </motion.div>
         )}
       </AnimatePresence>
@@ -480,7 +604,7 @@ export default function AdminDashboard() {
           <div className="hidden md:flex items-center gap-4 text-xs">
             <div className="text-center">
               <p className="text-lg font-black text-amber-500 leading-none">{newCount}</p>
-              <p className="text-zinc-600 text-[9px] uppercase mt-0.5">Novos</p>
+              <p className="text-zinc-600 text-[9px] uppercase mt-0.5">Pendentes</p>
             </div>
             <div className="text-center border-l border-zinc-800 pl-4">
               <p className="text-lg font-black text-sky-400 leading-none">{activeCount}</p>
@@ -499,7 +623,7 @@ export default function AdminDashboard() {
           </div>
 
           <div className="flex items-center gap-1 shrink-0">
-            <button onClick={() => setShowCancelled(true)} className="p-2 text-zinc-400 hover:text-red-400 relative" title="Cancelados">
+            <button onClick={() => setShowCancelled(true)} className="p-2 text-zinc-400 hover:text-red-400 relative" title="Recusados">
               <XCircle size={20} />
               {cancelledOrders.length > 0 && (
                 <span className="absolute -top-0.5 -right-0.5 bg-red-500 text-white text-[9px] font-black w-4 h-4 rounded-full flex items-center justify-center">
@@ -550,20 +674,70 @@ export default function AdminDashboard() {
             <div className="max-w-[1800px] mx-auto h-full flex gap-3 overflow-x-auto pb-4" style={{ minHeight: 'calc(100vh - 240px)' }}>
               {visibleColumns.map(col => (
                 <Column key={col.key} col={col} orders={ordersByColumn[col.key]} newOrderIds={newOrderIds}
-                  onWorkflowChange={handleWorkflowChange} onPaymentStatus={handlePaymentStatus} />
+                  onAccept={handleAccept} onRefuse={openRefuse} onAdvance={handleAdvance} onBack={handleBack}
+                  onPaymentStatus={handlePaymentStatus} />
               ))}
             </div>
             <DragOverlay>
               {activeDragOrder && (
                 <div className="w-[300px] rotate-2">
                   <OrderCard order={activeDragOrder} highlight={false} dragging
-                    onWorkflowChange={handleWorkflowChange} onPaymentStatus={handlePaymentStatus} />
+                    onAccept={handleAccept} onRefuse={openRefuse} onAdvance={handleAdvance} onBack={handleBack}
+                    onPaymentStatus={handlePaymentStatus} />
                 </div>
               )}
             </DragOverlay>
           </DndContext>
         )}
       </main>
+
+      {/* Refuse modal */}
+      <AnimatePresence>
+        {refuseOrder && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[90] bg-black/75 flex items-end sm:items-center justify-center p-0 sm:p-4"
+            onClick={() => !refuseSaving && setRefuseOrder(null)}>
+            <motion.div initial={{ y: 40 }} animate={{ y: 0 }} exit={{ y: 40 }}
+              className="bg-zinc-950 border border-zinc-800 rounded-t-3xl sm:rounded-3xl w-full sm:max-w-md p-5 space-y-4"
+              onClick={e => e.stopPropagation()}>
+              <div className="flex items-center justify-between">
+                <h2 className="text-white font-black uppercase text-sm">Recusar pedido #{refuseOrder.orderNumber}</h2>
+                <button type="button" disabled={refuseSaving} onClick={() => setRefuseOrder(null)} className="text-zinc-500 hover:text-white"><X size={18} /></button>
+              </div>
+              <p className="text-zinc-500 text-sm">Informe o motivo. O cliente receberá a justificativa no WhatsApp.</p>
+              <div className="space-y-2">
+                {REJECT_REASON_SUGGESTIONS.map(reason => (
+                  <button key={reason} type="button" onClick={() => { setRejectReason(reason); setRefuseError(''); }}
+                    className={`w-full text-left px-4 py-3 rounded-xl border text-sm font-bold transition-all ${
+                      rejectReason === reason ? 'border-amber-500 bg-amber-500/10 text-amber-400' : 'border-zinc-800 bg-zinc-900 text-zinc-300'
+                    }`}>
+                    {reason}
+                  </button>
+                ))}
+                <button type="button" onClick={() => { setRejectReason('__other__'); setRefuseError(''); }}
+                  className={`w-full text-left px-4 py-3 rounded-xl border text-sm font-bold transition-all ${
+                    rejectReason === '__other__' ? 'border-amber-500 bg-amber-500/10 text-amber-400' : 'border-zinc-800 bg-zinc-900 text-zinc-300'
+                  }`}>
+                  Outro motivo
+                </button>
+                {rejectReason === '__other__' && (
+                  <textarea
+                    value={rejectCustom}
+                    onChange={e => setRejectCustom(e.target.value)}
+                    placeholder="Descreva o motivo..."
+                    className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 text-white text-sm resize-none h-24 focus:border-amber-500 focus:outline-none"
+                  />
+                )}
+              </div>
+              {refuseError && <p className="text-red-400 text-sm">{refuseError}</p>}
+              <button type="button" disabled={refuseSaving} onClick={confirmRefuse}
+                className="w-full h-12 rounded-xl bg-red-500 hover:bg-red-400 text-white font-black uppercase text-sm tracking-wide disabled:opacity-50">
+                {refuseSaving ? 'Recusando...' : 'Confirmar recusa'}
+              </button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <AnimatePresence>
         {showCancelled && (
@@ -575,15 +749,17 @@ export default function AdminDashboard() {
               onClick={e => e.stopPropagation()}>
               <div className="flex items-center justify-between mb-3">
                 <h2 className="text-white font-black uppercase flex items-center gap-2">
-                  <XCircle size={18} className="text-red-500" /> Cancelados
+                  <XCircle size={18} className="text-red-500" /> Recusados
                 </h2>
                 <button onClick={() => setShowCancelled(false)} className="p-2 text-zinc-500 hover:text-white"><X size={18} /></button>
               </div>
               {cancelledOrders.length === 0 ? (
-                <p className="text-zinc-600 text-sm text-center py-10">Nenhum pedido cancelado.</p>
+                <p className="text-zinc-600 text-sm text-center py-10">Nenhum pedido recusado.</p>
               ) : cancelledOrders.map(order => (
                 <div key={order.id} className="mb-3">
-                  <OrderCard order={order} highlight={false} onWorkflowChange={handleWorkflowChange} onPaymentStatus={handlePaymentStatus} />
+                  <OrderCard order={order} highlight={false}
+                    onAccept={handleAccept} onRefuse={openRefuse} onAdvance={handleAdvance} onBack={handleBack}
+                    onPaymentStatus={handlePaymentStatus} />
                 </div>
               ))}
             </motion.div>
