@@ -12,7 +12,7 @@ import {
   buildCustomerNotifyMessage, buildPostDeliverySurveyMessage,
   type WorkflowStage, type CardType, type OrderMeta, type OrderReview,
 } from "../lib/orderMeta";
-import { buildStaticPixPayload, decodePixSettings } from "../lib/staticPix";
+import { buildStaticPixPayload, decodePixSettings, normalizePixKey } from "../lib/staticPix";
 import crypto from "node:crypto";
 
 const router = Router();
@@ -240,18 +240,20 @@ router.post("/orders", resolvePublicCompany, async (req, res) => {
           merchantName: pixCfg!.name,
           merchantCity: pixCfg!.city,
           amount: total,
-          txid: `BGN${orderNumber}`,
+          // Referência só na descrição (MAI 02). TXID deve permanecer "***" no BR Code estático.
+          description: `PEDIDO${orderNumber}`,
         });
         // Never return an empty/invalid payload as a QR.
         if (qrCode && qrCode.length > 20) {
+          const normalizedKey = normalizePixKey(pixKey);
           pixPayment = {
             paymentId: `static_${trackingId}`,
             qrCode,
             qrCodeBase64: "",
-            pixKey,
+            pixKey: normalizedKey,
           };
           meta.pixCopyPaste = qrCode;
-          meta.pixKey = pixKey;
+          meta.pixKey = normalizedKey;
         } else {
           pixConfigured = false;
           pixUnavailableReason = "Não foi possível gerar o QR Code Pix. Verifique a chave cadastrada no painel.";
