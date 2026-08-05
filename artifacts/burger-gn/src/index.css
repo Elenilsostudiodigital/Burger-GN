@@ -157,6 +157,13 @@
     font-family: var(--app-font-display);
   }
 
+  /* Used while product modal is open — always cleared on close/unmount */
+  body.modal-open {
+    overflow: hidden;
+    overscroll-behavior: none;
+    touch-action: none;
+  }
+
   .pb-safe {
     padding-bottom: max(0.75rem, env(safe-area-inset-bottom, 0px));
   }

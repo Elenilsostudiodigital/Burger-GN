@@ -68,12 +68,20 @@ export default function Confirmation() {
   useEffect(() => {
     if (didInit.current) return;
     didInit.current = true;
-    const raw = sessionStorage.getItem('lastOrder');
-    if (!raw) return;
-    const stored = JSON.parse(raw) as StoredOrder;
-    setOrder(stored);
-    sessionStorage.removeItem('lastOrder');
-    clearCart();
+    try {
+      const raw = sessionStorage.getItem('lastOrder');
+      if (!raw) return;
+      const stored = JSON.parse(raw) as StoredOrder;
+      setOrder(stored);
+      sessionStorage.removeItem('lastOrder');
+    } catch (err) {
+      console.error('[BurgerGN] Failed to restore last order:', err);
+      try { sessionStorage.removeItem('lastOrder'); } catch { /* ignore */ }
+    } finally {
+      clearCart();
+      document.body.style.overflow = '';
+      document.body.classList.remove('modal-open');
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

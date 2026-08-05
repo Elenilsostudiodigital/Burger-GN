@@ -264,7 +264,22 @@ export default function Checkout() {
     } finally { setSubmitting(false); }
   };
 
-  if (cartItems.length === 0) { setLocation('/cardapio'); return null; }
+  // Never call setLocation during render — on mobile this returns null (black screen) before navigation.
+  useEffect(() => {
+    if (cartItems.length === 0 && !submitting) {
+      setLocation('/cardapio');
+    }
+  }, [cartItems.length, submitting, setLocation]);
+
+  if (cartItems.length === 0) {
+    return (
+      <PageTransition className="bg-[#0a0a0a]">
+        <div className="min-h-screen flex items-center justify-center">
+          <div className="w-8 h-8 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
+        </div>
+      </PageTransition>
+    );
+  }
 
   const stepNum = (n: number) => (
     <span className="w-6 h-6 rounded-full bg-amber-500/20 text-amber-500 flex items-center justify-center text-xs font-black flex-shrink-0">{n}</span>
@@ -274,7 +289,7 @@ export default function Checkout() {
 
   return (
     <PageTransition className="bg-[#0a0a0a]">
-      <header className="sticky top-0 z-40 bg-zinc-950/90 backdrop-blur-md border-b border-zinc-800 px-6 py-4">
+      <header className="sticky top-0 z-40 bg-zinc-950 border-b border-zinc-800 px-6 py-4">
         <div className="max-w-md mx-auto flex items-center">
           <button onClick={() => setLocation('/carrinho')} className="p-2 -ml-2 text-zinc-400 hover:text-white transition-colors">
             <ArrowLeft size={24} />

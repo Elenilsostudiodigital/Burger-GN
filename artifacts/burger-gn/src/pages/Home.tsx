@@ -83,7 +83,7 @@ export default function Home() {
 
   return (
     <PageTransition className="bg-[#0a0a0a]">
-      <header className="sticky top-0 z-40 bg-zinc-950/85 backdrop-blur-xl border-b border-zinc-800/80 px-4 py-3">
+      <header className="sticky top-0 z-40 bg-zinc-950 border-b border-zinc-800/80 px-4 py-3">
         <div className="max-w-md mx-auto flex items-center justify-between">
           <div className="flex items-center gap-2.5">
             <div className="w-9 h-9 border-2 border-amber-500 rounded-full flex items-center justify-center shadow-[0_0_18px_rgba(245,158,11,0.25)]">
@@ -149,7 +149,7 @@ export default function Home() {
       </section>
 
       {/* Search + section chips */}
-      <div className="sticky top-[57px] z-30 bg-[#0a0a0a]/92 backdrop-blur-xl border-b border-zinc-800/70">
+      <div className="sticky top-[57px] z-30 bg-[#0a0a0a] border-b border-zinc-800/70">
         <div className="max-w-md mx-auto px-4 pt-3 pb-2">
           <div className="relative">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />

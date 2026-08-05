@@ -9,6 +9,10 @@ interface ProductDetailModalProps {
   onAdd: (product: Product, addons: Addon[], notes: string, quantity: number) => void;
 }
 
+function safeList<T>(value: T[] | null | undefined): T[] {
+  return Array.isArray(value) ? value : [];
+}
+
 export function ProductDetailModal({ product, onClose, onAdd }: ProductDetailModalProps) {
   const [quantity, setQuantity] = useState(1);
   const [selected, setSelected] = useState<Addon[]>([]);
@@ -18,18 +22,31 @@ export function ProductDetailModal({ product, onClose, onAdd }: ProductDetailMod
     setQuantity(1);
     setSelected([]);
     setNotes('');
-  }, [product]);
+  }, [product?.id]);
 
+  // Lock scroll without leaving body stuck after close/crash (iOS-safe).
   useEffect(() => {
-    if (!product) return;
-    const prev = document.body.style.overflow;
+    if (!product) {
+      document.body.style.overflow = '';
+      document.body.classList.remove('modal-open');
+      return;
+    }
+    const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
+    document.body.classList.add('modal-open');
     return () => {
-      document.body.style.overflow = prev;
+      document.body.style.overflow = prevOverflow || '';
+      document.body.classList.remove('modal-open');
     };
   }, [product]);
 
-  if (!product) return null;
+  // Always restore scroll if this component unmounts for any reason.
+  useEffect(() => {
+    return () => {
+      document.body.style.overflow = '';
+      document.body.classList.remove('modal-open');
+    };
+  }, []);
 
   const toggleAddon = (addon: Addon) => {
     setSelected(prev =>
@@ -39,30 +56,46 @@ export function ProductDetailModal({ product, onClose, onAdd }: ProductDetailMod
     );
   };
 
-  const unitPrice = parseFloat(product.price) + selected.reduce((acc, a) => acc + a.price, 0);
+  const ingredients = safeList(product?.ingredients);
+  const addons = safeList(product?.addons);
+  const unitPrice = product
+    ? (parseFloat(product.price) || 0) + selected.reduce((acc, a) => acc + (Number(a.price) || 0), 0)
+    : 0;
   const totalPrice = unitPrice * quantity;
   const fmt = (v: number) => `R$ ${v.toFixed(2).replace('.', ',')}`;
 
   return (
-    <AnimatePresence>
+    <AnimatePresence
+      onExitComplete={() => {
+        document.body.style.overflow = '';
+        document.body.classList.remove('modal-open');
+      }}
+    >
       {product && (
         <motion.div
+          key={product.id}
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/75 backdrop-blur-sm"
+          transition={{ duration: 0.18 }}
+          className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/80"
           onClick={onClose}
+          role="dialog"
+          aria-modal="true"
         >
           <motion.div
-            initial={{ y: '100%', opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            exit={{ y: '100%', opacity: 0 }}
-            transition={{ type: 'spring', damping: 28, stiffness: 300 }}
-            className="relative w-full sm:max-w-md h-[min(92dvh,920px)] max-h-[92dvh] bg-zinc-950 rounded-t-3xl sm:rounded-3xl overflow-hidden flex flex-col border border-zinc-800 shadow-2xl"
-            style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
+            initial={{ y: '100%' }}
+            animate={{ y: 0 }}
+            exit={{ y: '100%' }}
+            transition={{ type: 'tween', duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
+            className="relative w-full sm:max-w-md bg-zinc-950 rounded-t-3xl sm:rounded-3xl overflow-hidden flex flex-col border border-zinc-800 shadow-2xl"
+            style={{
+              height: 'min(92vh, 920px)',
+              maxHeight: '92vh',
+              paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+            }}
             onClick={e => e.stopPropagation()}
           >
-            {/* Scrollable content only */}
             <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain">
               <div className="relative w-full h-48 sm:h-56 bg-zinc-900">
                 {product.videoUrl ? (
@@ -72,6 +105,7 @@ export function ProductDetailModal({ product, onClose, onAdd }: ProductDetailMod
                     className="w-full h-full object-cover"
                     controls
                     playsInline
+                    preload="metadata"
                   />
                 ) : (
                   <img
@@ -85,7 +119,7 @@ export function ProductDetailModal({ product, onClose, onAdd }: ProductDetailMod
                   type="button"
                   onClick={onClose}
                   aria-label="Fechar"
-                  className="absolute top-3 right-3 w-9 h-9 rounded-full bg-black/60 backdrop-blur flex items-center justify-center text-white hover:bg-black/80 transition-colors"
+                  className="absolute top-3 right-3 w-9 h-9 rounded-full bg-black/70 flex items-center justify-center text-white"
                 >
                   <X size={18} />
                 </button>
@@ -94,18 +128,18 @@ export function ProductDetailModal({ product, onClose, onAdd }: ProductDetailMod
               <div className="px-5 py-4 space-y-5">
                 <div>
                   <h2 className="text-white font-black uppercase text-xl leading-tight tracking-tight">{product.name}</h2>
-                  <p className="text-amber-500 font-black text-lg mt-1">{fmt(parseFloat(product.price))}</p>
+                  <p className="text-amber-500 font-black text-lg mt-1">{fmt(parseFloat(product.price) || 0)}</p>
                 </div>
 
                 {product.description && (
                   <p className="text-zinc-400 text-sm leading-relaxed">{product.description}</p>
                 )}
 
-                {product.ingredients.length > 0 && (
+                {ingredients.length > 0 && (
                   <div className="space-y-2">
                     <h3 className="text-zinc-500 text-xs font-bold uppercase tracking-wider">Ingredientes</h3>
                     <div className="flex flex-wrap gap-1.5">
-                      {product.ingredients.map((ing, idx) => (
+                      {ingredients.map((ing, idx) => (
                         <span key={idx} className="px-2.5 py-1 rounded-full bg-zinc-900 border border-zinc-800 text-zinc-300 text-xs">
                           {ing}
                         </span>
@@ -114,11 +148,11 @@ export function ProductDetailModal({ product, onClose, onAdd }: ProductDetailMod
                   </div>
                 )}
 
-                {product.addons.length > 0 && (
+                {addons.length > 0 && (
                   <div className="space-y-2">
                     <h3 className="text-zinc-500 text-xs font-bold uppercase tracking-wider">Adicionais</h3>
                     <div className="space-y-2">
-                      {product.addons.map((addon, idx) => {
+                      {addons.map((addon, idx) => {
                         const isSelected = selected.some(a => a.name === addon.name);
                         return (
                           <button
@@ -131,7 +165,7 @@ export function ProductDetailModal({ product, onClose, onAdd }: ProductDetailMod
                           >
                             <span className={`text-sm font-medium ${isSelected ? 'text-amber-500' : 'text-zinc-300'}`}>{addon.name}</span>
                             <div className="flex items-center gap-2.5">
-                              <span className={`text-sm font-bold ${isSelected ? 'text-amber-500' : 'text-zinc-400'}`}>+ {fmt(addon.price)}</span>
+                              <span className={`text-sm font-bold ${isSelected ? 'text-amber-500' : 'text-zinc-400'}`}>+ {fmt(Number(addon.price) || 0)}</span>
                               <div className={`w-5 h-5 rounded-full border flex items-center justify-center ${isSelected ? 'bg-amber-500 border-amber-500' : 'border-zinc-700'}`}>
                                 {isSelected && <Check size={12} className="text-zinc-950" />}
                               </div>
@@ -155,13 +189,12 @@ export function ProductDetailModal({ product, onClose, onAdd }: ProductDetailMod
               </div>
             </div>
 
-            {/* Always-visible confirm bar */}
-            <div className="shrink-0 z-20 border-t border-zinc-800 bg-zinc-950/95 backdrop-blur-md px-5 pt-3 pb-3 space-y-3">
+            <div className="shrink-0 z-20 border-t border-zinc-800 bg-zinc-950 px-5 pt-3 pb-3 space-y-3">
               <div className="flex items-center justify-center gap-4 bg-zinc-900 border border-zinc-800 rounded-xl py-2">
                 <button
                   type="button"
                   onClick={() => setQuantity(q => Math.max(1, q - 1))}
-                  className="w-10 h-10 flex items-center justify-center bg-zinc-800 text-white rounded-lg hover:bg-zinc-700 active:scale-95 transition-transform"
+                  className="w-10 h-10 flex items-center justify-center bg-zinc-800 text-white rounded-lg active:scale-95"
                 >
                   <Minus size={16} />
                 </button>
@@ -169,15 +202,18 @@ export function ProductDetailModal({ product, onClose, onAdd }: ProductDetailMod
                 <button
                   type="button"
                   onClick={() => setQuantity(q => q + 1)}
-                  className="w-10 h-10 flex items-center justify-center bg-amber-500 text-zinc-950 rounded-lg hover:brightness-110 active:scale-95 transition-transform"
+                  className="w-10 h-10 flex items-center justify-center bg-amber-500 text-zinc-950 rounded-lg active:scale-95"
                 >
                   <Plus size={16} />
                 </button>
               </div>
               <button
                 type="button"
-                onClick={() => { onAdd(product, selected, notes.trim(), quantity); onClose(); }}
-                className="w-full min-h-14 py-3.5 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-black uppercase tracking-wider rounded-xl flex items-center justify-center gap-2 transition-colors active:scale-[0.98] shadow-[0_8px_24px_rgba(245,158,11,0.25)]"
+                onClick={() => {
+                  onAdd(product, selected, notes.trim(), quantity);
+                  onClose();
+                }}
+                className="w-full min-h-14 py-3.5 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-black uppercase tracking-wider rounded-xl flex items-center justify-center gap-2 active:scale-[0.98]"
               >
                 Confirmar Pedido • {fmt(totalPrice)}
               </button>

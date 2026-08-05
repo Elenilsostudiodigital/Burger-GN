@@ -58,7 +58,22 @@ export const deleteCategory = (id: number) => api.delete(`/admin/categories/${id
 // ── Products ──────────────────────────────────────────────────────────────────
 export interface Addon { name: string; price: number; }
 export interface Product { id: number; name: string; description: string; price: string; categoryId: number | null; image: string; videoUrl: string; ingredients: string[]; addons: Addon[]; available: boolean; displayOrder: number; categorySlug: string | null; categoryName: string | null; }
-export const getProducts = () => api.get("/products") as Promise<Product[]>;
+
+/** Normalize API product payloads so null JSON fields never crash the mobile UI. */
+export function normalizeProduct(p: Product): Product {
+  return {
+    ...p,
+    description: p.description ?? "",
+    image: p.image ?? "",
+    videoUrl: p.videoUrl ?? "",
+    price: p.price ?? "0",
+    ingredients: Array.isArray(p.ingredients) ? p.ingredients : [],
+    addons: Array.isArray(p.addons) ? p.addons : [],
+  };
+}
+
+export const getProducts = () =>
+  api.get("/products").then((list: Product[]) => (Array.isArray(list) ? list.map(normalizeProduct) : [])) as Promise<Product[]>;
 export const getAdminProducts = () => api.get("/admin/products") as Promise<Product[]>;
 export const createProduct = (d: Partial<Product>) => api.post("/admin/products", d) as Promise<Product>;
 export const updateProduct = (id: number, d: Partial<Product>) => api.put(`/admin/products/${id}`, d) as Promise<Product>;

@@ -20,8 +20,11 @@ export function ProductRowCard({
   onQuickAdd,
   onQuantityChange,
 }: ProductRowCardProps) {
-  const hasCustomization = product.ingredients.length > 0 || product.addons.length > 0;
-  const price = `R$ ${parseFloat(product.price).toFixed(2).replace('.', ',')}`;
+  const ingredients = Array.isArray(product.ingredients) ? product.ingredients : [];
+  const addons = Array.isArray(product.addons) ? product.addons : [];
+  const hasCustomization = ingredients.length > 0 || addons.length > 0;
+  const priceNum = Number.parseFloat(String(product.price));
+  const price = `R$ ${(Number.isFinite(priceNum) ? priceNum : 0).toFixed(2).replace('.', ',')}`;
 
   return (
     <motion.div

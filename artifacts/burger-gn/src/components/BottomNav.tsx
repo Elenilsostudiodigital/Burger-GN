@@ -9,7 +9,7 @@ export function BottomNav() {
   const { totalItems } = useCart();
 
   return (
-    <div className="fixed bottom-0 left-0 right-0 z-50 bg-zinc-950/95 backdrop-blur-md border-t border-zinc-800 px-6 py-3 pb-safe">
+    <div className="fixed bottom-0 left-0 right-0 z-50 bg-zinc-950 border-t border-zinc-800 px-6 py-3 pb-safe">
       <div className="max-w-md mx-auto flex justify-between items-center">
         
         <Link href="/" className="flex flex-col items-center gap-1 group">

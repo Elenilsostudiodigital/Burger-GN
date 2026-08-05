@@ -74,7 +74,7 @@ export default function Menu() {
 
   return (
     <PageTransition className="bg-[#0a0a0a]">
-      <header className="sticky top-0 z-40 bg-zinc-950/90 backdrop-blur-md border-b border-zinc-800 px-6 py-4">
+      <header className="sticky top-0 z-40 bg-zinc-950 border-b border-zinc-800 px-6 py-4">
         <div className="max-w-md mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 border-2 border-amber-500 rounded-full flex items-center justify-center">
@@ -97,7 +97,7 @@ export default function Menu() {
         </div>
       </header>
 
-      <div className="sticky top-[73px] z-30 bg-zinc-950/90 backdrop-blur-md border-b border-zinc-800">
+      <div className="sticky top-[73px] z-30 bg-zinc-950 border-b border-zinc-800">
         <div className="max-w-md mx-auto px-4 pt-3">
           <div className="relative mb-2.5">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />

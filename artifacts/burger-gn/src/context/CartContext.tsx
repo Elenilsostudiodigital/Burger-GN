@@ -71,7 +71,10 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
 
   const clearCart = () => setCartItems([]);
 
-  const lineTotal = (ci: CartItem) => (ci.item.price + ci.selectedAddons.reduce((acc, a) => acc + a.price, 0)) * ci.quantity;
+  const lineTotal = (ci: CartItem) => {
+    const addons = Array.isArray(ci.selectedAddons) ? ci.selectedAddons : [];
+    return (Number(ci.item.price) + addons.reduce((acc, a) => acc + (Number(a.price) || 0), 0)) * ci.quantity;
+  };
 
   const totalItems = useMemo(() => cartItems.reduce((acc, ci) => acc + ci.quantity, 0), [cartItems]);
   const subtotal = useMemo(() => cartItems.reduce((acc, ci) => acc + lineTotal(ci), 0), [cartItems]);

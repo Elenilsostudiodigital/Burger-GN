@@ -35,7 +35,15 @@ router.get("/products", resolvePublicCompany, async (req, res) => {
       .leftJoin(categoriesTable, eq(productsTable.categoryId, categoriesTable.id))
       .where(and(...conditions))
       .orderBy(asc(productsTable.displayOrder));
-    res.json(products);
+    // Guard against null JSON fields from legacy imports — prevents mobile UI crashes.
+    res.json(products.map(p => ({
+      ...p,
+      ingredients: Array.isArray(p.ingredients) ? p.ingredients : [],
+      addons: Array.isArray(p.addons) ? p.addons : [],
+      description: p.description ?? "",
+      image: p.image ?? "",
+      videoUrl: p.videoUrl ?? "",
+    })));
   } catch (err) {
     req.log.error({ err }, "Failed to fetch products");
     res.status(500).json({ error: "Internal server error" });
