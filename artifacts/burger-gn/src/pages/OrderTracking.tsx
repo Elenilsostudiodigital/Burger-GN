@@ -2,8 +2,9 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useParams, Link, useLocation } from 'wouter';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  trackOrder, getPaymentSettings, submitOrderReview, Order,
-  ORDER_TYPE_LABELS, PAYMENT_METHOD_LABELS, PAYMENT_STATUS_LABELS,
+  trackOrder, getPaymentSettings, submitOrderReview, uploadOrderReceipt, Order,
+  ORDER_TYPE_LABELS, PAYMENT_METHOD_LABELS, PAYMENT_STATUS_LABELS, WORKFLOW_LABELS,
+  isAllowedReceiptFile, RECEIPT_ACCEPT,
 } from '../lib/api';
 import {
   getMyOrder, clearMyOrder, saveMyOrder, archiveMyOrder,
@@ -11,7 +12,7 @@ import {
 } from '../lib/myOrder';
 import { notifyOrderStatusChange } from '../lib/pushNotifications';
 import { buildPostDeliverySurveyMessage, sendPostDeliverySurveyWhenReady } from '../lib/whatsappFuture';
-import { ArrowLeft, Clock, Home, AlertCircle, Timer, Star, Loader2 } from 'lucide-react';
+import { ArrowLeft, Clock, Home, AlertCircle, Timer, Star, Loader2, Camera, ImageIcon, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { PageTransition } from '../components/PageTransition';
 import { BottomNav } from '../components/BottomNav';
@@ -35,11 +36,35 @@ function resolveTimelineIndex(order: Order): number {
   if (wf === 'out' || order.status === 'delivery') return 4;
   if (wf === 'ready') return 3;
   if (wf === 'preparing') return 2;
+  // awaiting_payment / new stay on "Pedido Recebido"
   return 0;
 }
 
 function fmt(val: string) {
   return `R$ ${parseFloat(val).toFixed(2).replace('.', ',')}`;
+}
+
+function compressImage(file: File, maxWidth = 1200, quality = 0.72): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Falha ao ler arquivo'));
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const scale = Math.min(1, maxWidth / img.width);
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
+        const ctx = canvas.getContext('2d');
+        if (!ctx) { reject(new Error('Canvas indisponível')); return; }
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      };
+      img.onerror = () => reject(new Error('Imagem inválida'));
+      img.src = reader.result as string;
+    };
+    reader.readAsDataURL(file);
+  });
 }
 
 function OrderTimelineView({ trackingId }: { trackingId: string }) {
@@ -57,6 +82,12 @@ function OrderTimelineView({ trackingId }: { trackingId: string }) {
   const [reviewError, setReviewError] = useState('');
   const [secondsLeft, setSecondsLeft] = useState<number | null>(null);
   const closedRef = useRef(false);
+  const [receiptPreview, setReceiptPreview] = useState<string | null>(null);
+  const [uploadingReceipt, setUploadingReceipt] = useState(false);
+  const [receiptError, setReceiptError] = useState('');
+  const [receiptOk, setReceiptOk] = useState(false);
+  const galleryRef = useRef<HTMLInputElement>(null);
+  const cameraRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     getPaymentSettings()
@@ -213,6 +244,63 @@ function OrderTimelineView({ trackingId }: { trackingId: string }) {
   const current = resolveTimelineIndex(order);
   const acceptedOrFurther = current >= 2 && current < 5;
   const delivered = order.status === 'done';
+  const pixNeedsReceipt = order.paymentMethod === 'pix'
+    && order.paymentStatus !== 'paid'
+    && order.status !== 'cancelled';
+  const paymentConfirmed = order.paymentMethod === 'pix'
+    && order.paymentStatus === 'paid'
+    && (order.workflow === 'new' || !order.workflow);
+
+  const pickReceipt = async (file: File | null) => {
+    if (!file) return;
+    if (!isAllowedReceiptFile(file)) {
+      setReceiptError('Envie uma imagem PNG, JPG, JPEG ou WEBP.');
+      return;
+    }
+    setReceiptError('');
+    try {
+      setReceiptPreview(await compressImage(file));
+    } catch {
+      setReceiptError('Não foi possível ler a imagem.');
+    }
+  };
+
+  const sendReceipt = async () => {
+    if (!receiptPreview) return;
+    setUploadingReceipt(true);
+    setReceiptError('');
+    try {
+      const updated = await uploadOrderReceipt(trackingId, receiptPreview);
+      setOrder(updated);
+      setReceiptOk(true);
+      setReceiptPreview(null);
+    } catch (err) {
+      setReceiptError(err instanceof Error ? err.message : 'Erro ao enviar comprovante');
+    } finally {
+      setUploadingReceipt(false);
+    }
+  };
+
+  const statusHeadline = (() => {
+    if (cancelled) return null;
+    if (order.paymentMethod === 'pix' && order.paymentStatus === 'paid' && order.workflow === 'new') {
+      return { emoji: '🎉', title: 'Pagamento confirmado', sub: 'Seu pedido foi enviado para análise da loja.' };
+    }
+    if (order.workflow === 'awaiting_payment' || (order.paymentMethod === 'pix' && order.receiptDataUrl && order.paymentStatus !== 'paid')) {
+      return {
+        emoji: '🟡',
+        title: WORKFLOW_LABELS.awaiting_payment,
+        sub: order.receiptRejectReason
+          ? `Comprovante recusado: ${order.receiptRejectReason}`
+          : 'Seu pagamento será analisado por nossa equipe.',
+      };
+    }
+    return {
+      emoji: TIMELINE[Math.max(0, current)]?.emoji,
+      title: TIMELINE[Math.max(0, current)]?.label,
+      sub: null as string | null,
+    };
+  })();
 
   return (
     <PageTransition className="bg-[#0a0a0a]">
@@ -317,15 +405,74 @@ function OrderTimelineView({ trackingId }: { trackingId: string }) {
                   </div>
                 )}
               </>
-            ) : (
+            ) : statusHeadline && (
               <>
                 <p className="text-zinc-500 text-xs uppercase tracking-wider mb-1">Status atual</p>
                 <h2 className="text-amber-400 font-black text-xl uppercase">
-                  {TIMELINE[Math.max(0, current)]?.emoji} {TIMELINE[Math.max(0, current)]?.label}
+                  {statusHeadline.emoji} {statusHeadline.title}
                 </h2>
+                {statusHeadline.sub && (
+                  <p className="text-zinc-300 text-sm mt-2">{statusHeadline.sub}</p>
+                )}
+                {paymentConfirmed && (
+                  <p className="text-zinc-400 text-xs mt-2">
+                    Aguarde enquanto nossa equipe confirma seu pedido.
+                  </p>
+                )}
                 <p className="text-zinc-600 text-xs mt-2 flex items-center justify-center gap-1">
                   <Clock size={12} /> Atualiza automaticamente
                 </p>
+              </>
+            )}
+          </motion.div>
+        )}
+
+        {!cancelled && pixNeedsReceipt && (
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+            className="rounded-3xl border border-amber-500/30 bg-zinc-900 p-5 space-y-3">
+            <h3 className="text-white font-black uppercase text-xs tracking-wider">
+              {order.receiptRejectReason || order.paymentStatus === 'failed'
+                ? 'Reenviar comprovante'
+                : order.receiptDataUrl
+                  ? 'Comprovante enviado'
+                  : 'Enviar comprovante Pix'}
+            </h3>
+            {order.receiptRejectReason && (
+              <div className="rounded-xl border border-red-800/50 bg-red-950/30 px-3 py-2 text-sm text-red-200">
+                Motivo da recusa: {order.receiptRejectReason}
+              </div>
+            )}
+            {order.receiptDataUrl && order.paymentStatus === 'pending' && !order.receiptRejectReason && (
+              <p className="text-zinc-400 text-sm">
+                ✅ Comprovante enviado. Aguarde a conferência do pagamento.
+              </p>
+            )}
+            {(order.paymentStatus === 'failed' || !order.receiptDataUrl || !!order.receiptRejectReason) && (
+              <>
+                <input ref={galleryRef} type="file" accept={RECEIPT_ACCEPT} className="hidden"
+                  onChange={e => { void pickReceipt(e.target.files?.[0] ?? null); e.target.value = ''; }} />
+                <input ref={cameraRef} type="file" accept={RECEIPT_ACCEPT} capture="environment" className="hidden"
+                  onChange={e => { void pickReceipt(e.target.files?.[0] ?? null); e.target.value = ''; }} />
+                <div className="grid grid-cols-2 gap-2">
+                  <button type="button" onClick={() => cameraRef.current?.click()}
+                    className="h-11 rounded-xl border border-zinc-700 bg-zinc-950 text-zinc-200 text-xs font-bold uppercase flex items-center justify-center gap-2">
+                    <Camera size={15} /> Tirar foto
+                  </button>
+                  <button type="button" onClick={() => galleryRef.current?.click()}
+                    className="h-11 rounded-xl border border-zinc-700 bg-zinc-950 text-zinc-200 text-xs font-bold uppercase flex items-center justify-center gap-2">
+                    <ImageIcon size={15} /> Galeria
+                  </button>
+                </div>
+                {receiptPreview && (
+                  <img src={receiptPreview} alt="Pré-visualização" className="w-full max-h-48 object-contain rounded-xl border border-zinc-800 bg-zinc-950" />
+                )}
+                {receiptError && <p className="text-red-400 text-xs">{receiptError}</p>}
+                {receiptOk && <p className="text-emerald-400 text-xs">✅ Comprovante enviado com sucesso.</p>}
+                <button type="button" disabled={!receiptPreview || uploadingReceipt} onClick={sendReceipt}
+                  className="w-full h-11 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-zinc-950 font-black text-xs uppercase flex items-center justify-center gap-2">
+                  {uploadingReceipt ? <Loader2 size={15} className="animate-spin" /> : <Upload size={15} />}
+                  Enviar comprovante
+                </button>
               </>
             )}
           </motion.div>

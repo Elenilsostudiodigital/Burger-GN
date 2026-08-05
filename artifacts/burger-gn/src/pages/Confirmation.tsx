@@ -1,12 +1,16 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Link } from 'wouter';
-import { motion } from 'framer-motion';
-import { CheckCircle2, Home, ExternalLink, Copy, Check, QrCode, Upload, Loader2, ImageIcon, AlertCircle } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import {
+  CheckCircle2, Home, ExternalLink, Copy, Check, QrCode, Upload, Loader2,
+  ImageIcon, AlertCircle, Camera, X,
+} from 'lucide-react';
 import { PageTransition } from '../components/PageTransition';
 import { useCart } from '../context/CartContext';
 import {
   ORDER_TYPE_LABELS, PAYMENT_METHOD_LABELS, CARD_TYPE_LABELS,
-  PaymentStatus, PixPaymentResult, uploadOrderReceipt, CardType, WorkflowStage,
+  PaymentStatus, PixPaymentResult, uploadOrderReceipt, trackOrder,
+  CardType, WorkflowStage, isAllowedReceiptFile, RECEIPT_ACCEPT,
 } from '../lib/api';
 import { saveMyOrder } from '../lib/myOrder';
 import { Button } from '@/components/ui/button';
@@ -33,6 +37,8 @@ interface StoredOrder {
   pixUnavailableReason?: string | null;
   createdAt: string;
 }
+
+type PixStep = 'pay' | 'upload' | 'sent' | 'confirmed';
 
 function compressImage(file: File, maxWidth = 1200, quality = 0.72): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -66,12 +72,14 @@ export default function Confirmation() {
   const [order, setOrder] = useState<StoredOrder | null>(null);
   const [copied, setCopied] = useState(false);
   const [copiedKey, setCopiedKey] = useState(false);
+  const [pixStep, setPixStep] = useState<PixStep>('pay');
   const [receiptPreview, setReceiptPreview] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
-  const [uploadOk, setUploadOk] = useState(false);
   const [uploadError, setUploadError] = useState('');
+  const [rejectReason, setRejectReason] = useState<string | null>(null);
   const didInit = useRef(false);
-  const fileRef = useRef<HTMLInputElement>(null);
+  const galleryRef = useRef<HTMLInputElement>(null);
+  const cameraRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (didInit.current) return;
@@ -100,6 +108,33 @@ export default function Confirmation() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Poll Pix payment conference result after receipt sent
+  useEffect(() => {
+    if (!order?.trackingId || order.paymentMethod !== 'pix') return;
+    if (pixStep !== 'sent' && pixStep !== 'upload') return;
+
+    let alive = true;
+    const poll = async () => {
+      try {
+        const live = await trackOrder(order.trackingId);
+        if (!alive) return;
+        if (live.paymentStatus === 'paid' || live.workflow === 'new') {
+          setPixStep('confirmed');
+          setRejectReason(null);
+          return;
+        }
+        if (live.paymentStatus === 'failed' || live.receiptRejectReason) {
+          setRejectReason(live.receiptRejectReason || 'Comprovante recusado');
+          setPixStep('upload');
+          setReceiptPreview(null);
+        }
+      } catch { /* ignore */ }
+    };
+    poll();
+    const id = setInterval(poll, 6000);
+    return () => { alive = false; clearInterval(id); };
+  }, [order?.trackingId, order?.paymentMethod, pixStep]);
+
   const handleCopyPix = async () => {
     if (!hasValidPixQr(order?.pixPayment)) return;
     try {
@@ -119,15 +154,29 @@ export default function Confirmation() {
     } catch { /* ignore */ }
   };
 
-  const handleReceipt = async (file: File | null) => {
+  const pickFile = async (file: File | null) => {
     if (!file || !order) return;
+    if (!isAllowedReceiptFile(file)) {
+      setUploadError('Envie uma imagem PNG, JPG, JPEG ou WEBP.');
+      return;
+    }
     setUploadError('');
-    setUploading(true);
     try {
       const dataUrl = await compressImage(file);
       setReceiptPreview(dataUrl);
-      await uploadOrderReceipt(order.trackingId, dataUrl);
-      setUploadOk(true);
+    } catch {
+      setUploadError('Não foi possível ler a imagem. Tente outra foto.');
+    }
+  };
+
+  const sendReceipt = async () => {
+    if (!order || !receiptPreview) return;
+    setUploadError('');
+    setUploading(true);
+    try {
+      await uploadOrderReceipt(order.trackingId, receiptPreview);
+      setRejectReason(null);
+      setPixStep('sent');
     } catch (err) {
       setUploadError(err instanceof Error ? err.message : 'Erro ao enviar comprovante');
     } finally {
@@ -143,6 +192,37 @@ export default function Confirmation() {
 
   const showPixQr = hasValidPixQr(order?.pixPayment);
   const showPixMissing = order?.paymentMethod === 'pix' && !showPixQr;
+  const isPix = order?.paymentMethod === 'pix';
+
+  const statusBadge = (() => {
+    if (!order) return null;
+    if (isPix && pixStep === 'confirmed') {
+      return (
+        <span className="inline-block bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 rounded-full px-4 py-1.5 text-xs font-black uppercase tracking-wider">
+          🎉 Pagamento confirmado
+        </span>
+      );
+    }
+    if (isPix && pixStep === 'sent') {
+      return (
+        <span className="inline-block bg-amber-500/10 text-amber-400 border border-amber-500/30 rounded-full px-4 py-1.5 text-xs font-black uppercase tracking-wider">
+          🟡 Aguardando conferência do pagamento
+        </span>
+      );
+    }
+    if (isPix) {
+      return (
+        <span className="inline-block bg-amber-500/10 text-amber-400 border border-amber-500/30 rounded-full px-4 py-1.5 text-xs font-black uppercase tracking-wider">
+          🟡 Aguardando pagamento Pix
+        </span>
+      );
+    }
+    return (
+      <span className="inline-block bg-amber-500/10 text-amber-400 border border-amber-500/30 rounded-full px-4 py-1.5 text-xs font-black uppercase tracking-wider">
+        🟡 Pendente de confirmação
+      </span>
+    );
+  })();
 
   return (
     <PageTransition className="bg-[#0a0a0a] min-h-screen flex flex-col items-center p-6 text-center pb-16">
@@ -157,15 +237,13 @@ export default function Confirmation() {
 
       <motion.h1 initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}
         className="text-3xl font-black text-white uppercase tracking-tighter mb-2">
-        Pedido Enviado!
+        {pixStep === 'confirmed' ? 'Pagamento Confirmado!' : 'Pedido Enviado!'}
       </motion.h1>
 
       {order && (
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }} className="mb-4 space-y-2">
           <p className="text-amber-500 font-black text-2xl">#{order.orderNumber}</p>
-          <span className="inline-block bg-amber-500/10 text-amber-400 border border-amber-500/30 rounded-full px-4 py-1.5 text-xs font-black uppercase tracking-wider">
-            🟡 Pendente de confirmação
-          </span>
+          {statusBadge}
           <p className="text-zinc-400 text-sm">
             {ORDER_TYPE_LABELS[order.orderType]} · {paymentLabel}
             {order.paymentMethod === 'cash' && order.needsChange && order.changeFor
@@ -173,9 +251,11 @@ export default function Confirmation() {
               : ''}
           </p>
           <p className="text-zinc-500 text-sm">Total: <span className="text-white font-bold">R$ {order.total.toFixed(2).replace('.', ',')}</span></p>
-          <p className="text-zinc-600 text-xs max-w-sm mx-auto">
-            Seu pedido aguarda a loja aceitar. Mesmo com Pix ou comprovante, ele só avança após confirmação do atendente.
-          </p>
+          {!isPix && (
+            <p className="text-zinc-600 text-xs max-w-sm mx-auto">
+              Seu pedido aguarda a loja aceitar. Ele só avança após confirmação do atendente.
+            </p>
+          )}
         </motion.div>
       )}
 
@@ -190,95 +270,153 @@ export default function Confirmation() {
                 {order?.pixUnavailableReason
                   || 'A chave Pix da loja precisa ser cadastrada. Não foi gerado QR Code para evitar pagamento inválido.'}
               </p>
-              <p className="text-zinc-500 text-xs mt-2">
-                Seu pedido continua pendente. A loja será avisada e poderá orientar outra forma de pagamento.
-              </p>
             </div>
           </div>
         </motion.div>
       )}
 
-      {showPixQr && order?.pixPayment && (
-        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }}
-          className="w-full max-w-sm bg-zinc-900 border border-zinc-800 rounded-2xl p-5 mb-4 text-left space-y-4">
-          <div className="flex items-center gap-2 justify-center">
-            <QrCode size={18} className="text-amber-500" />
-            <h3 className="text-white font-black uppercase tracking-wide text-sm">Pague com Pix</h3>
-          </div>
+      <AnimatePresence mode="wait">
+        {pixStep === 'confirmed' && (
+          <motion.div key="confirmed" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+            className="w-full max-w-sm rounded-2xl border border-emerald-500/40 bg-emerald-500/10 p-6 mb-4 space-y-3">
+            <p className="text-4xl">🎉</p>
+            <h3 className="text-emerald-300 font-black text-lg uppercase">Pagamento confirmado com sucesso.</h3>
+            <p className="text-zinc-300 text-sm leading-relaxed">
+              Seu pedido foi enviado para análise da loja.
+              Aguarde enquanto nossa equipe confirma seu pedido.
+            </p>
+          </motion.div>
+        )}
 
-          <div className="flex justify-center">
-            {order.pixPayment.qrCodeBase64 ? (
-              <img
-                src={`data:image/png;base64,${order.pixPayment.qrCodeBase64}`}
-                alt="QR Code Pix"
-                className="w-52 h-52 rounded-xl bg-white p-2"
-              />
-            ) : (
-              <img
-                src={`https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(order.pixPayment.qrCode)}`}
-                alt="QR Code Pix"
-                className="w-52 h-52 rounded-xl bg-white p-2"
-              />
-            )}
-          </div>
+        {pixStep === 'sent' && (
+          <motion.div key="sent" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+            className="w-full max-w-sm rounded-2xl border border-emerald-500/30 bg-zinc-900 p-6 mb-4 space-y-3">
+            <CheckCircle2 size={40} className="text-emerald-400 mx-auto" />
+            <h3 className="text-white font-black text-base uppercase">✅ Comprovante enviado com sucesso.</h3>
+            <p className="text-zinc-300 text-sm leading-relaxed">
+              Seu pagamento será analisado por nossa equipe.
+            </p>
+            <p className="text-zinc-500 text-sm">Aguarde alguns instantes.</p>
+          </motion.div>
+        )}
 
-          {order.pixPayment.pixKey && (
-            <div className="space-y-1.5">
-              <p className="text-zinc-500 text-xs">Chave Pix</p>
-              <div className="flex gap-2">
-                <div className="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-zinc-300 text-xs font-mono truncate">
-                  {order.pixPayment.pixKey}
+        {showPixQr && order?.pixPayment && pixStep === 'pay' && (
+          <motion.div key="pay" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+            className="w-full max-w-sm bg-zinc-900 border border-zinc-800 rounded-2xl p-5 mb-4 text-left space-y-4">
+            <div className="flex items-center gap-2 justify-center">
+              <QrCode size={18} className="text-amber-500" />
+              <h3 className="text-white font-black uppercase tracking-wide text-sm">Pague com Pix</h3>
+            </div>
+
+            <div className="flex justify-center">
+              {order.pixPayment.qrCodeBase64 ? (
+                <img
+                  src={`data:image/png;base64,${order.pixPayment.qrCodeBase64}`}
+                  alt="QR Code Pix"
+                  className="w-52 h-52 rounded-xl bg-white p-2"
+                />
+              ) : (
+                <img
+                  src={`https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(order.pixPayment.qrCode)}`}
+                  alt="QR Code Pix"
+                  className="w-52 h-52 rounded-xl bg-white p-2"
+                />
+              )}
+            </div>
+
+            {order.pixPayment.pixKey && (
+              <div className="space-y-1.5">
+                <p className="text-zinc-500 text-xs">Chave Pix</p>
+                <div className="flex gap-2">
+                  <div className="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-zinc-300 text-xs font-mono truncate">
+                    {order.pixPayment.pixKey}
+                  </div>
+                  <button type="button" onClick={handleCopyKey}
+                    className={`shrink-0 px-3 rounded-lg font-bold text-xs flex items-center gap-1.5 transition-colors ${copiedKey ? 'bg-green-500/20 text-green-400' : 'bg-zinc-800 text-white hover:bg-zinc-700'}`}>
+                    {copiedKey ? <Check size={14} /> : <Copy size={14} />}
+                  </button>
                 </div>
-                <button type="button" onClick={handleCopyKey}
-                  className={`shrink-0 px-3 rounded-lg font-bold text-xs flex items-center gap-1.5 transition-colors ${copiedKey ? 'bg-green-500/20 text-green-400' : 'bg-zinc-800 text-white hover:bg-zinc-700'}`}>
-                  {copiedKey ? <Check size={14} /> : <Copy size={14} />}
+              </div>
+            )}
+
+            <div className="space-y-1.5">
+              <p className="text-zinc-500 text-xs">Pix Copia e Cola</p>
+              <div className="flex gap-2">
+                <div className="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-zinc-400 text-xs font-mono truncate">
+                  {order.pixPayment.qrCode}
+                </div>
+                <button type="button" onClick={handleCopyPix}
+                  className={`shrink-0 px-3 rounded-lg font-bold text-xs flex items-center gap-1.5 transition-colors ${copied ? 'bg-green-500/20 text-green-400' : 'bg-amber-500 text-zinc-950 hover:bg-amber-400'}`}>
+                  {copied ? <Check size={14} /> : <Copy size={14} />} {copied ? 'Copiado!' : 'Copiar'}
                 </button>
               </div>
             </div>
-          )}
 
-          <div className="space-y-1.5">
-            <p className="text-zinc-500 text-xs">Pix Copia e Cola</p>
-            <div className="flex gap-2">
-              <div className="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-zinc-400 text-xs font-mono truncate">
-                {order.pixPayment.qrCode}
-              </div>
-              <button type="button" onClick={handleCopyPix}
-                className={`shrink-0 px-3 rounded-lg font-bold text-xs flex items-center gap-1.5 transition-colors ${copied ? 'bg-green-500/20 text-green-400' : 'bg-amber-500 text-zinc-950 hover:bg-amber-400'}`}>
-                {copied ? <Check size={14} /> : <Copy size={14} />} {copied ? 'Copiado!' : 'Copiar'}
+            <button type="button" onClick={() => setPixStep('upload')}
+              className="w-full h-12 rounded-xl bg-amber-500 hover:bg-amber-400 text-zinc-950 font-black text-sm uppercase tracking-wide flex items-center justify-center gap-2">
+              <Upload size={16} /> Já realizei o pagamento
+            </button>
+          </motion.div>
+        )}
+
+        {showPixQr && pixStep === 'upload' && (
+          <motion.div key="upload" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+            className="w-full max-w-sm bg-zinc-900 border border-zinc-800 rounded-2xl p-5 mb-4 text-left space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-white font-black uppercase tracking-wide text-sm flex items-center gap-2">
+                <ImageIcon size={16} className="text-amber-500" /> Enviar comprovante
+              </h3>
+              <button type="button" onClick={() => { setPixStep('pay'); setUploadError(''); }}
+                className="text-zinc-500 hover:text-white p-1" aria-label="Voltar">
+                <X size={18} />
               </button>
             </div>
-          </div>
 
-          <div className="border-t border-zinc-800 pt-4 space-y-3">
-            <p className="text-zinc-300 text-sm font-bold flex items-center gap-2">
-              <Upload size={16} className="text-amber-500" /> Enviar comprovante
+            <p className="text-zinc-500 text-xs">
+              Tire uma foto ou escolha uma imagem da galeria (PNG, JPG, JPEG ou WEBP).
             </p>
-            <p className="text-zinc-600 text-xs">
-              Enviar o comprovante não aprova o pedido. Ele permanece pendente até a loja confirmar.
-            </p>
-            <input ref={fileRef} type="file" accept="image/*" className="hidden"
-              onChange={e => handleReceipt(e.target.files?.[0] ?? null)} />
-            <button type="button" disabled={uploading}
-              onClick={() => fileRef.current?.click()}
-              className="w-full h-12 rounded-xl border border-dashed border-zinc-700 bg-zinc-950 text-zinc-300 text-sm font-bold hover:border-amber-500/50 hover:text-amber-500 transition-colors flex items-center justify-center gap-2">
-              {uploading ? <Loader2 size={16} className="animate-spin" /> : <ImageIcon size={16} />}
-              {uploadOk ? 'Trocar comprovante' : 'Selecionar imagem'}
-            </button>
-            {(receiptPreview || uploadOk) && (
-              <div className="rounded-xl overflow-hidden border border-zinc-800">
-                <img src={receiptPreview || undefined} alt="Comprovante" className="w-full max-h-48 object-contain bg-zinc-950" />
+
+            {rejectReason && (
+              <div className="rounded-xl border border-red-800/50 bg-red-950/30 px-3 py-2.5 text-sm text-red-200">
+                <p className="font-bold text-red-300 mb-0.5">Comprovante recusado</p>
+                <p>Motivo: {rejectReason}</p>
+                <p className="text-red-200/70 text-xs mt-1">Envie um novo comprovante abaixo.</p>
               </div>
             )}
-            {uploadOk && (
-              <p className="text-green-400 text-xs flex items-center gap-1.5 justify-center">
-                <CheckCircle2 size={14} /> Comprovante enviado — aguardando confirmação da loja
-              </p>
+
+            <input ref={galleryRef} type="file" accept={RECEIPT_ACCEPT} className="hidden"
+              onChange={e => { void pickFile(e.target.files?.[0] ?? null); e.target.value = ''; }} />
+            <input ref={cameraRef} type="file" accept={RECEIPT_ACCEPT} capture="environment" className="hidden"
+              onChange={e => { void pickFile(e.target.files?.[0] ?? null); e.target.value = ''; }} />
+
+            <div className="grid grid-cols-2 gap-2">
+              <button type="button" onClick={() => cameraRef.current?.click()}
+                className="h-12 rounded-xl border border-zinc-700 bg-zinc-950 text-zinc-200 text-xs font-bold uppercase flex items-center justify-center gap-2 hover:border-amber-500/50">
+                <Camera size={16} /> Tirar foto
+              </button>
+              <button type="button" onClick={() => galleryRef.current?.click()}
+                className="h-12 rounded-xl border border-zinc-700 bg-zinc-950 text-zinc-200 text-xs font-bold uppercase flex items-center justify-center gap-2 hover:border-amber-500/50">
+                <ImageIcon size={16} /> Galeria
+              </button>
+            </div>
+
+            {receiptPreview && (
+              <div className="rounded-xl overflow-hidden border border-zinc-700">
+                <p className="text-[10px] uppercase tracking-wider text-zinc-500 px-3 py-1.5 bg-zinc-950">Pré-visualização</p>
+                <img src={receiptPreview} alt="Pré-visualização do comprovante" className="w-full max-h-56 object-contain bg-zinc-950" />
+              </div>
             )}
+
             {uploadError && <p className="text-red-400 text-xs text-center">{uploadError}</p>}
-          </div>
-        </motion.div>
-      )}
+
+            <button type="button" disabled={!receiptPreview || uploading} onClick={sendReceipt}
+              className="w-full h-12 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-zinc-950 font-black text-sm uppercase tracking-wide flex items-center justify-center gap-2">
+              {uploading ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
+              {uploading ? 'Enviando...' : 'Enviar comprovante'}
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.5 }}
         className="w-full max-w-sm space-y-3 mt-2">

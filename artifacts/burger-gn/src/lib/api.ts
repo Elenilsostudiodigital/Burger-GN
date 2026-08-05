@@ -183,7 +183,7 @@ export async function reverseGeocode(lat: number, lng: number): Promise<ReverseG
 
 // ── Orders ────────────────────────────────────────────────────────────────────
 export type OrderStatus = "new" | "preparing" | "delivery" | "done" | "cancelled";
-export type WorkflowStage = "new" | "accepted" | "preparing" | "ready" | "out" | "done";
+export type WorkflowStage = "awaiting_payment" | "new" | "accepted" | "preparing" | "ready" | "out" | "done";
 export type OrderType = "delivery" | "pickup" | "local";
 export type PaymentMethod = "pix" | "cash" | "card";
 export type CardType = "credit" | "debit";
@@ -205,6 +205,8 @@ export interface Order {
   needsChange?: boolean | null;
   receiptDataUrl?: string | null;
   receiptUploadedAt?: string | null;
+  receiptRejectReason?: string | null;
+  receiptRejectedAt?: string | null;
   rejectReason?: string | null;
   review?: OrderReview | null;
   deliveredAt?: string | null;
@@ -265,8 +267,15 @@ export const submitOrderReview = (
   d: { deliveredOk: boolean; stars?: number; comment?: string },
 ) => api.post(`/orders/track/${trackingId}/review`, d) as Promise<Order & { alreadyReviewed?: boolean }>;
 export const getAdminReviews = () => api.get("/admin/reviews") as Promise<AdminReviewRow[]>;
-export const updateOrderPaymentStatus = (id: number, paymentStatus: PaymentStatus) =>
-  api.patch(`/orders/${id}/payment-status`, { paymentStatus }) as Promise<Order>;
+export const updateOrderPaymentStatus = (
+  id: number,
+  paymentStatus: PaymentStatus,
+  opts?: { refuseReason?: string },
+) =>
+  api.patch(`/orders/${id}/payment-status`, {
+    paymentStatus,
+    refuseReason: opts?.refuseReason,
+  }) as Promise<Order>;
 export const getPopularProducts = () =>
   api.get("/products/popular") as Promise<Array<{ productId: number | null; productName: string; quantity: number }>>;
 
@@ -340,11 +349,23 @@ export function normalizePhoneForWhatsapp(phone: string): string {
 export function buildCustomerNotifyMessage(
   orderNumber: number,
   customerName: string,
-  workflow: WorkflowStage | "cancelled",
+  workflow: WorkflowStage | "cancelled" | "payment_confirmed" | "receipt_refused",
   rejectReason?: string | null,
 ): string {
   const name = (customerName || "cliente").trim().split(/\s+/)[0] || "cliente";
   switch (workflow) {
+    case "payment_confirmed":
+      return (
+        `🎉 Pagamento confirmado com sucesso.\n\n` +
+        `Olá ${name}! Seu pedido #${orderNumber} foi enviado para análise da loja.\n` +
+        `Aguarde enquanto nossa equipe confirma seu pedido. — The Burger GN`
+      );
+    case "receipt_refused":
+      return (
+        `Olá ${name}! Seu comprovante do pedido #${orderNumber} foi recusado.` +
+        `${rejectReason ? ` Motivo: ${rejectReason}.` : ""} ` +
+        `Você pode enviar um novo comprovante pelo app. — The Burger GN`
+      );
     case "preparing":
     case "accepted":
       return `Olá ${name}! Seu pedido #${orderNumber} foi aceito e já está sendo preparado. — The Burger GN`;
@@ -358,6 +379,8 @@ export function buildCustomerNotifyMessage(
       return `Olá ${name}! Infelizmente seu pedido #${orderNumber} foi recusado.${
         rejectReason ? ` Motivo: ${rejectReason}.` : ""
       } — The Burger GN`;
+    case "awaiting_payment":
+      return `Olá ${name}! Recebemos o comprovante do pedido #${orderNumber}. Estamos conferindo o pagamento. — The Burger GN`;
     default:
       return `Olá ${name}! Recebemos seu pedido #${orderNumber} e ele está pendente de confirmação. — The Burger GN`;
   }
@@ -376,6 +399,12 @@ export const REJECT_REASON_SUGGESTIONS = [
   "Pagamento não confirmado",
 ] as const;
 
+export const RECEIPT_REJECT_SUGGESTIONS = [
+  "Comprovante ilegível",
+  "Pagamento não localizado",
+  "Valor incorreto",
+] as const;
+
 export const ORDER_TYPE_LABELS: Record<OrderType, string> = {
   local: "Consumir na loja",
   pickup: "Retirar no balcão",
@@ -391,6 +420,7 @@ export const STATUS_LABELS: Record<OrderStatus, string> = {
   cancelled: "Recusado",
 };
 export const WORKFLOW_LABELS: Record<WorkflowStage | "cancelled", string> = {
+  awaiting_payment: "Aguardando conferência do pagamento",
   new: "Pendente",
   accepted: "Em Preparo",
   preparing: "Em Preparo",
@@ -399,7 +429,19 @@ export const WORKFLOW_LABELS: Record<WorkflowStage | "cancelled", string> = {
   done: "Entregue",
   cancelled: "Recusado",
 };
-export const PAYMENT_STATUS_LABELS: Record<PaymentStatus, string> = { pending: "Pendente", paid: "Pago", failed: "Falhou" };
+export const PAYMENT_STATUS_LABELS: Record<PaymentStatus, string> = {
+  pending: "Pendente",
+  paid: "Pagamento Confirmado",
+  failed: "Comprovante recusado",
+};
+
+export const RECEIPT_ACCEPT = "image/png,image/jpeg,image/jpg,image/webp";
+export function isAllowedReceiptFile(file: File): boolean {
+  const type = (file.type || "").toLowerCase();
+  if (type === "image/png" || type === "image/jpeg" || type === "image/jpg" || type === "image/webp") return true;
+  const name = file.name.toLowerCase();
+  return /\.(png|jpe?g|webp)$/.test(name);
+}
 
 // ── Financial Report ────────────────────────────────────────────────────────
 export interface FinancialChartPoint { label: string; total: number; orders: number; }

@@ -1,6 +1,13 @@
 /** Order metadata embedded in `orders.notes` — no schema changes required. */
 
-export type WorkflowStage = "new" | "accepted" | "preparing" | "ready" | "out" | "done";
+export type WorkflowStage =
+  | "awaiting_payment"
+  | "new"
+  | "accepted"
+  | "preparing"
+  | "ready"
+  | "out"
+  | "done";
 export type CardType = "credit" | "debit";
 
 export interface StatusHistoryEntry {
@@ -23,6 +30,9 @@ export interface OrderMeta {
   needsChange?: boolean;
   receiptDataUrl?: string;
   receiptUploadedAt?: string;
+  /** Present when admin refused the Pix receipt (order stays open for resubmit). */
+  receiptRejectReason?: string;
+  receiptRejectedAt?: string;
   history?: StatusHistoryEntry[];
   pixCopyPaste?: string;
   pixKey?: string;
@@ -35,6 +45,7 @@ export interface OrderMeta {
 }
 
 export const WORKFLOW_LABELS: Record<WorkflowStage | "cancelled", string> = {
+  awaiting_payment: "Aguardando conferência do pagamento",
   new: "Pendente",
   accepted: "Em Preparo", // legacy stage — treated as preparing
   preparing: "Em Preparo",
@@ -46,6 +57,7 @@ export const WORKFLOW_LABELS: Record<WorkflowStage | "cancelled", string> = {
 
 /** Maps UI workflow to existing DB `order_status` enum values. */
 export const WORKFLOW_TO_STATUS: Record<WorkflowStage, "new" | "preparing" | "delivery" | "done"> = {
+  awaiting_payment: "new",
   new: "new",
   accepted: "preparing",
   preparing: "preparing",
@@ -77,6 +89,8 @@ export function serializeOrderNotes(publicNotes: string, meta: OrderMeta): strin
   if (typeof meta.needsChange === "boolean") cleanMeta.needsChange = meta.needsChange;
   if (meta.receiptDataUrl) cleanMeta.receiptDataUrl = meta.receiptDataUrl;
   if (meta.receiptUploadedAt) cleanMeta.receiptUploadedAt = meta.receiptUploadedAt;
+  if (meta.receiptRejectReason) cleanMeta.receiptRejectReason = meta.receiptRejectReason;
+  if (meta.receiptRejectedAt) cleanMeta.receiptRejectedAt = meta.receiptRejectedAt;
   if (meta.history?.length) cleanMeta.history = meta.history;
   if (meta.pixCopyPaste) cleanMeta.pixCopyPaste = meta.pixCopyPaste;
   if (meta.pixKey) cleanMeta.pixKey = meta.pixKey;
@@ -125,11 +139,23 @@ export function appendHistory(
 export function buildCustomerNotifyMessage(
   orderNumber: number,
   customerName: string,
-  workflow: WorkflowStage | "cancelled",
+  workflow: WorkflowStage | "cancelled" | "payment_confirmed" | "receipt_refused",
   rejectReason?: string | null,
 ): string {
   const name = (customerName || "cliente").trim().split(/\s+/)[0] || "cliente";
   switch (workflow) {
+    case "payment_confirmed":
+      return (
+        `🎉 Pagamento confirmado com sucesso.\n\n` +
+        `Olá ${name}! Seu pedido #${orderNumber} foi enviado para análise da loja.\n` +
+        `Aguarde enquanto nossa equipe confirma seu pedido. — The Burger GN`
+      );
+    case "receipt_refused":
+      return (
+        `Olá ${name}! Seu comprovante do pedido #${orderNumber} foi recusado.` +
+        `${rejectReason ? ` Motivo: ${rejectReason}.` : ""} ` +
+        `Você pode enviar um novo comprovante pelo app. — The Burger GN`
+      );
     case "preparing":
     case "accepted":
       return `Olá ${name}! Seu pedido #${orderNumber} foi aceito e já está sendo preparado. — The Burger GN`;
@@ -143,6 +169,8 @@ export function buildCustomerNotifyMessage(
       return `Olá ${name}! Infelizmente seu pedido #${orderNumber} foi recusado.${
         rejectReason ? ` Motivo: ${rejectReason}.` : ""
       } — The Burger GN`;
+    case "awaiting_payment":
+      return `Olá ${name}! Recebemos o comprovante do pedido #${orderNumber}. Estamos conferindo o pagamento. — The Burger GN`;
     case "new":
     default:
       return `Olá ${name}! Recebemos seu pedido #${orderNumber} e ele está pendente de confirmação. — The Burger GN`;

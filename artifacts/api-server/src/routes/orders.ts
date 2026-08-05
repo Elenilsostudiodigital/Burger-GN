@@ -17,7 +17,11 @@ import crypto from "node:crypto";
 
 const router = Router();
 
-const WORKFLOW_VALUES: WorkflowStage[] = ["new", "accepted", "preparing", "ready", "out", "done"];
+const WORKFLOW_VALUES: WorkflowStage[] = [
+  "awaiting_payment", "new", "accepted", "preparing", "ready", "out", "done",
+];
+
+const RECEIPT_MIME_RE = /^data:image\/(png|jpe?g|webp);base64,/i;
 
 function enrichOrder<T extends { notes: string; status: string }>(order: T) {
   const { publicNotes, meta } = parseOrderNotes(order.notes);
@@ -31,6 +35,8 @@ function enrichOrder<T extends { notes: string; status: string }>(order: T) {
     needsChange: meta.needsChange ?? null,
     receiptDataUrl: meta.receiptDataUrl ?? null,
     receiptUploadedAt: meta.receiptUploadedAt ?? null,
+    receiptRejectReason: meta.receiptRejectReason ?? null,
+    receiptRejectedAt: meta.receiptRejectedAt ?? null,
     rejectReason: meta.rejectReason ?? null,
     review: meta.review ?? null,
     deliveredAt: meta.deliveredAt ?? null,
@@ -214,18 +220,29 @@ router.post("/orders", resolvePublicCompany, async (req, res) => {
     const [{ maxNum }] = await db.select({ maxNum: sql<number>`COALESCE(MAX(order_number), 0)` }).from(ordersTable).where(eq(ordersTable.companyId, companyId));
     const orderNumber = (Number(maxNum) || 0) + 1;
 
-    // Orders always start PENDING — never auto-accepted, even after Pix/receipt.
+    // Non-Pix: start as Pendente. Pix: waits for receipt → conferência → then Pendente.
+    // Never auto-accepted.
     let pixPayment: { paymentId: string; qrCode: string; qrCodeBase64: string; pixKey: string } | null = null;
     let pixConfigured = false;
     let pixUnavailableReason: string | null = null;
-    let meta: OrderMeta = {
-      workflow: "new",
-      history: [{ stage: "new", label: "Pendente", at: new Date().toISOString() }],
-    };
+    const isPix = body.paymentMethod === "pix";
+    let meta: OrderMeta = isPix
+      ? {
+          workflow: "awaiting_payment",
+          history: [{
+            stage: "awaiting_payment",
+            label: "Aguardando pagamento Pix",
+            at: new Date().toISOString(),
+          }],
+        }
+      : {
+          workflow: "new",
+          history: [{ stage: "new", label: "Pendente", at: new Date().toISOString() }],
+        };
     if (body.paymentMethod === "card" && body.cardType) meta.cardType = body.cardType;
     if (body.paymentMethod === "cash") meta.needsChange = !!body.needsChange || !!body.changeFor;
 
-    if (body.paymentMethod === "pix") {
+    if (isPix) {
       const [paySettings] = await db.select().from(paymentSettingsTable).where(eq(paymentSettingsTable.companyId, companyId));
       const pixCfg = decodePixSettings(paySettings?.gatewayProvider)
         ?? (paySettings?.mercadoPagoPublicKey && !paySettings.mercadoPagoPublicKey.startsWith("APP_USR")
@@ -305,7 +322,10 @@ router.post("/orders", resolvePublicCompany, async (req, res) => {
     });
 
     const fullOrder = await getOrderWithItems(result.id);
-    broadcastSSE(companyId, "new_order", fullOrder);
+    // Pix only enters the admin "new order" queue after receipt upload.
+    if (!isPix) {
+      broadcastSSE(companyId, "new_order", fullOrder);
+    }
 
     // cardCheckoutUrl kept null — Mercado Pago intentionally not wired yet (future-ready)
     // paymentStatus stays DB default "pending"; Pix/receipt never auto-accepts the order.
@@ -314,7 +334,7 @@ router.post("/orders", resolvePublicCompany, async (req, res) => {
       deliveryFee, distanceKm: customerDistanceKm, discountAmount, couponCode: validatedCouponCode,
       pixPayment, pixConfigured, pixUnavailableReason, cardCheckoutUrl: null,
       paymentStatus: "pending",
-      workflow: "new",
+      workflow: isPix ? "awaiting_payment" : "new",
     });
   } catch (err) {
     req.log.error({ err }, "Failed to create order");
@@ -381,6 +401,26 @@ router.patch("/orders/:id/status", requireCompanyAuth, async (req, res) => {
       requestedWorkflow = "preparing";
     }
 
+    // Pix: kitchen accept only after admin confirms payment manually.
+    const advancingToKitchen =
+      requestedWorkflow === "preparing" ||
+      requestedWorkflow === "ready" ||
+      requestedWorkflow === "out" ||
+      requestedWorkflow === "done" ||
+      body.status === "preparing" ||
+      body.status === "delivery" ||
+      body.status === "done";
+    if (
+      advancingToKitchen &&
+      existing.paymentMethod === "pix" &&
+      existing.paymentStatus !== "paid"
+    ) {
+      res.status(400).json({
+        error: "Confirme o pagamento Pix antes de aceitar este pedido.",
+      });
+      return;
+    }
+
     if (requestedWorkflow === "cancelled" || body.status === "cancelled") {
       const reason = typeof body.rejectReason === "string" ? body.rejectReason.trim() : "";
       if (!reason) {
@@ -391,6 +431,9 @@ router.patch("/orders/:id/status", requireCompanyAuth, async (req, res) => {
       nextMeta.rejectReason = reason;
       nextMeta = appendHistory(nextMeta, "cancelled", `Recusado: ${reason}`);
       notifyStage = "cancelled";
+    } else if (requestedWorkflow === "awaiting_payment") {
+      res.status(400).json({ error: "Status inválido para alteração manual." });
+      return;
     } else if (requestedWorkflow && WORKFLOW_VALUES.includes(requestedWorkflow)) {
       const wf = requestedWorkflow as WorkflowStage;
       nextStatus = WORKFLOW_TO_STATUS[wf];
@@ -556,13 +599,13 @@ router.get("/admin/reviews", requireCompanyAuth, async (req, res) => {
   }
 });
 
-// Upload payment receipt (public via trackingId OR admin via id)
+// Upload payment receipt (public via trackingId)
 router.post("/orders/track/:trackingId/receipt", async (req, res) => {
   try {
     const { trackingId } = req.params as { trackingId: string };
     const { receiptDataUrl } = req.body as { receiptDataUrl?: string };
-    if (!receiptDataUrl || typeof receiptDataUrl !== "string" || !receiptDataUrl.startsWith("data:image/")) {
-      res.status(400).json({ error: "Envie uma imagem válida do comprovante." }); return;
+    if (!receiptDataUrl || typeof receiptDataUrl !== "string" || !RECEIPT_MIME_RE.test(receiptDataUrl)) {
+      res.status(400).json({ error: "Envie uma imagem PNG, JPG, JPEG ou WEBP do comprovante." }); return;
     }
     if (receiptDataUrl.length > 1_200_000) {
       res.status(400).json({ error: "Comprovante muito grande. Use uma imagem menor (até ~900KB)." }); return;
@@ -570,47 +613,144 @@ router.post("/orders/track/:trackingId/receipt", async (req, res) => {
 
     const [existing] = await db.select().from(ordersTable).where(eq(ordersTable.trackingId, trackingId));
     if (!existing) { res.status(404).json({ error: "Order not found" }); return; }
+    if (existing.status === "cancelled") {
+      res.status(400).json({ error: "Este pedido foi recusado e não aceita novo comprovante." }); return;
+    }
+    if (existing.paymentStatus === "paid") {
+      res.status(400).json({ error: "Pagamento já confirmado. Não é necessário reenviar o comprovante." }); return;
+    }
 
     const { publicNotes, meta } = parseOrderNotes(existing.notes);
-    const nextMeta: OrderMeta = {
+    let nextMeta: OrderMeta = {
       ...meta,
       receiptDataUrl,
       receiptUploadedAt: new Date().toISOString(),
     };
+    delete nextMeta.receiptRejectReason;
+    delete nextMeta.receiptRejectedAt;
+    nextMeta = appendHistory(
+      nextMeta,
+      "awaiting_payment",
+      "Aguardando conferência do pagamento",
+    );
 
-    // Receipt upload does NOT mark payment as paid and does NOT accept the order.
-    // Order stays PENDING (workflow new) until an admin accepts it.
+    // Receipt does NOT mark paid and does NOT accept the order.
     const [order] = await db.update(ordersTable)
-      .set({ notes: serializeOrderNotes(publicNotes, nextMeta), updatedAt: new Date() })
+      .set({
+        paymentStatus: "pending",
+        status: "new",
+        notes: serializeOrderNotes(publicNotes, nextMeta),
+        updatedAt: new Date(),
+      })
       .where(eq(ordersTable.id, existing.id))
       .returning();
 
+    const enriched = { ...enrichOrder(order), items: (await getOrderWithItems(order.id))?.items ?? [] };
+
+    // First receipt (or resubmit after refuse) surfaces the order in the admin queue.
+    broadcastSSE(existing.companyId, "new_order", enriched);
     broadcastSSE(existing.companyId, "order_receipt", {
-      id: order.id, trackingId: order.trackingId, receiptUploadedAt: nextMeta.receiptUploadedAt,
+      id: order.id,
+      trackingId: order.trackingId,
+      receiptUploadedAt: nextMeta.receiptUploadedAt,
+      workflow: "awaiting_payment",
     });
 
-    res.json({ ...enrichOrder(order), paymentStatus: order.paymentStatus });
+    res.json(enriched);
   } catch (err) {
     req.log.error({ err }, "Failed to upload receipt");
     res.status(500).json({ error: "Internal server error" });
   }
 });
 
-// Admin: mark payment as paid (manual conference)
+// Admin: confirm or refuse Pix payment (manual conference)
 router.patch("/orders/:id/payment-status", requireCompanyAuth, async (req, res) => {
   try {
     const id = Number(req.params["id"]);
-    const { paymentStatus } = req.body as { paymentStatus: "pending" | "paid" | "failed" };
+    const body = req.body as {
+      paymentStatus: "pending" | "paid" | "failed";
+      refuseReason?: string;
+    };
+    const { paymentStatus } = body;
     if (!["pending", "paid", "failed"].includes(paymentStatus)) {
       res.status(400).json({ error: "Invalid payment status" }); return;
     }
+
+    const [existing] = await db.select().from(ordersTable)
+      .where(and(eq(ordersTable.id, id), eq(ordersTable.companyId, req.companyId!)));
+    if (!existing) { res.status(404).json({ error: "Not found" }); return; }
+
+    const { publicNotes, meta } = parseOrderNotes(existing.notes);
+    let nextMeta = { ...meta };
+    let customerNotifyMessage: string | null = null;
+    let notifyKind: "payment_confirmed" | "receipt_refused" | null = null;
+
+    if (paymentStatus === "paid") {
+      nextMeta = appendHistory(nextMeta, "new", "Pendente");
+      delete nextMeta.receiptRejectReason;
+      delete nextMeta.receiptRejectedAt;
+      notifyKind = "payment_confirmed";
+      customerNotifyMessage = buildCustomerNotifyMessage(
+        existing.orderNumber,
+        existing.customerName,
+        "payment_confirmed",
+      );
+    } else if (paymentStatus === "failed") {
+      const reason = typeof body.refuseReason === "string" ? body.refuseReason.trim() : "";
+      if (!reason) {
+        res.status(400).json({ error: "Informe o motivo da recusa do comprovante." }); return;
+      }
+      nextMeta.receiptRejectReason = reason;
+      nextMeta.receiptRejectedAt = new Date().toISOString();
+      // Keep image for audit; clear upload stamp so UI treats as rejected / awaiting resubmit.
+      nextMeta = appendHistory(
+        nextMeta,
+        "awaiting_payment",
+        `Comprovante recusado: ${reason}`,
+      );
+      notifyKind = "receipt_refused";
+      customerNotifyMessage = buildCustomerNotifyMessage(
+        existing.orderNumber,
+        existing.customerName,
+        "receipt_refused",
+        reason,
+      );
+    }
+
     const [order] = await db.update(ordersTable)
-      .set({ paymentStatus, updatedAt: new Date() })
+      .set({
+        paymentStatus,
+        status: "new",
+        notes: serializeOrderNotes(publicNotes, nextMeta),
+        updatedAt: new Date(),
+      })
       .where(and(eq(ordersTable.id, id), eq(ordersTable.companyId, req.companyId!)))
       .returning();
-    if (!order) { res.status(404).json({ error: "Not found" }); return; }
-    broadcastSSE(req.companyId!, "order_payment", { id: order.id, trackingId: order.trackingId, paymentStatus });
-    res.json(enrichOrder(order));
+
+    const enriched = enrichOrder(order);
+    broadcastSSE(req.companyId!, "order_payment", {
+      id: order.id,
+      trackingId: order.trackingId,
+      paymentStatus,
+      workflow: enriched.workflow,
+      receiptRejectReason: nextMeta.receiptRejectReason ?? null,
+      customerNotifyMessage,
+      notifyKind,
+    });
+
+    if (paymentStatus === "paid") {
+      // Re-enter "Novos Pedidos" queue as Pendente after payment conference.
+      broadcastSSE(req.companyId!, "new_order", {
+        ...enriched,
+        items: (await getOrderWithItems(order.id))?.items ?? [],
+      });
+    }
+
+    res.json({
+      ...enriched,
+      items: (await getOrderWithItems(order.id))?.items ?? [],
+      customerNotifyMessage,
+    });
   } catch (err) {
     req.log.error({ err }, "Failed to update payment status");
     res.status(500).json({ error: "Internal server error" });

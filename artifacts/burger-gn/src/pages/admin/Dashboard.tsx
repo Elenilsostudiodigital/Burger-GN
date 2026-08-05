@@ -8,8 +8,9 @@ import {
 import { useAdmin } from '../../context/AdminContext';
 import {
   getOrders, updateOrderWorkflow, updateOrderPaymentStatus,
-  openCustomerWhatsapp, buildCustomerNotifyMessage, REJECT_REASON_SUGGESTIONS,
-  Order, WorkflowStage, PaymentStatus,
+  openCustomerWhatsapp, buildCustomerNotifyMessage,
+  REJECT_REASON_SUGGESTIONS, RECEIPT_REJECT_SUGGESTIONS,
+  Order, WorkflowStage,
   ORDER_TYPE_LABELS, PAYMENT_METHOD_LABELS, PAYMENT_STATUS_LABELS, CARD_TYPE_LABELS, WORKFLOW_LABELS,
 } from '../../lib/api';
 import {
@@ -45,11 +46,37 @@ function fmt(val: string) { return `R$ ${parseFloat(val).toFixed(2).replace('.',
 function formatTime(dateStr: string) {
   return new Date(dateStr).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 }
+function formatDate(dateStr: string) {
+  return new Date(dateStr).toLocaleDateString('pt-BR');
+}
 function timeAgo(dateStr: string) {
   const diff = Math.floor((Date.now() - new Date(dateStr).getTime()) / 60000);
   if (diff < 1) return 'agora';
   if (diff < 60) return `${diff}min`;
   return `${Math.floor(diff / 60)}h`;
+}
+
+function needsPaymentConference(order: Order): boolean {
+  return order.paymentMethod === 'pix'
+    && !!order.receiptDataUrl
+    && order.paymentStatus !== 'paid'
+    && order.status !== 'cancelled';
+}
+
+function canAcceptOrder(order: Order): boolean {
+  if (order.status === 'cancelled') return false;
+  if (order.workflow === 'awaiting_payment') return false;
+  if (order.paymentMethod === 'pix' && order.paymentStatus !== 'paid') return false;
+  return true;
+}
+
+/** Pix without receipt stays off the board until the customer sends proof. */
+function isVisibleOnBoard(order: Order): boolean {
+  if (order.status === 'cancelled') return true;
+  if (order.paymentMethod === 'pix' && order.workflow === 'awaiting_payment' && !order.receiptDataUrl) {
+    return false;
+  }
+  return true;
 }
 
 function playBeep() {
@@ -75,6 +102,7 @@ function playBeep() {
 function getBoardColumn(order: Order): ColumnKey | 'cancelled' {
   if (order.status === 'cancelled') return 'cancelled';
   const wf = order.workflow === 'accepted' ? 'preparing' : order.workflow;
+  if (wf === 'awaiting_payment') return 'new';
   if (wf === 'preparing' || wf === 'ready' || wf === 'out' || wf === 'done' || wf === 'new') return wf;
   if (order.status === 'preparing') return 'preparing';
   if (order.status === 'delivery') return 'out';
@@ -82,7 +110,12 @@ function getBoardColumn(order: Order): ColumnKey | 'cancelled' {
   return 'new';
 }
 
-function notifyCustomer(order: Order, workflow: WorkflowStage | 'cancelled', rejectReason?: string | null, apiMessage?: string | null) {
+function notifyCustomer(
+  order: Order,
+  workflow: WorkflowStage | 'cancelled' | 'payment_confirmed' | 'receipt_refused',
+  rejectReason?: string | null,
+  apiMessage?: string | null,
+) {
   const message = apiMessage
     || buildCustomerNotifyMessage(order.orderNumber, order.customerName, workflow, rejectReason);
   openCustomerWhatsapp(order.phone, message);
@@ -120,13 +153,14 @@ function buildReceiptHTML(order: Order): string {
   </body></html>`;
 }
 
-function OrderCard({ order, highlight, dragging, onAccept, onRefuse, onAdvance, onBack, onPaymentStatus }: {
+function OrderCard({ order, highlight, dragging, onAccept, onRefuse, onAdvance, onBack, onConfirmPayment, onRefuseReceipt }: {
   order: Order; highlight: boolean; dragging?: boolean;
   onAccept: (order: Order) => void;
   onRefuse: (order: Order) => void;
   onAdvance: (order: Order, workflow: ColumnKey) => void;
   onBack: (order: Order, workflow: ColumnKey) => void;
-  onPaymentStatus: (id: number, status: PaymentStatus) => void;
+  onConfirmPayment: (order: Order) => void;
+  onRefuseReceipt: (order: Order) => void;
 }) {
   const [updating, setUpdating] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
@@ -136,12 +170,14 @@ function OrderCard({ order, highlight, dragging, onAccept, onRefuse, onAdvance, 
   const prevStatus = colIndex > 0 ? COLUMN_ORDER[colIndex - 1] : null;
   const nextStatus = colIndex >= 0 && colIndex < COLUMN_ORDER.length - 1 ? COLUMN_ORDER[colIndex + 1] : null;
   const lastChange = order.history?.length ? order.history[order.history.length - 1] : null;
-  const isPending = column === 'new';
+  const awaitingPay = needsPaymentConference(order);
+  const isPending = column === 'new' && !awaitingPay && canAcceptOrder(order);
+  const dragDisabled = column === 'cancelled' || awaitingPay || (column === 'new' && !canAcceptOrder(order));
 
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: `order-${order.id}`,
     data: { orderId: order.id, workflow: column },
-    disabled: column === 'cancelled',
+    disabled: dragDisabled,
   });
 
   const style = transform ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)` } : undefined;
@@ -163,7 +199,7 @@ function OrderCard({ order, highlight, dragging, onAccept, onRefuse, onAdvance, 
       } ${dragging ? 'shadow-2xl ring-2 ring-amber-500/60' : ''}`}
     >
       <div className="p-3 pb-2 flex items-start gap-2">
-        {column !== 'cancelled' && (
+        {!dragDisabled && (
           <button {...attributes} {...listeners}
             className="mt-0.5 p-1.5 -ml-1 text-zinc-600 hover:text-zinc-300 cursor-grab active:cursor-grabbing shrink-0 touch-none"
             title="Arrastar">
@@ -174,8 +210,13 @@ function OrderCard({ order, highlight, dragging, onAccept, onRefuse, onAdvance, 
           <div className="flex items-center gap-2 mb-1 flex-wrap">
             <span className="text-amber-500 font-black text-lg">#{order.orderNumber}</span>
             <span className="text-zinc-500 text-xs flex items-center gap-1">
-              <Clock size={11} /> {formatTime(order.createdAt)} · {timeAgo(order.createdAt)}
+              <Clock size={11} /> {formatDate(order.createdAt)} · {formatTime(order.createdAt)} · {timeAgo(order.createdAt)}
             </span>
+            {awaitingPay && (
+              <span className="bg-yellow-400 text-zinc-950 text-[9px] font-black uppercase px-1.5 py-0.5 rounded animate-pulse">
+                🟡 Aguardando conferência
+              </span>
+            )}
             {isPending && (
               <span className="bg-amber-500 text-zinc-950 text-[9px] font-black uppercase px-1.5 py-0.5 rounded animate-pulse">
                 🟡 Pendente
@@ -183,6 +224,7 @@ function OrderCard({ order, highlight, dragging, onAccept, onRefuse, onAdvance, 
             )}
           </div>
           <p className="text-white font-bold truncate">{order.customerName}</p>
+          <p className="text-zinc-500 text-[11px] mt-0.5">WhatsApp: {order.phone}</p>
           {lastChange && (
             <p className="text-zinc-600 text-[10px] mt-0.5">
               {lastChange.label} às {formatTime(lastChange.at)}
@@ -190,6 +232,9 @@ function OrderCard({ order, highlight, dragging, onAccept, onRefuse, onAdvance, 
           )}
           {order.rejectReason && (
             <p className="text-red-400 text-[11px] mt-1">Motivo: {order.rejectReason}</p>
+          )}
+          {order.receiptRejectReason && order.paymentStatus === 'failed' && (
+            <p className="text-red-400 text-[11px] mt-1">Comprovante: {order.receiptRejectReason}</p>
           )}
         </div>
       </div>
@@ -202,17 +247,14 @@ function OrderCard({ order, highlight, dragging, onAccept, onRefuse, onAdvance, 
           {PAYMENT_METHOD_LABELS[order.paymentMethod]}
           {order.cardType ? ` · ${CARD_TYPE_LABELS[order.cardType]}` : ''}
         </span>
-        <button
-          type="button"
-          onClick={() => onPaymentStatus(order.id, order.paymentStatus === 'paid' ? 'pending' : 'paid')}
+        <span
           className={`font-black uppercase px-1.5 py-0.5 rounded ${
             order.paymentStatus === 'paid' ? 'bg-green-500/15 text-green-400' :
             order.paymentStatus === 'failed' ? 'bg-red-500/15 text-red-400' : 'bg-zinc-700/40 text-zinc-400'
           }`}
-          title="Confirmar pagamento (não aceita o pedido automaticamente)"
         >
           {PAYMENT_STATUS_LABELS[order.paymentStatus]}
-        </button>
+        </span>
         {order.receiptDataUrl && (
           <button type="button" onClick={() => setShowReceipt(true)}
             className="font-bold uppercase px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 flex items-center gap-1">
@@ -274,7 +316,33 @@ function OrderCard({ order, highlight, dragging, onAccept, onRefuse, onAdvance, 
         </div>
       )}
 
-      {/* Pending: Accept / Refuse */}
+      {/* Pix: Confirm / Refuse receipt */}
+      {awaitingPay && (
+        <div className="p-3 pt-2 space-y-2">
+          {order.receiptDataUrl && (
+            <button type="button" onClick={() => setShowReceipt(true)}
+              className="w-full rounded-xl overflow-hidden border border-amber-500/30 bg-zinc-950">
+              <img src={order.receiptDataUrl} alt="Comprovante" className="w-full max-h-36 object-contain" />
+              <p className="text-[10px] text-amber-400 font-bold uppercase py-1.5">Ver comprovante</p>
+            </button>
+          )}
+          <div className="grid grid-cols-2 gap-2">
+            <button type="button" disabled={updating} onClick={() => run(() => onRefuseReceipt(order))}
+              className="h-11 rounded-xl bg-red-950/50 border border-red-800/50 text-red-400 font-black text-[10px] uppercase tracking-wide flex items-center justify-center gap-1 hover:bg-red-900/40">
+              <Ban size={14} /> Recusar comprovante
+            </button>
+            <button type="button" disabled={updating} onClick={() => run(() => onConfirmPayment(order))}
+              className="h-11 rounded-xl bg-green-500 text-zinc-950 font-black text-[10px] uppercase tracking-wide flex items-center justify-center gap-1 hover:bg-green-400">
+              <CheckCircle2 size={14} /> Confirmar pagamento
+            </button>
+          </div>
+          <p className="text-zinc-600 text-[10px] text-center">
+            O pedido só entra como Pendente após confirmar o pagamento.
+          </p>
+        </div>
+      )}
+
+      {/* Pending: Accept / Refuse (kitchen) */}
       {isPending && (
         <div className="p-3 pt-2 grid grid-cols-2 gap-2">
           <button type="button" disabled={updating} onClick={() => run(() => onRefuse(order))}
@@ -364,13 +432,19 @@ function OrderCard({ order, highlight, dragging, onAccept, onRefuse, onAdvance, 
               </div>
               <img src={order.receiptDataUrl} alt="Comprovante" className="w-full rounded-xl max-h-[70vh] object-contain bg-zinc-900" />
               <p className="text-zinc-500 text-[11px] mt-2 text-center">
-                Comprovante não aceita o pedido automaticamente. Confirme o pagamento e depois aceite o pedido.
+                Confirme o pagamento para enviar o pedido à fila Pendente. Depois a loja poderá aceitar.
               </p>
               {order.paymentStatus !== 'paid' && (
-                <button type="button" onClick={() => { onPaymentStatus(order.id, 'paid'); setShowReceipt(false); }}
-                  className="mt-3 w-full h-11 rounded-xl bg-green-500 text-zinc-950 font-bold text-sm flex items-center justify-center gap-2">
-                  <CheckCircle2 size={16} /> Marcar pagamento como pago
-                </button>
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  <button type="button" onClick={() => { onRefuseReceipt(order); setShowReceipt(false); }}
+                    className="h-11 rounded-xl bg-red-950/50 border border-red-800/50 text-red-400 font-bold text-xs flex items-center justify-center gap-1">
+                    <Ban size={14} /> Recusar
+                  </button>
+                  <button type="button" onClick={() => { onConfirmPayment(order); setShowReceipt(false); }}
+                    className="h-11 rounded-xl bg-green-500 text-zinc-950 font-bold text-xs flex items-center justify-center gap-1">
+                    <CheckCircle2 size={14} /> Confirmar
+                  </button>
+                </div>
               )}
             </div>
           </motion.div>
@@ -380,13 +454,14 @@ function OrderCard({ order, highlight, dragging, onAccept, onRefuse, onAdvance, 
   );
 }
 
-function Column({ col, orders, newOrderIds, onAccept, onRefuse, onAdvance, onBack, onPaymentStatus }: {
+function Column({ col, orders, newOrderIds, onAccept, onRefuse, onAdvance, onBack, onConfirmPayment, onRefuseReceipt }: {
   col: ColumnDef; orders: Order[]; newOrderIds: Set<number>;
   onAccept: (order: Order) => void;
   onRefuse: (order: Order) => void;
   onAdvance: (order: Order, workflow: ColumnKey) => void;
   onBack: (order: Order, workflow: ColumnKey) => void;
-  onPaymentStatus: (id: number, status: PaymentStatus) => void;
+  onConfirmPayment: (order: Order) => void;
+  onRefuseReceipt: (order: Order) => void;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: col.key });
   return (
@@ -407,7 +482,7 @@ function Column({ col, orders, newOrderIds, onAccept, onRefuse, onAdvance, onBac
           ) : orders.map(order => (
             <OrderCard key={order.id} order={order} highlight={newOrderIds.has(order.id)}
               onAccept={onAccept} onRefuse={onRefuse} onAdvance={onAdvance} onBack={onBack}
-              onPaymentStatus={onPaymentStatus} />
+              onConfirmPayment={onConfirmPayment} onRefuseReceipt={onRefuseReceipt} />
           ))}
         </AnimatePresence>
       </div>
@@ -430,6 +505,11 @@ export default function AdminDashboard() {
   const [rejectCustom, setRejectCustom] = useState('');
   const [refuseError, setRefuseError] = useState('');
   const [refuseSaving, setRefuseSaving] = useState(false);
+  const [receiptRefuseOrder, setReceiptRefuseOrder] = useState<Order | null>(null);
+  const [receiptRejectReason, setReceiptRejectReason] = useState('');
+  const [receiptRejectCustom, setReceiptRejectCustom] = useState('');
+  const [receiptRefuseError, setReceiptRefuseError] = useState('');
+  const [receiptRefuseSaving, setReceiptRefuseSaving] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState<boolean>(() => {
     const stored = localStorage.getItem(SOUND_STORAGE_KEY);
     return stored === null ? true : stored === 'true';
@@ -452,17 +532,17 @@ export default function AdminDashboard() {
       if (soundEnabledRef.current) playBeep();
       setOrders(prev => [order, ...prev.filter(o => o.id !== order.id)]);
       setNewOrderIds(prev => new Set([...prev, order.id]));
-      setNotification(`🟡 Novo pedido pendente #${order.orderNumber} de ${order.customerName}`);
+      const label = needsPaymentConference(order)
+        ? `🟡 Comprovante Pix #${order.orderNumber} — aguardando conferência`
+        : `🟡 Novo pedido pendente #${order.orderNumber} de ${order.customerName}`;
+      setNotification(label);
       setTimeout(() => setNotification(null), 6000);
       setTimeout(() => setNewOrderIds(prev => { const s = new Set(prev); s.delete(order.id); return s; }), 30000);
     });
 
     es.addEventListener('order_status', () => { fetchOrders(); });
     es.addEventListener('order_receipt', () => { fetchOrders(); });
-    es.addEventListener('order_payment', (e) => {
-      const data = JSON.parse(e.data) as { id: number; paymentStatus: PaymentStatus };
-      setOrders(prev => prev.map(o => o.id === data.id ? { ...o, paymentStatus: data.paymentStatus } : o));
-    });
+    es.addEventListener('order_payment', () => { fetchOrders(); });
 
     return () => es.close();
   }, [fetchOrders]);
@@ -472,13 +552,65 @@ export default function AdminDashboard() {
   };
 
   const handleAccept = async (order: Order) => {
+    if (!canAcceptOrder(order)) {
+      setNotification('Confirme o pagamento Pix antes de aceitar este pedido.');
+      setTimeout(() => setNotification(null), 4000);
+      return;
+    }
     setNewOrderIds(prev => { const s = new Set(prev); s.delete(order.id); return s; });
     try {
       const updated = await updateOrderWorkflow(order.id, 'preparing');
       applyUpdated(order.id, updated);
       notifyCustomer(order, 'preparing', null, updated.customerNotifyMessage);
-    } catch {
+    } catch (err) {
+      setNotification(err instanceof Error ? err.message : 'Não foi possível aceitar o pedido.');
+      setTimeout(() => setNotification(null), 4000);
       fetchOrders();
+    }
+  };
+
+  const handleConfirmPayment = async (order: Order) => {
+    try {
+      const updated = await updateOrderPaymentStatus(order.id, 'paid');
+      applyUpdated(order.id, updated);
+      notifyCustomer(order, 'payment_confirmed', null, updated.customerNotifyMessage);
+      setNotification(`Pagamento confirmado — pedido #${order.orderNumber} na fila Pendente`);
+      setTimeout(() => setNotification(null), 5000);
+    } catch (err) {
+      setNotification(err instanceof Error ? err.message : 'Erro ao confirmar pagamento');
+      setTimeout(() => setNotification(null), 4000);
+      fetchOrders();
+    }
+  };
+
+  const openRefuseReceipt = (order: Order) => {
+    setReceiptRefuseOrder(order);
+    setReceiptRejectReason('');
+    setReceiptRejectCustom('');
+    setReceiptRefuseError('');
+  };
+
+  const confirmRefuseReceipt = async () => {
+    if (!receiptRefuseOrder) return;
+    const reason = receiptRejectReason === '__other__'
+      ? receiptRejectCustom.trim()
+      : receiptRejectReason.trim();
+    if (!reason) {
+      setReceiptRefuseError('Selecione ou informe o motivo da recusa do comprovante.');
+      return;
+    }
+    setReceiptRefuseSaving(true);
+    setReceiptRefuseError('');
+    try {
+      const updated = await updateOrderPaymentStatus(receiptRefuseOrder.id, 'failed', { refuseReason: reason });
+      applyUpdated(receiptRefuseOrder.id, updated);
+      notifyCustomer(receiptRefuseOrder, 'receipt_refused', reason, updated.customerNotifyMessage);
+      setReceiptRefuseOrder(null);
+    } catch (err) {
+      setReceiptRefuseError(err instanceof Error ? err.message : 'Não foi possível recusar o comprovante.');
+      fetchOrders();
+    } finally {
+      setReceiptRefuseSaving(false);
     }
   };
 
@@ -530,13 +662,6 @@ export default function AdminDashboard() {
     }
   };
 
-  const handlePaymentStatus = async (id: number, paymentStatus: PaymentStatus) => {
-    // Payment confirmation never changes workflow / never auto-accepts.
-    setOrders(prev => prev.map(o => o.id === id ? { ...o, paymentStatus } : o));
-    try { await updateOrderPaymentStatus(id, paymentStatus); }
-    catch { fetchOrders(); }
-  };
-
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 150, tolerance: 8 } }),
@@ -552,6 +677,7 @@ export default function AdminDashboard() {
     if (!orderId || !from || !COLUMN_ORDER.includes(to) || to === from) return;
     const order = orders.find(o => o.id === orderId);
     if (!order) return;
+    if (needsPaymentConference(order) || (from === 'new' && !canAcceptOrder(order))) return;
 
     // From pending: only allow drop onto Em Preparo (= accept)
     if (from === 'new') {
@@ -566,6 +692,7 @@ export default function AdminDashboard() {
   const ordersByColumn = useMemo(() => {
     const map: Record<ColumnKey, Order[]> = { new: [], preparing: [], ready: [], out: [], done: [] };
     for (const o of orders) {
+      if (!isVisibleOnBoard(o)) continue;
       const col = getBoardColumn(o);
       if (col !== 'cancelled' && col in map) map[col].push(o);
     }
@@ -675,7 +802,7 @@ export default function AdminDashboard() {
               {visibleColumns.map(col => (
                 <Column key={col.key} col={col} orders={ordersByColumn[col.key]} newOrderIds={newOrderIds}
                   onAccept={handleAccept} onRefuse={openRefuse} onAdvance={handleAdvance} onBack={handleBack}
-                  onPaymentStatus={handlePaymentStatus} />
+                  onConfirmPayment={handleConfirmPayment} onRefuseReceipt={openRefuseReceipt} />
               ))}
             </div>
             <DragOverlay>
@@ -683,7 +810,7 @@ export default function AdminDashboard() {
                 <div className="w-[300px] rotate-2">
                   <OrderCard order={activeDragOrder} highlight={false} dragging
                     onAccept={handleAccept} onRefuse={openRefuse} onAdvance={handleAdvance} onBack={handleBack}
-                    onPaymentStatus={handlePaymentStatus} />
+                    onConfirmPayment={handleConfirmPayment} onRefuseReceipt={openRefuseReceipt} />
                 </div>
               )}
             </DragOverlay>
@@ -739,6 +866,65 @@ export default function AdminDashboard() {
         )}
       </AnimatePresence>
 
+      {/* Refuse receipt modal */}
+      <AnimatePresence>
+        {receiptRefuseOrder && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[90] bg-black/75 flex items-end sm:items-center justify-center p-0 sm:p-4"
+            onClick={() => !receiptRefuseSaving && setReceiptRefuseOrder(null)}>
+            <motion.div initial={{ y: 40 }} animate={{ y: 0 }} exit={{ y: 40 }}
+              className="bg-zinc-950 border border-zinc-800 rounded-t-3xl sm:rounded-3xl w-full sm:max-w-md p-5 space-y-4"
+              onClick={e => e.stopPropagation()}>
+              <div className="flex items-center justify-between">
+                <h2 className="text-white font-black uppercase text-sm">
+                  Recusar comprovante #{receiptRefuseOrder.orderNumber}
+                </h2>
+                <button type="button" disabled={receiptRefuseSaving} onClick={() => setReceiptRefuseOrder(null)}
+                  className="text-zinc-500 hover:text-white"><X size={18} /></button>
+              </div>
+              <p className="text-zinc-500 text-sm">
+                Informe o motivo. O cliente será notificado e poderá reenviar o comprovante.
+              </p>
+              <div className="space-y-2">
+                {RECEIPT_REJECT_SUGGESTIONS.map(reason => (
+                  <button key={reason} type="button"
+                    onClick={() => { setReceiptRejectReason(reason); setReceiptRefuseError(''); }}
+                    className={`w-full text-left px-4 py-3 rounded-xl border text-sm font-bold transition-all ${
+                      receiptRejectReason === reason
+                        ? 'border-amber-500 bg-amber-500/10 text-amber-400'
+                        : 'border-zinc-800 bg-zinc-900 text-zinc-300'
+                    }`}>
+                    {reason}
+                  </button>
+                ))}
+                <button type="button"
+                  onClick={() => { setReceiptRejectReason('__other__'); setReceiptRefuseError(''); }}
+                  className={`w-full text-left px-4 py-3 rounded-xl border text-sm font-bold transition-all ${
+                    receiptRejectReason === '__other__'
+                      ? 'border-amber-500 bg-amber-500/10 text-amber-400'
+                      : 'border-zinc-800 bg-zinc-900 text-zinc-300'
+                  }`}>
+                  Outro motivo
+                </button>
+                {receiptRejectReason === '__other__' && (
+                  <textarea
+                    value={receiptRejectCustom}
+                    onChange={e => setReceiptRejectCustom(e.target.value)}
+                    placeholder="Descreva o motivo..."
+                    className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 text-white text-sm resize-none h-24 focus:border-amber-500 focus:outline-none"
+                  />
+                )}
+              </div>
+              {receiptRefuseError && <p className="text-red-400 text-sm">{receiptRefuseError}</p>}
+              <button type="button" disabled={receiptRefuseSaving} onClick={confirmRefuseReceipt}
+                className="w-full h-12 rounded-xl bg-red-500 hover:bg-red-400 text-white font-black uppercase text-sm tracking-wide disabled:opacity-50">
+                {receiptRefuseSaving ? 'Enviando...' : 'Recusar comprovante'}
+              </button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <AnimatePresence>
         {showCancelled && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
@@ -759,7 +945,7 @@ export default function AdminDashboard() {
                 <div key={order.id} className="mb-3">
                   <OrderCard order={order} highlight={false}
                     onAccept={handleAccept} onRefuse={openRefuse} onAdvance={handleAdvance} onBack={handleBack}
-                    onPaymentStatus={handlePaymentStatus} />
+                    onConfirmPayment={handleConfirmPayment} onRefuseReceipt={openRefuseReceipt} />
                 </div>
               ))}
             </motion.div>
