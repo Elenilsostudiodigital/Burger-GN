@@ -64,16 +64,31 @@ export default function Checkout() {
   const [couponLoading, setCouponLoading] = useState(false);
   const [couponError, setCouponError] = useState('');
 
-  const { register, handleSubmit, watch, setValue, formState: { errors } } = useForm<CheckoutFormData>();
+  const { register, handleSubmit, watch, setValue, formState: { errors } } = useForm<CheckoutFormData>({
+    defaultValues: {
+      nome: '',
+      telefone: '',
+      endereco: '',
+      numero: '',
+      complemento: '',
+      bairro: '',
+      referencia: '',
+      observacoes: '',
+      troco: '',
+    },
+  });
   const bairroValue = watch('bairro');
   const enderecoValue = watch('endereco');
   const numeroValue = watch('numero');
 
   useEffect(() => {
-    getDeliveryZones().then(setZones).catch(() => {});
-    getKmDeliveryConfig().then(setKmConfig).catch(() => {});
+    // Ensure leftover modal lock never blocks typing on checkout inputs.
+    document.body.style.overflow = '';
+    document.body.classList.remove('modal-open');
+    getDeliveryZones().then(list => setZones(Array.isArray(list) ? list : [])).catch(() => setZones([]));
+    getKmDeliveryConfig().then(setKmConfig).catch(() => setKmConfig(null));
     getPaymentSettings().then(setPaySettings).catch(() => {});
-    getWhatsappSettings().then(s => setWaNumber(s.number)).catch(() => {});
+    getWhatsappSettings().then(s => setWaNumber(s?.number || WHATSAPP_NUMBER)).catch(() => {});
   }, []);
 
   // Cash restricted for delivery unless admin allows — auto-switch away if needed
@@ -120,32 +135,50 @@ export default function Checkout() {
   const usingKm = isDelivery && kmEnabled && customerCoords !== null;
 
   const applyCoordinates = (lat: number, lng: number) => {
-    setCustomerCoords({ lat, lng });
-    setGpsError('');
-    if (kmConfig && kmConfig.enabled) {
-      const baseLat = parseFloat(kmConfig.baseLat);
-      const baseLng = parseFloat(kmConfig.baseLng);
-      if (baseLat !== 0 || baseLng !== 0) {
-        const dist = haversineKm(baseLat, baseLng, lat, lng);
-        setDistanceKm(dist);
-        const maxDist = parseFloat(kmConfig.maxDistanceKm);
-        if (dist <= maxDist) {
-          const { fee, consult } = findKmTier(dist, kmConfig.tiers);
-          if (!consult && fee !== null) {
-            setDeliveryFee(fee);
-            setFeeFound(true);
-            setFeeMessage('');
-          } else {
-            setDeliveryFee(0);
-            setFeeFound(false);
-            setFeeMessage('Distância fora das faixas cadastradas. Consulte pelo WhatsApp.');
-          }
-        } else {
-          setDeliveryFee(0);
-          setFeeFound(false);
-          setFeeMessage(`Distância de ${dist.toFixed(1)}km excede o raio de entrega (${maxDist}km). Consulte pelo WhatsApp.`);
-        }
+    try {
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+      setCustomerCoords({ lat, lng });
+      setGpsError('');
+      if (!kmConfig?.enabled) return;
+
+      const baseLat = parseFloat(String(kmConfig.baseLat ?? '0'));
+      const baseLng = parseFloat(String(kmConfig.baseLng ?? '0'));
+      if (!Number.isFinite(baseLat) || !Number.isFinite(baseLng) || (baseLat === 0 && baseLng === 0)) {
+        setFeeFound(false);
+        setFeeMessage('Local da loja não configurado para cálculo por KM. Consulte pelo WhatsApp.');
+        return;
       }
+
+      const dist = haversineKm(baseLat, baseLng, lat, lng);
+      if (!Number.isFinite(dist)) {
+        setFeeFound(false);
+        setFeeMessage('Não foi possível calcular a distância. Consulte pelo WhatsApp.');
+        return;
+      }
+
+      setDistanceKm(dist);
+      const maxDist = parseFloat(String(kmConfig.maxDistanceKm ?? '0'));
+      if (Number.isFinite(maxDist) && maxDist > 0 && dist > maxDist) {
+        setDeliveryFee(0);
+        setFeeFound(false);
+        setFeeMessage(`Distância de ${dist.toFixed(1)}km excede o raio de entrega (${maxDist}km). Consulte pelo WhatsApp.`);
+        return;
+      }
+
+      const { fee, consult } = findKmTier(dist, kmConfig.tiers);
+      if (!consult && fee !== null && Number.isFinite(fee)) {
+        setDeliveryFee(fee);
+        setFeeFound(true);
+        setFeeMessage('');
+      } else {
+        setDeliveryFee(0);
+        setFeeFound(false);
+        setFeeMessage('Distância fora das faixas cadastradas. Consulte pelo WhatsApp.');
+      }
+    } catch (err) {
+      console.error('[BurgerGN] applyCoordinates failed:', err);
+      setFeeFound(false);
+      setFeeMessage('Não foi possível calcular a taxa de entrega. Consulte pelo WhatsApp.');
     }
   };
 
@@ -165,11 +198,21 @@ export default function Checkout() {
     clearTimeout(feeDebounce.current);
     feeDebounce.current = setTimeout(async () => {
       setFeeLoading(true);
-      const fullAddr = `${enderecoValue}, ${numeroValue}, ${bairroValue}, Lauro de Freitas, Bahia, Brasil`;
-      const coords = await geocodeAddress(fullAddr);
-      if (coords) applyCoordinates(coords.lat, coords.lng);
-      else { setFeeFound(false); setFeeMessage('Não foi possível localizar este endereço automaticamente. Consulte a taxa pelo WhatsApp.'); }
-      setFeeLoading(false);
+      try {
+        const fullAddr = `${enderecoValue}, ${numeroValue}, ${bairroValue}, Lauro de Freitas, Bahia, Brasil`;
+        const coords = await geocodeAddress(fullAddr);
+        if (coords) applyCoordinates(coords.lat, coords.lng);
+        else {
+          setFeeFound(false);
+          setFeeMessage('Não foi possível localizar este endereço automaticamente. Consulte a taxa pelo WhatsApp.');
+        }
+      } catch (err) {
+        console.error('[BurgerGN] geocode effect failed:', err);
+        setFeeFound(false);
+        setFeeMessage('Não foi possível localizar este endereço automaticamente. Consulte a taxa pelo WhatsApp.');
+      } finally {
+        setFeeLoading(false);
+      }
     }, 900);
     return () => clearTimeout(feeDebounce.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -179,10 +222,11 @@ export default function Checkout() {
   const total = Math.max(0, subtotal + (isDelivery ? deliveryFee : 0) - discount);
   const fmt = (v: number) => `R$ ${v.toFixed(2).replace('.', ',')}`;
 
-  const formatPhone = (v: string) => {
-    const n = v.replace(/\D/g, '');
+  const formatPhone = (v: string | null | undefined) => {
+    const raw = String(v ?? '');
+    const n = raw.replace(/\D/g, '');
     if (n.length <= 11) return n.replace(/(\d{2})(\d{5})(\d{4})/, '($1) $2-$3');
-    return v;
+    return raw;
   };
 
   const handleApplyCoupon = async () => {
@@ -222,28 +266,31 @@ export default function Checkout() {
           addons: ci.selectedAddons, notes: ci.notes,
         })),
       });
-      sessionStorage.setItem('lastOrder', JSON.stringify({
+      const orderPayload = {
         trackingId: result.trackingId,
         orderNumber: result.orderNumber,
-        customerName: data.nome, phone: data.telefone,
+        customerName: data.nome ?? '', phone: data.telefone ?? '',
         orderType, paymentMethod,
         cardType: paymentMethod === 'card' ? cardType : null,
         needsChange: paymentMethod === 'cash' ? needsChange : false,
         changeFor: paymentMethod === 'cash' && needsChange ? (data.troco || null) : null,
-        address: data.endereco, numero: data.numero,
-        complemento: data.complemento,
-        neighborhood: data.bairro, reference: data.referencia,
-        notes: data.observacoes,
+        address: data.endereco ?? '', numero: data.numero ?? '',
+        complemento: data.complemento ?? '',
+        neighborhood: data.bairro ?? '', reference: data.referencia ?? '',
+        notes: data.observacoes ?? '',
         distanceKm: result.distanceKm ?? null,
         customerLat: isDelivery && customerCoords ? customerCoords.lat : null,
         customerLng: isDelivery && customerCoords ? customerCoords.lng : null,
         couponCode: appliedCoupon?.code ?? null,
         discountAmount: result.discountAmount ?? 0,
-        items: cartItems.map(ci => ({
-          name: ci.item.name, quantity: ci.quantity, price: ci.item.price,
-          addons: ci.selectedAddons, notes: ci.notes,
-          subtotal: (ci.item.price + ci.selectedAddons.reduce((acc, a) => acc + a.price, 0)) * ci.quantity,
-        })),
+        items: cartItems.map(ci => {
+          const addons = Array.isArray(ci.selectedAddons) ? ci.selectedAddons : [];
+          return {
+            name: ci.item.name, quantity: ci.quantity, price: ci.item.price,
+            addons, notes: ci.notes ?? '',
+            subtotal: (Number(ci.item.price) + addons.reduce((acc, a) => acc + (Number(a.price) || 0), 0)) * ci.quantity,
+          };
+        }),
         subtotal,
         deliveryFee: result.deliveryFee ?? 0,
         discount,
@@ -253,7 +300,12 @@ export default function Checkout() {
         pixPayment: result.pixPayment ?? null,
         paymentStatus: 'pending',
         createdAt: new Date().toISOString(),
-      }));
+      };
+      try {
+        sessionStorage.setItem('lastOrder', JSON.stringify(orderPayload));
+      } catch (storageErr) {
+        console.error('[BurgerGN] sessionStorage lastOrder failed:', storageErr);
+      }
       if (result.cardCheckoutUrl) {
         window.location.href = result.cardCheckoutUrl;
         return;
@@ -336,7 +388,14 @@ export default function Checkout() {
               <div className="space-y-1.5">
                 <Label className="text-zinc-400 text-sm">Telefone (WhatsApp) *</Label>
                 <Input placeholder="(00) 00000-0000" className="bg-zinc-900 border-zinc-800 h-12 text-white focus:border-amber-500"
-                  {...register('telefone', { required: 'Telefone é obrigatório', onChange: e => { e.target.value = formatPhone(e.target.value); } })} />
+                  {...register('telefone', {
+                    required: 'Telefone é obrigatório',
+                    onChange: e => {
+                      const el = e?.target;
+                      if (!el) return;
+                      el.value = formatPhone(el.value);
+                    },
+                  })} />
                 {errors.telefone && <span className="text-red-400 text-xs">{errors.telefone.message}</span>}
               </div>
             </div>
@@ -621,20 +680,24 @@ export default function Checkout() {
           {/* Sticky summary */}
           <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 sticky bottom-4 z-10 shadow-2xl">
             <div className="space-y-1.5 mb-4 text-sm">
-              {cartItems.map((ci, idx) => (
-                <div key={idx}>
+              {cartItems.map((ci, idx) => {
+                const addons = Array.isArray(ci.selectedAddons) ? ci.selectedAddons : [];
+                const line = (Number(ci.item.price) + addons.reduce((acc, a) => acc + (Number(a.price) || 0), 0)) * ci.quantity;
+                return (
+                <div key={ci.lineId || idx}>
                   <div className="flex justify-between text-zinc-400">
                     <span>{ci.quantity}x {ci.item.name}</span>
-                    <span>{fmt((ci.item.price + ci.selectedAddons.reduce((acc, a) => acc + a.price, 0)) * ci.quantity)}</span>
+                    <span>{fmt(line)}</span>
                   </div>
-                  {ci.selectedAddons.length > 0 && (
-                    <p className="text-zinc-600 text-xs pl-3">+ {ci.selectedAddons.map(a => a.name).join(', ')}</p>
+                  {addons.length > 0 && (
+                    <p className="text-zinc-600 text-xs pl-3">+ {addons.map(a => a.name).join(', ')}</p>
                   )}
                   {ci.notes && (
                     <p className="text-zinc-600 text-xs pl-3 italic">Obs: {ci.notes}</p>
                   )}
                 </div>
-              ))}
+                );
+              })}
               <div className="flex justify-between text-zinc-500 text-xs pt-1">
                 <span>Subtotal</span><span className="text-zinc-300">{fmt(subtotal)}</span>
               </div>

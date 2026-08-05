@@ -20,14 +20,18 @@ export function haversineKm(lat1: number, lng1: number, lat2: number, lng2: numb
 
 export function findKmTier(
   distanceKm: number,
-  tiers: Array<{ fromKm: string; toKm: string | null; fee: string | null }>
+  tiers: Array<{ fromKm: string; toKm: string | null; fee: string | null }> | null | undefined
 ): { fee: number | null; consult: boolean } {
-  const sorted = [...tiers].sort((a, b) => parseFloat(a.fromKm) - parseFloat(b.fromKm));
+  if (!Array.isArray(tiers) || tiers.length === 0 || !Number.isFinite(distanceKm)) {
+    return { fee: null, consult: true };
+  }
+  const sorted = [...tiers].sort((a, b) => parseFloat(String(a.fromKm)) - parseFloat(String(b.fromKm)));
   for (const tier of sorted) {
-    const from = parseFloat(tier.fromKm);
-    const to = tier.toKm !== null ? parseFloat(tier.toKm) : Infinity;
+    const from = parseFloat(String(tier.fromKm));
+    const to = tier.toKm !== null && tier.toKm !== undefined ? parseFloat(String(tier.toKm)) : Infinity;
+    if (!Number.isFinite(from)) continue;
     if (distanceKm >= from && distanceKm <= to) {
-      return { fee: tier.fee !== null ? parseFloat(tier.fee) : null, consult: tier.fee === null };
+      return { fee: tier.fee !== null && tier.fee !== undefined ? parseFloat(String(tier.fee)) : null, consult: tier.fee === null };
     }
   }
   return { fee: null, consult: true };

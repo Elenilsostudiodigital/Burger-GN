@@ -18,7 +18,15 @@ export class ErrorBoundary extends React.Component<Props, State> {
   }
 
   componentDidCatch(error: Error, info: React.ErrorInfo) {
-    console.error('[BurgerGN] UI crash:', error, info.componentStack);
+    console.error('[BurgerGN] UI crash:', error?.message, error, info.componentStack);
+    try {
+      sessionStorage.setItem('lastUiCrash', JSON.stringify({
+        message: error?.message || 'unknown',
+        stack: error?.stack || '',
+        componentStack: info.componentStack || '',
+        at: new Date().toISOString(),
+      }));
+    } catch { /* ignore */ }
   }
 
   private handleReload = () => {

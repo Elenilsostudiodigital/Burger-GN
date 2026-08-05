@@ -34,14 +34,19 @@ export function haversineKm(lat1: number, lng1: number, lat2: number, lng2: numb
 
 export function findKmTier(
   distanceKm: number,
-  tiers: Array<{ fromKm: string; toKm: string | null; fee: string | null }>
+  tiers: Array<{ fromKm: string; toKm: string | null; fee: string | null }> | null | undefined
 ): { fee: number | null; consult: boolean } {
-  const sorted = [...tiers].sort((a, b) => parseFloat(a.fromKm) - parseFloat(b.fromKm));
+  // Guard: API/legacy payloads may omit tiers — spreading null crashes checkout while typing address.
+  if (!Array.isArray(tiers) || tiers.length === 0 || !Number.isFinite(distanceKm)) {
+    return { fee: null, consult: true };
+  }
+  const sorted = [...tiers].sort((a, b) => parseFloat(String(a.fromKm)) - parseFloat(String(b.fromKm)));
   for (const tier of sorted) {
-    const from = parseFloat(tier.fromKm);
-    const to = tier.toKm !== null ? parseFloat(tier.toKm) : Infinity;
+    const from = parseFloat(String(tier.fromKm));
+    const to = tier.toKm !== null && tier.toKm !== undefined ? parseFloat(String(tier.toKm)) : Infinity;
+    if (!Number.isFinite(from)) continue;
     if (distanceKm >= from && distanceKm <= to) {
-      return { fee: tier.fee !== null ? parseFloat(tier.fee) : null, consult: tier.fee === null };
+      return { fee: tier.fee !== null && tier.fee !== undefined ? parseFloat(String(tier.fee)) : null, consult: tier.fee === null };
     }
   }
   return { fee: null, consult: true };
@@ -94,7 +99,15 @@ export interface KmDeliveryTier { id: number; fromKm: string; toKm: string | nul
 export interface KmDeliveryConfig { id: number; enabled: boolean; baseAddress: string; baseLat: string; baseLng: string; minFee: string; feePerKm: string; maxDistanceKm: string; updatedAt: string; tiers: KmDeliveryTier[]; }
 export interface KmFeeResult { enabled: boolean; distanceKm?: number; fee: number | null; consult?: boolean; message?: string; }
 
-export const getKmDeliveryConfig = () => api.get("/delivery/km-config") as Promise<KmDeliveryConfig>;
+export const getKmDeliveryConfig = () =>
+  api.get("/delivery/km-config").then((cfg: KmDeliveryConfig) => ({
+    ...cfg,
+    enabled: !!cfg?.enabled,
+    baseLat: cfg?.baseLat ?? "0",
+    baseLng: cfg?.baseLng ?? "0",
+    maxDistanceKm: cfg?.maxDistanceKm ?? "0",
+    tiers: Array.isArray(cfg?.tiers) ? cfg.tiers : [],
+  })) as Promise<KmDeliveryConfig>;
 export const calculateKmFee = (lat: number, lng: number) => api.post("/delivery/calculate-fee", { lat, lng }) as Promise<KmFeeResult>;
 export const getAdminKmDelivery = () => api.get("/admin/km-delivery") as Promise<{ config: KmDeliveryConfig | null; tiers: KmDeliveryTier[] }>;
 export const updateKmDeliveryConfig = (d: Partial<KmDeliveryConfig>) => api.put("/admin/km-delivery", d) as Promise<KmDeliveryConfig>;

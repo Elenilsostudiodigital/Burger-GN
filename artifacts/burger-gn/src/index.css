@@ -157,11 +157,11 @@
     font-family: var(--app-font-display);
   }
 
-  /* Used while product modal is open — always cleared on close/unmount */
+  /* Used while product modal is open — always cleared on close/unmount.
+     Do NOT set touch-action:none here — it breaks checkout inputs on mobile if the class sticks. */
   body.modal-open {
     overflow: hidden;
     overscroll-behavior: none;
-    touch-action: none;
   }
 
   .pb-safe {
