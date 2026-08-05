@@ -19,6 +19,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 
 type OrderType = 'delivery' | 'pickup' | 'local';
 type PaymentMethod = 'pix' | 'cash' | 'card';
+type CardType = 'credit' | 'debit';
 
 interface CheckoutFormData {
   nome: string; telefone: string;
@@ -32,6 +33,8 @@ export default function Checkout() {
   const { cartItems, subtotal } = useCart();
   const [orderType, setOrderType] = useState<OrderType>('delivery');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('pix');
+  const [cardType, setCardType] = useState<CardType>('credit');
+  const [needsChange, setNeedsChange] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
 
@@ -209,7 +212,9 @@ export default function Checkout() {
         customerLat: isDelivery && customerCoords ? customerCoords.lat : undefined,
         customerLng: isDelivery && customerCoords ? customerCoords.lng : undefined,
         orderType, paymentMethod,
-        changeFor: data.troco ? parseFloat(data.troco) : undefined,
+        changeFor: paymentMethod === 'cash' && needsChange && data.troco ? parseFloat(data.troco) : undefined,
+        cardType: paymentMethod === 'card' ? cardType : undefined,
+        needsChange: paymentMethod === 'cash' ? needsChange : undefined,
         couponCode: appliedCoupon?.code,
         items: cartItems.map(ci => ({
           productId: ci.item.id, productName: ci.item.name,
@@ -222,7 +227,9 @@ export default function Checkout() {
         orderNumber: result.orderNumber,
         customerName: data.nome, phone: data.telefone,
         orderType, paymentMethod,
-        changeFor: data.troco || null,
+        cardType: paymentMethod === 'card' ? cardType : null,
+        needsChange: paymentMethod === 'cash' ? needsChange : false,
+        changeFor: paymentMethod === 'cash' && needsChange ? (data.troco || null) : null,
         address: data.endereco, numero: data.numero,
         complemento: data.complemento,
         neighborhood: data.bairro, reference: data.referencia,
@@ -483,17 +490,60 @@ export default function Checkout() {
                 <AlertCircle size={12} /> Dinheiro disponível apenas para retirada no balcão.
               </p>
             )}
-            {!paySettings?.onlinePaymentEnabled && (paymentMethod === 'pix' || paymentMethod === 'card') && (
-              <p className="text-zinc-600 text-xs">
-                Pagamento combinado na entrega/retirada — confirmação final acontece pelo WhatsApp.
-              </p>
+            {paymentMethod === 'pix' && (
+              <div className="p-4 bg-zinc-900 border border-zinc-800 rounded-xl space-y-1">
+                <p className="text-zinc-300 text-sm font-medium">Após confirmar, você verá o QR Code Pix e a chave copia e cola.</p>
+                <p className="text-zinc-600 text-xs">
+                  {paySettings?.pixConfigured
+                    ? `Chave configurada: ${paySettings.pixKeyPreview}`
+                    : 'Configure a chave Pix em Admin → Config → Pagamento para gerar o QR automaticamente.'}
+                </p>
+              </div>
+            )}
+            {paymentMethod === 'card' && (
+              <div className="space-y-2 p-4 bg-zinc-900 border border-zinc-800 rounded-xl">
+                <Label className="text-zinc-400 text-sm">Tipo do cartão</Label>
+                <div className="grid grid-cols-2 gap-2">
+                  {([
+                    { key: 'credit' as const, label: 'Crédito' },
+                    { key: 'debit' as const, label: 'Débito' },
+                  ]).map(opt => (
+                    <button key={opt.key} type="button" onClick={() => setCardType(opt.key)}
+                      className={`h-11 rounded-xl border text-sm font-bold uppercase tracking-wider transition-all ${
+                        cardType === opt.key ? 'border-amber-500 bg-amber-500/10 text-amber-500' : 'border-zinc-800 bg-zinc-950 text-zinc-400'
+                      }`}>
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-zinc-600 text-xs">Pagamento na entrega/retirada com a maquininha.</p>
+              </div>
             )}
             {paymentMethod === 'cash' && (
-              <div className="space-y-1.5 p-4 bg-zinc-900 border border-zinc-800 rounded-xl">
-                <Label className="text-zinc-400 text-sm">Troco para quanto?</Label>
-                <Input placeholder="Ex: 100" className="bg-zinc-950 border-zinc-800 h-12 text-white focus:border-amber-500"
-                  {...register('troco')} />
-                <p className="text-xs text-zinc-600">Deixe em branco se não precisar de troco.</p>
+              <div className="space-y-3 p-4 bg-zinc-900 border border-zinc-800 rounded-xl">
+                <Label className="text-zinc-400 text-sm">Precisa de troco?</Label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button type="button" onClick={() => setNeedsChange(true)}
+                    className={`h-11 rounded-xl border text-sm font-bold uppercase tracking-wider transition-all ${
+                      needsChange ? 'border-amber-500 bg-amber-500/10 text-amber-500' : 'border-zinc-800 bg-zinc-950 text-zinc-400'
+                    }`}>
+                    Sim
+                  </button>
+                  <button type="button" onClick={() => { setNeedsChange(false); setValue('troco', ''); }}
+                    className={`h-11 rounded-xl border text-sm font-bold uppercase tracking-wider transition-all ${
+                      !needsChange ? 'border-amber-500 bg-amber-500/10 text-amber-500' : 'border-zinc-800 bg-zinc-950 text-zinc-400'
+                    }`}>
+                    Não
+                  </button>
+                </div>
+                {needsChange && (
+                  <div className="space-y-1.5">
+                    <Label className="text-zinc-400 text-sm">Troco para quanto?</Label>
+                    <Input placeholder="Ex: 100" className="bg-zinc-950 border-zinc-800 h-12 text-white focus:border-amber-500"
+                      {...register('troco', { required: needsChange ? 'Informe o valor do troco' : false })} />
+                    {errors.troco && <span className="text-red-400 text-xs">{errors.troco.message}</span>}
+                  </div>
+                )}
               </div>
             )}
           </section>
@@ -589,7 +639,9 @@ export default function Checkout() {
               )}
               <div className="flex justify-between text-zinc-500 text-xs">
                 <span>Pagamento</span>
-                <span className="text-zinc-300">{paymentMethod === 'pix' ? 'Pix' : paymentMethod === 'cash' ? 'Dinheiro' : 'Cartão'}</span>
+                <span className="text-zinc-300">
+                  {paymentMethod === 'pix' ? 'Pix' : paymentMethod === 'cash' ? 'Dinheiro' : `Cartão (${cardType === 'credit' ? 'Crédito' : 'Débito'})`}
+                </span>
               </div>
               <div className="border-t border-zinc-800 pt-2 flex justify-between font-bold text-white">
                 <span>Total</span>
@@ -600,7 +652,9 @@ export default function Checkout() {
               className="w-full min-h-[56px] font-bold tracking-wider rounded-xl bg-amber-500 hover:bg-amber-400 text-zinc-950 text-base">
               {submitting ? <><Loader2 size={20} className="animate-spin mr-2" /> Enviando...</> : 'CONFIRMAR PEDIDO'}
             </Button>
-            <p className="text-xs text-zinc-600 text-center mt-2">Você será redirecionado para o WhatsApp.</p>
+            <p className="text-xs text-zinc-600 text-center mt-2">
+              {paymentMethod === 'pix' ? 'Na próxima tela você paga via Pix e pode enviar o comprovante.' : 'Pedido enviado ao painel da loja.'}
+            </p>
           </div>
         </form>
       </main>

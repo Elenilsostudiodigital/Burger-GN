@@ -9,15 +9,18 @@ export interface HomeSection {
 type SectionDef = {
   id: string;
   title: string;
-  /** Match category slug/name; product name used as fallback for smash/batata */
   slugIncludes?: string[];
   nameIncludes?: string[];
   productNameIncludes?: string[];
   featured?: boolean;
+  highlight?: boolean;
+  newest?: boolean;
 };
 
 const SECTION_DEFS: SectionDef[] = [
   { id: 'mais-pedidos', title: 'Os Mais Pedidos', featured: true },
+  { id: 'destaques', title: 'Em Destaque', highlight: true },
+  { id: 'novos', title: 'Novidades', newest: true },
   { id: 'combos', title: 'Combos', slugIncludes: ['combo'], nameIncludes: ['combo'] },
   {
     id: 'hamburguer-artesanal',
@@ -63,32 +66,30 @@ function matchesCategory(cat: Category, def: SectionDef) {
   );
 }
 
-function productsForDef(def: SectionDef, categories: Category[], products: Product[]): Product[] {
+function productsForDef(
+  def: SectionDef,
+  categories: Category[],
+  products: Product[],
+  popularIds: number[],
+): Product[] {
   if (def.featured) {
+    if (popularIds.length > 0) {
+      const map = new Map(products.map(p => [p.id, p]));
+      return popularIds.map(id => map.get(id)).filter((p): p is Product => !!p).slice(0, 6);
+    }
     const promo = products.filter(p => normalize(p.categorySlug).includes('promocao'));
     if (promo.length > 0) return promo.slice(0, 6);
+    return [...products].sort((a, b) => a.displayOrder - b.displayOrder).slice(0, 6);
+  }
 
-    const burgerSlugs = categories
-      .filter(c => matchesCategory(c, {
-        id: 'hamburguer-artesanal',
-        title: '',
-        slugIncludes: ['hamburguer', 'burger'],
-        nameIncludes: ['hamburguer', 'artesanal'],
-      }))
-      .map(c => c.slug);
+  if (def.highlight) {
+    const promo = products.filter(p => normalize(p.categorySlug).includes('promocao'));
+    if (promo.length > 0) return promo.slice(0, 6);
+    return [...products].sort((a, b) => a.displayOrder - b.displayOrder).slice(0, 4);
+  }
 
-    const comboSlugs = categories
-      .filter(c => matchesCategory(c, { id: 'combos', title: '', slugIncludes: ['combo'], nameIncludes: ['combo'] }))
-      .map(c => c.slug);
-
-    const pool = products.filter(p =>
-      (p.categorySlug && (burgerSlugs.includes(p.categorySlug) || comboSlugs.includes(p.categorySlug))) ||
-      normalize(p.categoryName).includes('hamburguer') ||
-      normalize(p.categoryName).includes('combo')
-    );
-
-    const sorted = [...(pool.length ? pool : products)].sort((a, b) => a.displayOrder - b.displayOrder);
-    return sorted.slice(0, 6);
+  if (def.newest) {
+    return [...products].sort((a, b) => b.id - a.id).slice(0, 6);
   }
 
   const matchedCats = categories.filter(c => matchesCategory(c, def));
@@ -102,27 +103,37 @@ function productsForDef(def: SectionDef, categories: Category[], products: Produ
 
   if (list.length === 0 && def.productNameIncludes?.length) {
     list = products.filter(p =>
-      def.productNameIncludes!.some(n => normalize(p.name).includes(normalize(n)) || normalize(p.description).includes(normalize(n)))
+      def.productNameIncludes!.some(n =>
+        normalize(p.name).includes(normalize(n)) || normalize(p.description).includes(normalize(n))
+      )
     );
   }
 
   return [...list].sort((a, b) => a.displayOrder - b.displayOrder);
 }
 
-/** Build home sections from live categories/products. Empty sections are omitted. */
-export function buildHomeSections(categories: Category[], products: Product[]): HomeSection[] {
-  const usedIds = new Set<number>();
+export function buildHomeSections(
+  categories: Category[],
+  products: Product[],
+  popularIds: number[] = [],
+): HomeSection[] {
   const sections: HomeSection[] = [];
 
   for (const def of SECTION_DEFS) {
-    let items = productsForDef(def, categories, products);
-    if (!def.featured) {
-      items = items.filter(p => !usedIds.has(p.id));
-    }
+    const items = productsForDef(def, categories, products, popularIds);
     if (items.length === 0) continue;
-    if (!def.featured) items.forEach(p => usedIds.add(p.id));
     sections.push({ id: def.id, title: def.title, products: items });
   }
 
   return sections;
+}
+
+export function filterProductsByQuery(products: Product[], query: string): Product[] {
+  const q = normalize(query.trim());
+  if (!q) return products;
+  return products.filter(p =>
+    normalize(p.name).includes(q) ||
+    normalize(p.description).includes(q) ||
+    normalize(p.categoryName).includes(q)
+  );
 }

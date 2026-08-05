@@ -4,6 +4,7 @@ import { paymentSettingsTable, externalLinksTable, whatsappSettingsTable } from 
 import { eq, asc, and } from "drizzle-orm";
 import { requireCompanyAuth } from "../middlewares/auth";
 import { resolvePublicCompany } from "../middlewares/company";
+import { decodePixSettings, encodePixSettings } from "../lib/staticPix";
 
 const router = Router();
 const DEFAULT_WHATSAPP_NUMBER = "5571996981707";
@@ -12,6 +13,12 @@ function maskToken(token: string | null): string {
   if (!token) return "";
   if (token.length <= 4) return "••••";
   return `••••${token.slice(-4)}`;
+}
+
+function maskPixKey(key: string): string {
+  if (!key) return "";
+  if (key.length <= 6) return "••••••";
+  return `${key.slice(0, 3)}•••${key.slice(-3)}`;
 }
 
 async function getOrCreatePaymentSettings(companyId: number) {
@@ -34,9 +41,13 @@ router.get("/payment-settings", resolvePublicCompany, async (req, res) => {
   try {
     const settings = await getOrCreatePaymentSettings(req.companyId!);
     const mercadoPagoConfigured = !!settings.mercadoPagoAccessToken;
+    const pixCfg = decodePixSettings(settings.gatewayProvider);
     res.json({
-      onlinePaymentEnabled: settings.onlinePaymentEnabled && mercadoPagoConfigured,
+      onlinePaymentEnabled: false, // Mercado Pago reserved for future — static Pix is active
       cashOnDeliveryEnabled: settings.cashOnDeliveryEnabled,
+      pixConfigured: !!pixCfg?.key,
+      pixKeyPreview: pixCfg?.key ? maskPixKey(pixCfg.key) : "",
+      mercadoPagoReady: mercadoPagoConfigured,
     });
   } catch (err) {
     req.log.error({ err }, "Failed to get payment settings");
@@ -72,11 +83,16 @@ router.get("/external-links", resolvePublicCompany, async (req, res) => {
 
 function toAdminPaymentSettings(settings: typeof paymentSettingsTable.$inferSelect) {
   const { mercadoPagoAccessToken, mercadoPagoPublicKey, ...rest } = settings;
+  const pixCfg = decodePixSettings(settings.gatewayProvider);
   return {
     ...rest,
     mercadoPagoConfigured: !!mercadoPagoAccessToken,
     mercadoPagoAccessTokenPreview: maskToken(mercadoPagoAccessToken),
     mercadoPagoPublicKey: mercadoPagoPublicKey ?? "",
+    pixKey: pixCfg?.key ?? "",
+    pixMerchantName: pixCfg?.name ?? "THE BURGER GN",
+    pixMerchantCity: pixCfg?.city ?? "LAURO DE FREITAS",
+    pixConfigured: !!pixCfg?.key,
   };
 }
 
@@ -95,22 +111,32 @@ router.put("/admin/payment-settings", requireCompanyAuth, async (req, res) => {
     const body = req.body as {
       onlinePaymentEnabled?: boolean; gatewayProvider?: string; cashOnDeliveryEnabled?: boolean;
       mercadoPagoAccessToken?: string; mercadoPagoPublicKey?: string; clearMercadoPagoCredentials?: boolean;
+      pixKey?: string; pixMerchantName?: string; pixMerchantCity?: string;
     };
     const settings = await getOrCreatePaymentSettings(req.companyId!);
     const patch: Record<string, unknown> = {
+      // Keep MP toggle stored, but storefront uses static Pix until MP is intentionally enabled later.
       onlinePaymentEnabled: body.onlinePaymentEnabled,
-      gatewayProvider: body.gatewayProvider,
       cashOnDeliveryEnabled: body.cashOnDeliveryEnabled,
       updatedAt: new Date(),
     };
     Object.keys(patch).forEach((k) => patch[k] === undefined && delete patch[k]);
 
+    if (body.pixKey !== undefined) {
+      const existingPix = decodePixSettings(settings.gatewayProvider);
+      patch["gatewayProvider"] = encodePixSettings(
+        body.pixKey.trim(),
+        body.pixMerchantName ?? existingPix?.name ?? "THE BURGER GN",
+        body.pixMerchantCity ?? existingPix?.city ?? "LAURO DE FREITAS",
+      );
+    } else if (body.gatewayProvider !== undefined) {
+      patch["gatewayProvider"] = body.gatewayProvider;
+    }
+
     if (body.clearMercadoPagoCredentials) {
       patch["mercadoPagoAccessToken"] = null;
       patch["mercadoPagoPublicKey"] = null;
     } else {
-      // Only overwrite the access token when a non-empty value is submitted, so the masked
-      // preview shown by the admin UI never wipes a previously-saved credential.
       if (body.mercadoPagoAccessToken) patch["mercadoPagoAccessToken"] = body.mercadoPagoAccessToken.trim();
       if (body.mercadoPagoPublicKey !== undefined) patch["mercadoPagoPublicKey"] = body.mercadoPagoPublicKey.trim();
     }

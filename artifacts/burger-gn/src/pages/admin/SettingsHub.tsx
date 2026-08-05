@@ -55,6 +55,9 @@ function PaymentTab() {
   const [cashOnDelivery, setCashOnDelivery] = useState(true);
   const [accessToken, setAccessToken] = useState('');
   const [publicKey, setPublicKey] = useState('');
+  const [pixKey, setPixKey] = useState('');
+  const [pixName, setPixName] = useState('THE BURGER GN');
+  const [pixCity, setPixCity] = useState('LAURO DE FREITAS');
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState('');
 
@@ -65,6 +68,9 @@ function PaymentTab() {
     setOnline(s.onlinePaymentEnabled);
     setCashOnDelivery(s.cashOnDeliveryEnabled);
     setPublicKey(s.mercadoPagoPublicKey);
+    setPixKey(s.pixKey ?? '');
+    setPixName(s.pixMerchantName ?? 'THE BURGER GN');
+    setPixCity(s.pixMerchantCity ?? 'LAURO DE FREITAS');
     setLoading(false);
   };
 
@@ -76,12 +82,15 @@ function PaymentTab() {
       const updated = await updatePaymentSettings({
         onlinePaymentEnabled: online,
         cashOnDeliveryEnabled: cashOnDelivery,
-        gatewayProvider: 'mercadopago',
         mercadoPagoAccessToken: accessToken.trim() || undefined,
         mercadoPagoPublicKey: publicKey.trim(),
+        pixKey,
+        pixMerchantName: pixName,
+        pixMerchantCity: pixCity,
       });
       setSettings(updated);
       setAccessToken('');
+      setPixKey(updated.pixKey ?? pixKey);
       setSaving(false); setSuccess(true);
       setTimeout(() => setSuccess(false), 3000);
     } catch {
@@ -107,26 +116,56 @@ function PaymentTab() {
 
   return (
     <div className="space-y-5">
-      {/* Gateway status */}
-      <div className={`rounded-2xl p-5 border flex items-start gap-3 ${settings.mercadoPagoConfigured ? 'bg-green-900/10 border-green-800/40' : 'bg-orange-900/10 border-orange-800/40'}`}>
-        {settings.mercadoPagoConfigured
+      {/* Static Pix — active now */}
+      <div className={`rounded-2xl p-5 border flex items-start gap-3 ${settings.pixConfigured ? 'bg-green-900/10 border-green-800/40' : 'bg-amber-900/10 border-amber-800/40'}`}>
+        {settings.pixConfigured
           ? <ShieldCheck size={22} className="text-green-400 mt-0.5 shrink-0" />
-          : <ShieldAlert size={22} className="text-orange-400 mt-0.5 shrink-0" />}
+          : <ShieldAlert size={22} className="text-amber-400 mt-0.5 shrink-0" />}
         <div>
-          <p className={`font-bold text-sm ${settings.mercadoPagoConfigured ? 'text-green-400' : 'text-orange-400'}`}>
-            {settings.mercadoPagoConfigured ? 'Mercado Pago conectado' : 'Mercado Pago não conectado'}
+          <p className={`font-bold text-sm ${settings.pixConfigured ? 'text-green-400' : 'text-amber-400'}`}>
+            {settings.pixConfigured ? 'Pix manual ativo' : 'Configure a chave Pix'}
           </p>
           <p className="text-zinc-500 text-xs mt-1 leading-relaxed">
-            {settings.mercadoPagoConfigured
-              ? 'Suas credenciais estão salvas. Pix (QR code + copia-e-cola) e Cartão de crédito/débito são processados automaticamente pelo Mercado Pago.'
-              : 'Cole abaixo o Access Token da sua conta Mercado Pago para aceitar Pix e Cartão automaticamente, caindo direto na sua conta.'}
+            Gera QR Code e Copia e Cola automaticamente no pedido. Comprovantes enviados pelo cliente aparecem no painel.
           </p>
         </div>
       </div>
 
-      {/* Mercado Pago credentials */}
       <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-3">
-        <Label className="text-zinc-400 text-xs uppercase font-bold">Credenciais do Mercado Pago</Label>
+        <Label className="text-zinc-400 text-xs uppercase font-bold">Chave Pix (Copia e Cola)</Label>
+        <div className="space-y-1.5">
+          <Label className="text-zinc-500 text-xs">Chave (e-mail, CPF/CNPJ, telefone ou aleatória)</Label>
+          <Input value={pixKey} onChange={e => setPixKey(e.target.value)}
+            placeholder="sua-chave-pix@email.com"
+            className="bg-zinc-950 border-zinc-800 text-white h-11 text-sm focus:border-amber-500 font-mono" />
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <div className="space-y-1.5">
+            <Label className="text-zinc-500 text-xs">Nome no Pix</Label>
+            <Input value={pixName} onChange={e => setPixName(e.target.value)}
+              className="bg-zinc-950 border-zinc-800 text-white h-11 text-sm focus:border-amber-500" />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-zinc-500 text-xs">Cidade</Label>
+            <Input value={pixCity} onChange={e => setPixCity(e.target.value)}
+              className="bg-zinc-950 border-zinc-800 text-white h-11 text-sm focus:border-amber-500" />
+          </div>
+        </div>
+      </div>
+
+      {/* Mercado Pago — future ready, not active */}
+      <div className="rounded-2xl p-5 border border-zinc-800 bg-zinc-900/50 flex items-start gap-3 opacity-80">
+        <ShieldAlert size={22} className="text-zinc-500 mt-0.5 shrink-0" />
+        <div>
+          <p className="font-bold text-sm text-zinc-400">Mercado Pago (preparado — ainda não ativo)</p>
+          <p className="text-zinc-600 text-xs mt-1 leading-relaxed">
+            Credenciais podem ser salvas agora. A integração automática será ligada em uma etapa futura, sem perder o Pix manual.
+          </p>
+        </div>
+      </div>
+
+      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-3">
+        <Label className="text-zinc-400 text-xs uppercase font-bold">Credenciais do Mercado Pago (futuro)</Label>
         <div className="space-y-1.5">
           <Label className="text-zinc-500 text-xs">Access Token {settings.mercadoPagoConfigured && <span className="text-zinc-600">(atual: {settings.mercadoPagoAccessTokenPreview})</span>}</Label>
           <Input type="password" value={accessToken} onChange={e => setAccessToken(e.target.value)}

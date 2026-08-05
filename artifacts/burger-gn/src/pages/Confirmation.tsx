@@ -1,10 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Link } from 'wouter';
 import { motion } from 'framer-motion';
-import { CheckCircle2, MessageCircle, Home, ExternalLink, Copy, Check, QrCode } from 'lucide-react';
+import { CheckCircle2, Home, ExternalLink, Copy, Check, QrCode, Upload, Loader2, ImageIcon } from 'lucide-react';
 import { PageTransition } from '../components/PageTransition';
 import { useCart } from '../context/CartContext';
-import { WHATSAPP_NUMBER, getWhatsappSettings, ORDER_TYPE_LABELS, PAYMENT_METHOD_LABELS, PAYMENT_STATUS_LABELS, PaymentStatus, trackOrder, PixPaymentResult } from '../lib/api';
+import {
+  ORDER_TYPE_LABELS, PAYMENT_METHOD_LABELS, CARD_TYPE_LABELS,
+  PaymentStatus, PixPaymentResult, uploadOrderReceipt, CardType,
+} from '../lib/api';
 import { Button } from '@/components/ui/button';
 
 interface StoredOrder {
@@ -13,6 +16,8 @@ interface StoredOrder {
   orderType: 'delivery' | 'pickup' | 'local';
   paymentMethod: 'pix' | 'cash' | 'card';
   paymentStatus: PaymentStatus;
+  cardType: CardType | null;
+  needsChange: boolean;
   changeFor: string | null;
   address: string; numero: string; complemento: string;
   neighborhood: string; reference: string; notes: string;
@@ -25,85 +30,40 @@ interface StoredOrder {
   createdAt: string;
 }
 
-function fullAddress(order: StoredOrder): string {
-  let addr = `${order.address}, ${order.numero}`;
-  if (order.complemento) addr += `, ${order.complemento}`;
-  return addr;
-}
-
-function formatDateTime(iso: string): string {
-  const d = new Date(iso);
-  const date = d.toLocaleDateString('pt-BR');
-  const time = d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-  return `${date} às ${time}`;
-}
-
-function buildWhatsAppMessage(order: StoredOrder): string {
-  const itemsText = order.items.map(i => {
-    let line = `• ${i.quantity}x ${i.name} — R$ ${i.subtotal.toFixed(2).replace('.', ',')}`;
-    if (i.addons && i.addons.length > 0) {
-      line += `\n   + ${i.addons.map(a => a.name).join(', ')}`;
-    }
-    if (i.notes) {
-      line += `\n   Obs: ${i.notes}`;
-    }
-    return line;
-  }).join('\n');
-
-  let deliveryText = ORDER_TYPE_LABELS[order.orderType];
-  if (order.orderType === 'delivery') {
-    deliveryText += `\n📍 *Endereço:* ${fullAddress(order)}`;
-    deliveryText += `\n🏘️ *Bairro:* ${order.neighborhood}`;
-    if (order.reference) deliveryText += `\n📌 *Referência:* ${order.reference}`;
-    if (order.distanceKm !== null) deliveryText += `\n📏 *Distância:* ${order.distanceKm.toFixed(1)} km`;
-    if (order.customerLat !== null && order.customerLng !== null) {
-      deliveryText += `\n🗺️ *Localização:* https://www.google.com/maps?q=${order.customerLat},${order.customerLng}`;
-    }
-  }
-
-  let paymentText = PAYMENT_METHOD_LABELS[order.paymentMethod];
-  if (order.paymentMethod === 'cash' && order.changeFor) {
-    paymentText += ` (troco p/ R$ ${order.changeFor})`;
-  }
-  const paymentStatusText = PAYMENT_STATUS_LABELS[order.paymentStatus];
-
-  const feeText = order.deliveryFee > 0
-    ? `R$ ${order.deliveryFee.toFixed(2).replace('.', ',')}`
-    : order.orderType === 'delivery' ? 'A consultar' : 'Grátis';
-
-  const discountLine = order.discount > 0 && order.couponCode
-    ? `\n🏷️ *Cupom ${order.couponCode}:* -R$ ${order.discount.toFixed(2).replace('.', ',')}`
-    : '';
-
-  return `🍔 *PEDIDO #${order.orderNumber} — The Burger GN*
-🕒 *Data/Hora:* ${formatDateTime(order.createdAt)}
-
-👤 *Cliente:* ${order.customerName}
-📱 *Telefone:* ${order.phone}
-
-📦 *Tipo de pedido:* ${deliveryText}
-${order.notes ? `\n📝 *Observações:* ${order.notes}` : ''}
-🛒 *Itens:*
-${itemsText}
-
-━━━━━━━━━━━━━━━━━
-💰 *Subtotal:* R$ ${order.subtotal.toFixed(2).replace('.', ',')}
-🚴 *Taxa de entrega:* ${feeText}${discountLine}
-💵 *TOTAL: R$ ${order.total.toFixed(2).replace('.', ',')}*
-━━━━━━━━━━━━━━━━━
-💳 *Pagamento:* ${paymentText}
-✅ *Status do pagamento:* ${paymentStatusText}
-
-Aguardo confirmação! 🙏`;
+function compressImage(file: File, maxWidth = 1200, quality = 0.72): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Falha ao ler arquivo'));
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const scale = Math.min(1, maxWidth / img.width);
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
+        const ctx = canvas.getContext('2d');
+        if (!ctx) { reject(new Error('Canvas indisponível')); return; }
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      };
+      img.onerror = () => reject(new Error('Imagem inválida'));
+      img.src = reader.result as string;
+    };
+    reader.readAsDataURL(file);
+  });
 }
 
 export default function Confirmation() {
   const { clearCart } = useCart();
   const [order, setOrder] = useState<StoredOrder | null>(null);
-  const [whatsappUrl, setWhatsappUrl] = useState('');
   const [copied, setCopied] = useState(false);
-  const [paid, setPaid] = useState(false);
+  const [copiedKey, setCopiedKey] = useState(false);
+  const [receiptPreview, setReceiptPreview] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadOk, setUploadOk] = useState(false);
+  const [uploadError, setUploadError] = useState('');
   const didInit = useRef(false);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (didInit.current) return;
@@ -113,29 +73,9 @@ export default function Confirmation() {
     const stored = JSON.parse(raw) as StoredOrder;
     setOrder(stored);
     sessionStorage.removeItem('lastOrder');
-    getWhatsappSettings()
-      .then(s => s.number)
-      .catch(() => WHATSAPP_NUMBER)
-      .then(number => {
-        const url = `https://wa.me/${number}?text=${encodeURIComponent(buildWhatsAppMessage(stored))}`;
-        setWhatsappUrl(url);
-        setTimeout(() => { window.open(url, '_blank'); }, 1500);
-      });
     clearCart();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  // Poll payment status while a Pix payment is pending
-  useEffect(() => {
-    if (!order?.pixPayment || paid) return;
-    const interval = setInterval(async () => {
-      try {
-        const fresh = await trackOrder(order.trackingId);
-        if (fresh.paymentStatus === 'paid') { setPaid(true); clearInterval(interval); }
-      } catch { /* ignore */ }
-    }, 5000);
-    return () => clearInterval(interval);
-  }, [order, paid]);
 
   const handleCopyPix = async () => {
     if (!order?.pixPayment) return;
@@ -146,86 +86,152 @@ export default function Confirmation() {
     } catch { /* ignore */ }
   };
 
+  const handleCopyKey = async () => {
+    const key = order?.pixPayment?.pixKey;
+    if (!key) return;
+    try {
+      await navigator.clipboard.writeText(key);
+      setCopiedKey(true);
+      setTimeout(() => setCopiedKey(false), 2500);
+    } catch { /* ignore */ }
+  };
+
+  const handleReceipt = async (file: File | null) => {
+    if (!file || !order) return;
+    setUploadError('');
+    setUploading(true);
+    try {
+      const dataUrl = await compressImage(file);
+      setReceiptPreview(dataUrl);
+      await uploadOrderReceipt(order.trackingId, dataUrl);
+      setUploadOk(true);
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : 'Erro ao enviar comprovante');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const paymentLabel = order
+    ? order.paymentMethod === 'card' && order.cardType
+      ? `Cartão (${CARD_TYPE_LABELS[order.cardType]})`
+      : PAYMENT_METHOD_LABELS[order.paymentMethod]
+    : '';
+
   return (
-    <PageTransition className="bg-[#0a0a0a] min-h-screen flex flex-col items-center justify-center p-6 text-center">
+    <PageTransition className="bg-[#0a0a0a] min-h-screen flex flex-col items-center p-6 text-center pb-16">
       <motion.div initial={{ scale: 0, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
         transition={{ type: 'spring', stiffness: 200, damping: 18 }}
-        className="relative w-36 h-36 flex items-center justify-center mb-8">
+        className="relative w-28 h-28 flex items-center justify-center mb-6 mt-4">
         <div className="absolute inset-0 rounded-full bg-amber-500/10 animate-ping" style={{ animationDuration: '2.5s' }} />
-        <div className="w-36 h-36 rounded-full bg-amber-500/10 border-2 border-amber-500/30 flex items-center justify-center">
-          <CheckCircle2 size={72} className="text-amber-500" />
+        <div className="w-28 h-28 rounded-full bg-amber-500/10 border-2 border-amber-500/30 flex items-center justify-center">
+          <CheckCircle2 size={56} className="text-amber-500" />
         </div>
       </motion.div>
 
-      <motion.h1 initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}
-        className="text-4xl font-black text-white uppercase tracking-tighter mb-2">
-        Pedido Enviado!
+      <motion.h1 initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}
+        className="text-3xl font-black text-white uppercase tracking-tighter mb-2">
+        Pedido Confirmado!
       </motion.h1>
 
       {order && (
-        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }} className="mb-2 space-y-1">
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }} className="mb-4 space-y-1">
           <p className="text-amber-500 font-black text-2xl">#{order.orderNumber}</p>
-          {order.discount > 0 && order.couponCode && (
-            <p className="text-green-400 text-sm font-bold">🏷️ Desconto de R$ {order.discount.toFixed(2).replace('.', ',')} aplicado!</p>
-          )}
+          <p className="text-zinc-400 text-sm">
+            {ORDER_TYPE_LABELS[order.orderType]} · {paymentLabel}
+            {order.paymentMethod === 'cash' && order.needsChange && order.changeFor
+              ? ` · Troco p/ R$ ${parseFloat(order.changeFor).toFixed(2).replace('.', ',')}`
+              : ''}
+          </p>
+          <p className="text-zinc-500 text-sm">Total: <span className="text-white font-bold">R$ {order.total.toFixed(2).replace('.', ',')}</span></p>
         </motion.div>
       )}
 
-      <motion.p initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.5 }}
-        className="text-zinc-400 text-base mb-6 max-w-[300px] leading-relaxed">
-        Abrindo o WhatsApp para confirmar seu pedido...
-      </motion.p>
-
       {order?.pixPayment && (
-        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.55 }}
-          className="w-full max-w-sm bg-zinc-900 border border-zinc-800 rounded-2xl p-5 mb-6 text-left space-y-4">
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }}
+          className="w-full max-w-sm bg-zinc-900 border border-zinc-800 rounded-2xl p-5 mb-4 text-left space-y-4">
           <div className="flex items-center gap-2 justify-center">
             <QrCode size={18} className="text-amber-500" />
             <h3 className="text-white font-black uppercase tracking-wide text-sm">Pague com Pix</h3>
           </div>
-          {paid ? (
-            <div className="flex items-center justify-center gap-2 bg-green-900/20 border border-green-800/40 rounded-xl py-4 text-green-400 font-bold">
-              <CheckCircle2 size={20} /> Pagamento confirmado!
-            </div>
-          ) : (
-            <>
-              <div className="flex justify-center">
-                <img
-                  src={`data:image/png;base64,${order.pixPayment.qrCodeBase64}`}
-                  alt="QR Code Pix"
-                  className="w-48 h-48 rounded-xl bg-white p-2"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <p className="text-zinc-500 text-xs">Ou copie o código Pix (copia e cola):</p>
-                <div className="flex gap-2">
-                  <div className="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-zinc-400 text-xs font-mono truncate">
-                    {order.pixPayment.qrCode}
-                  </div>
-                  <button type="button" onClick={handleCopyPix}
-                    className={`shrink-0 px-3 rounded-lg font-bold text-xs flex items-center gap-1.5 transition-colors ${copied ? 'bg-green-500/20 text-green-400' : 'bg-amber-500 text-zinc-950 hover:bg-amber-400'}`}>
-                    {copied ? <Check size={14} /> : <Copy size={14} />} {copied ? 'Copiado!' : 'Copiar'}
-                  </button>
+
+          <div className="flex justify-center">
+            {order.pixPayment.qrCodeBase64 ? (
+              <img
+                src={`data:image/png;base64,${order.pixPayment.qrCodeBase64}`}
+                alt="QR Code Pix"
+                className="w-52 h-52 rounded-xl bg-white p-2"
+              />
+            ) : (
+              <img
+                src={`https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(order.pixPayment.qrCode)}`}
+                alt="QR Code Pix"
+                className="w-52 h-52 rounded-xl bg-white p-2"
+              />
+            )}
+          </div>
+
+          {order.pixPayment.pixKey && (
+            <div className="space-y-1.5">
+              <p className="text-zinc-500 text-xs">Chave Pix</p>
+              <div className="flex gap-2">
+                <div className="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-zinc-300 text-xs font-mono truncate">
+                  {order.pixPayment.pixKey}
                 </div>
+                <button type="button" onClick={handleCopyKey}
+                  className={`shrink-0 px-3 rounded-lg font-bold text-xs flex items-center gap-1.5 transition-colors ${copiedKey ? 'bg-green-500/20 text-green-400' : 'bg-zinc-800 text-white hover:bg-zinc-700'}`}>
+                  {copiedKey ? <Check size={14} /> : <Copy size={14} />}
+                </button>
               </div>
-              <p className="text-zinc-600 text-xs text-center">Aguardando confirmação do pagamento...</p>
-            </>
+            </div>
           )}
+
+          <div className="space-y-1.5">
+            <p className="text-zinc-500 text-xs">Pix Copia e Cola</p>
+            <div className="flex gap-2">
+              <div className="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-zinc-400 text-xs font-mono truncate">
+                {order.pixPayment.qrCode}
+              </div>
+              <button type="button" onClick={handleCopyPix}
+                className={`shrink-0 px-3 rounded-lg font-bold text-xs flex items-center gap-1.5 transition-colors ${copied ? 'bg-green-500/20 text-green-400' : 'bg-amber-500 text-zinc-950 hover:bg-amber-400'}`}>
+                {copied ? <Check size={14} /> : <Copy size={14} />} {copied ? 'Copiado!' : 'Copiar'}
+              </button>
+            </div>
+          </div>
+
+          <div className="border-t border-zinc-800 pt-4 space-y-3">
+            <p className="text-zinc-300 text-sm font-bold flex items-center gap-2">
+              <Upload size={16} className="text-amber-500" /> Enviar comprovante
+            </p>
+            <input ref={fileRef} type="file" accept="image/*" className="hidden"
+              onChange={e => handleReceipt(e.target.files?.[0] ?? null)} />
+            <button type="button" disabled={uploading}
+              onClick={() => fileRef.current?.click()}
+              className="w-full h-12 rounded-xl border border-dashed border-zinc-700 bg-zinc-950 text-zinc-300 text-sm font-bold hover:border-amber-500/50 hover:text-amber-500 transition-colors flex items-center justify-center gap-2">
+              {uploading ? <Loader2 size={16} className="animate-spin" /> : <ImageIcon size={16} />}
+              {uploadOk ? 'Trocar comprovante' : 'Selecionar imagem'}
+            </button>
+            {(receiptPreview || uploadOk) && (
+              <div className="rounded-xl overflow-hidden border border-zinc-800">
+                <img src={receiptPreview || undefined} alt="Comprovante" className="w-full max-h-48 object-contain bg-zinc-950" />
+              </div>
+            )}
+            {uploadOk && (
+              <p className="text-green-400 text-xs flex items-center gap-1.5 justify-center">
+                <CheckCircle2 size={14} /> Comprovante enviado ao painel da loja
+              </p>
+            )}
+            {uploadError && <p className="text-red-400 text-xs text-center">{uploadError}</p>}
+          </div>
         </motion.div>
       )}
 
-      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.7 }}
-        className="w-full max-w-sm space-y-3">
-        <a href={whatsappUrl || undefined} target="_blank" rel="noopener noreferrer" className="block w-full">
-          <Button size="lg" disabled={!whatsappUrl}
-            className="w-full min-h-[60px] text-base font-bold tracking-wider rounded-2xl bg-[#25D366] hover:bg-[#20bd5a] text-white flex items-center justify-center gap-2">
-            <MessageCircle size={22} /> ENVIAR PELO WHATSAPP
-          </Button>
-        </a>
+      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.5 }}
+        className="w-full max-w-sm space-y-3 mt-2">
         {order && (
           <Link href={`/pedido/${order.trackingId}`} className="block w-full">
-            <Button variant="outline" size="lg"
-              className="w-full min-h-[56px] font-bold tracking-wider rounded-2xl border-zinc-700 bg-transparent text-zinc-300 hover:bg-zinc-900 flex items-center justify-center gap-2">
+            <Button size="lg"
+              className="w-full min-h-[56px] font-bold tracking-wider rounded-2xl bg-amber-500 hover:bg-amber-400 text-zinc-950 flex items-center justify-center gap-2">
               <ExternalLink size={18} /> ACOMPANHAR PEDIDO
             </Button>
           </Link>

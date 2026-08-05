@@ -1,13 +1,14 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useCart } from '../context/CartContext';
 import { getCategories, getProducts, getExternalLinks, Category, Product, ExternalLink, Addon } from '../lib/api';
+import { filterProductsByQuery } from '../lib/homeSections';
 import { BottomNav } from '../components/BottomNav';
 import { WhatsAppButton } from '../components/WhatsAppButton';
 import { PageTransition } from '../components/PageTransition';
 import { ProductDetailModal } from '../components/ProductDetailModal';
 import { ProductRowCard } from '../components/ProductRowCard';
-import { ShoppingCart, ExternalLink as ExternalLinkIcon } from 'lucide-react';
+import { ShoppingCart, ExternalLink as ExternalLinkIcon, Search, X } from 'lucide-react';
 import { Link } from 'wouter';
 
 export default function Menu() {
@@ -15,6 +16,7 @@ export default function Menu() {
   const [products, setProducts] = useState<Product[]>([]);
   const [externalLinks, setExternalLinks] = useState<ExternalLink[]>([]);
   const [activeCategory, setActiveCategory] = useState<string>('');
+  const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [detailProduct, setDetailProduct] = useState<Product | null>(null);
   const { cartItems, addItem, updateQuantity, totalItems } = useCart();
@@ -31,7 +33,10 @@ export default function Menu() {
     getExternalLinks().then(setExternalLinks).catch(() => {});
   }, []);
 
-  const filteredItems = products.filter(p => p.categorySlug === activeCategory);
+  const filteredItems = useMemo(() => {
+    if (search.trim()) return filterProductsByQuery(products, search);
+    return products.filter(p => p.categorySlug === activeCategory);
+  }, [products, activeCategory, search]);
 
   const quantityForProduct = (productId: number) =>
     cartItems.filter(ci => ci.item.id === productId && ci.selectedAddons.length === 0 && !ci.notes)
@@ -93,24 +98,45 @@ export default function Menu() {
       </header>
 
       <div className="sticky top-[73px] z-30 bg-zinc-950/90 backdrop-blur-md border-b border-zinc-800">
-        <div className="max-w-md mx-auto px-4 py-3 flex gap-2.5 overflow-x-auto no-scrollbar snap-x">
-          {categories.map(cat => (
-            <button
-              key={cat.slug}
-              onClick={() => setActiveCategory(cat.slug)}
-              className={`snap-start whitespace-nowrap px-4 py-2 rounded-full font-bold text-xs tracking-wider uppercase transition-all ${
-                activeCategory === cat.slug
-                  ? 'bg-amber-500 text-zinc-950 shadow-[0_0_15px_rgba(245,158,11,0.35)]'
-                  : 'bg-zinc-900 text-zinc-400 border border-zinc-800 hover:bg-zinc-800 hover:text-white'
-              }`}
-            >
-              {cat.name}
-            </button>
-          ))}
+        <div className="max-w-md mx-auto px-4 pt-3">
+          <div className="relative mb-2.5">
+            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
+            <input
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Buscar no cardápio..."
+              className="w-full h-10 rounded-xl bg-zinc-900 border border-zinc-800 pl-10 pr-10 text-sm text-white placeholder:text-zinc-600 focus:border-amber-500 focus:outline-none"
+            />
+            {search && (
+              <button type="button" onClick={() => setSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500">
+                <X size={15} />
+              </button>
+            )}
+          </div>
         </div>
+        {!search && (
+          <div className="max-w-md mx-auto px-4 pb-3 flex gap-2.5 overflow-x-auto no-scrollbar snap-x">
+            {categories.map(cat => (
+              <button
+                key={cat.slug}
+                onClick={() => {
+                  setActiveCategory(cat.slug);
+                  document.getElementById('menu-list')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }}
+                className={`snap-start whitespace-nowrap px-4 py-2 rounded-full font-bold text-xs tracking-wider uppercase transition-all ${
+                  activeCategory === cat.slug
+                    ? 'bg-amber-500 text-zinc-950 shadow-[0_0_15px_rgba(245,158,11,0.35)]'
+                    : 'bg-zinc-900 text-zinc-400 border border-zinc-800 hover:bg-zinc-800 hover:text-white'
+                }`}
+              >
+                {cat.name}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
-      <main className="max-w-md mx-auto px-4 py-5 pb-32">
+      <main id="menu-list" className="max-w-md mx-auto px-4 py-5 pb-32 scroll-mt-40">
         {loading ? (
           <div className="flex justify-center py-20">
             <div className="w-8 h-8 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
@@ -118,7 +144,7 @@ export default function Menu() {
         ) : (
           <AnimatePresence mode="wait">
             <motion.div
-              key={activeCategory}
+              key={search || activeCategory}
               initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -8 }}
@@ -126,7 +152,9 @@ export default function Menu() {
               className="space-y-2.5"
             >
               {filteredItems.length === 0 ? (
-                <p className="text-zinc-500 text-center py-12">Nenhum item nesta categoria.</p>
+                <p className="text-zinc-500 text-center py-12">
+                  {search ? 'Nenhum produto encontrado.' : 'Nenhum item nesta categoria.'}
+                </p>
               ) : (
                 filteredItems.map((item, idx) => (
                   <ProductRowCard

@@ -1,9 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'wouter';
 import { motion } from 'framer-motion';
-import { ShoppingCart, ArrowRight } from 'lucide-react';
-import { getCategories, getProducts, Category, Product, Addon } from '../lib/api';
-import { buildHomeSections } from '../lib/homeSections';
+import { ShoppingCart, ArrowRight, Search, X } from 'lucide-react';
+import { getCategories, getProducts, getPopularProducts, Category, Product, Addon } from '../lib/api';
+import { buildHomeSections, filterProductsByQuery } from '../lib/homeSections';
 import { useCart } from '../context/CartContext';
 import { BottomNav } from '../components/BottomNav';
 import { PageTransition } from '../components/PageTransition';
@@ -14,23 +14,31 @@ import { Button } from '@/components/ui/button';
 export default function Home() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
+  const [popularIds, setPopularIds] = useState<number[]>([]);
   const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
   const [detailProduct, setDetailProduct] = useState<Product | null>(null);
   const { cartItems, addItem, updateQuantity, totalItems } = useCart();
 
   useEffect(() => {
-    Promise.all([getCategories(), getProducts()])
-      .then(([cats, prods]) => {
+    Promise.all([getCategories(), getProducts(), getPopularProducts().catch(() => [])])
+      .then(([cats, prods, popular]) => {
         setCategories(cats);
         setProducts(prods);
+        setPopularIds(popular.map(p => p.productId).filter((id): id is number => typeof id === 'number'));
       })
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
 
   const sections = useMemo(
-    () => buildHomeSections(categories, products),
-    [categories, products],
+    () => buildHomeSections(categories, products, popularIds),
+    [categories, products, popularIds],
+  );
+
+  const searchResults = useMemo(
+    () => (search.trim() ? filterProductsByQuery(products, search) : []),
+    [products, search],
   );
 
   const quantityForProduct = (productId: number) =>
@@ -140,10 +148,26 @@ export default function Home() {
         </div>
       </section>
 
-      {/* Section chips */}
-      {sections.length > 0 && (
-        <div className="sticky top-[57px] z-30 bg-[#0a0a0a]/90 backdrop-blur-xl border-b border-zinc-800/70">
-          <div className="max-w-md mx-auto px-4 py-3 flex gap-2 overflow-x-auto no-scrollbar">
+      {/* Search + section chips */}
+      <div className="sticky top-[57px] z-30 bg-[#0a0a0a]/92 backdrop-blur-xl border-b border-zinc-800/70">
+        <div className="max-w-md mx-auto px-4 pt-3 pb-2">
+          <div className="relative">
+            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
+            <input
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Buscar produtos..."
+              className="w-full h-11 rounded-xl bg-zinc-900 border border-zinc-800 pl-10 pr-10 text-sm text-white placeholder:text-zinc-600 focus:border-amber-500 focus:outline-none"
+            />
+            {search && (
+              <button type="button" onClick={() => setSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-white">
+                <X size={16} />
+              </button>
+            )}
+          </div>
+        </div>
+        {!search && sections.length > 0 && (
+          <div className="max-w-md mx-auto px-4 py-2.5 flex gap-2 overflow-x-auto no-scrollbar">
             {sections.map(section => (
               <button
                 key={section.id}
@@ -155,14 +179,37 @@ export default function Home() {
               </button>
             ))}
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
       <main className="max-w-md mx-auto px-4 pt-6 pb-8 space-y-9">
         {loading ? (
           <div className="flex justify-center py-20">
             <div className="w-8 h-8 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
           </div>
+        ) : search.trim() ? (
+          <section className="space-y-3">
+            <h2 className="text-white font-black text-lg tracking-tight">
+              Resultados {searchResults.length > 0 ? `(${searchResults.length})` : ''}
+            </h2>
+            {searchResults.length === 0 ? (
+              <p className="text-zinc-500 text-sm py-10 text-center">Nenhum produto encontrado para “{search}”.</p>
+            ) : (
+              <div className="space-y-2.5">
+                {searchResults.map((product, idx) => (
+                  <ProductRowCard
+                    key={`search-${product.id}`}
+                    product={product}
+                    index={idx}
+                    quantity={quantityForProduct(product.id)}
+                    onSelect={setDetailProduct}
+                    onQuickAdd={handleQuickAdd}
+                    onQuantityChange={handleQuantityChange}
+                  />
+                ))}
+              </div>
+            )}
+          </section>
         ) : sections.length === 0 ? (
           <div className="text-center py-16 space-y-4">
             <p className="text-zinc-500">Cardápio em atualização.</p>
@@ -179,7 +226,7 @@ export default function Home() {
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true, margin: '-40px' }}
               transition={{ duration: 0.4, delay: sIdx * 0.04, ease: [0.22, 1, 0.36, 1] }}
-              className="scroll-mt-36 space-y-3"
+              className="scroll-mt-40 space-y-3"
             >
               <div className="flex items-end justify-between gap-3 px-0.5">
                 <h2 className="text-white font-black text-lg tracking-tight">{section.title}</h2>

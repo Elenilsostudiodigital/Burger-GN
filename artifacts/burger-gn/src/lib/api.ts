@@ -110,11 +110,14 @@ export async function geocodeAddress(address: string): Promise<{ lat: number; ln
 
 // ── Orders ────────────────────────────────────────────────────────────────────
 export type OrderStatus = "new" | "preparing" | "delivery" | "done" | "cancelled";
+export type WorkflowStage = "new" | "accepted" | "preparing" | "ready" | "out" | "done";
 export type OrderType = "delivery" | "pickup" | "local";
 export type PaymentMethod = "pix" | "cash" | "card";
+export type CardType = "credit" | "debit";
 
 export interface OrderItem { id: number; orderId: number; productName: string; productPrice: string; quantity: number; addons: Addon[]; notes: string; subtotal: string; }
 export type PaymentStatus = "pending" | "paid" | "failed";
+export interface StatusHistoryEntry { stage: WorkflowStage | "cancelled"; label: string; at: string; }
 export interface Order {
   id: number; orderNumber: number; trackingId: string;
   customerName: string; phone: string;
@@ -123,7 +126,13 @@ export interface Order {
   customerLat: string | null; customerLng: string | null; distanceKm: string | null;
   orderType: OrderType; paymentMethod: PaymentMethod; paymentStatus: PaymentStatus; changeFor: string | null;
   subtotal: string; deliveryFee: string; discountAmount: string; couponCode: string | null;
-  total: string; status: OrderStatus; createdAt: string; items: OrderItem[];
+  total: string; status: OrderStatus; createdAt: string; updatedAt?: string; items: OrderItem[];
+  workflow?: WorkflowStage | "cancelled";
+  cardType?: CardType | null;
+  needsChange?: boolean | null;
+  receiptDataUrl?: string | null;
+  receiptUploadedAt?: string | null;
+  history?: StatusHistoryEntry[];
 }
 export interface CreateOrderPayload {
   customerName: string; phone: string;
@@ -131,10 +140,11 @@ export interface CreateOrderPayload {
   neighborhood?: string; reference?: string; notes?: string;
   customerLat?: number; customerLng?: number;
   orderType: OrderType; paymentMethod: PaymentMethod; changeFor?: number;
+  cardType?: CardType; needsChange?: boolean;
   couponCode?: string;
   items: Array<{ productId?: number; productName: string; productPrice: number; quantity: number; addons?: Addon[]; notes?: string }>;
 }
-export interface PixPaymentResult { paymentId: string; qrCode: string; qrCodeBase64: string; }
+export interface PixPaymentResult { paymentId: string; qrCode: string; qrCodeBase64: string; pixKey?: string; }
 export const createOrder = (d: CreateOrderPayload) => api.post("/orders", d) as Promise<{
   ok: boolean; trackingId: string; orderNumber: number; orderId: number;
   deliveryFee: number; distanceKm: number | null; discountAmount: number; couponCode: string | null;
@@ -143,6 +153,14 @@ export const createOrder = (d: CreateOrderPayload) => api.post("/orders", d) as 
 export const getOrders = () => api.get("/orders") as Promise<Order[]>;
 export const trackOrder = (trackingId: string) => api.get(`/orders/track/${trackingId}`) as Promise<Order>;
 export const updateOrderStatus = (id: number, status: OrderStatus) => api.patch(`/orders/${id}/status`, { status }) as Promise<Order>;
+export const updateOrderWorkflow = (id: number, workflow: WorkflowStage | "cancelled") =>
+  api.patch(`/orders/${id}/status`, { workflow }) as Promise<Order>;
+export const uploadOrderReceipt = (trackingId: string, receiptDataUrl: string) =>
+  api.post(`/orders/track/${trackingId}/receipt`, { receiptDataUrl }) as Promise<Order>;
+export const updateOrderPaymentStatus = (id: number, paymentStatus: PaymentStatus) =>
+  api.patch(`/orders/${id}/payment-status`, { paymentStatus }) as Promise<Order>;
+export const getPopularProducts = () =>
+  api.get("/products/popular") as Promise<Array<{ productId: number | null; productName: string; quantity: number }>>;
 
 // ── Coupons ───────────────────────────────────────────────────────────────────
 export type DiscountType = "percentage" | "fixed";
@@ -156,17 +174,25 @@ export const updateCoupon = (id: number, d: Partial<Coupon>) => api.put(`/admin/
 export const deleteCoupon = (id: number) => api.delete(`/admin/coupons/${id}`);
 
 // ── Payment Settings ──────────────────────────────────────────────────────────
-export interface PaymentSettingsPublic { onlinePaymentEnabled: boolean; cashOnDeliveryEnabled: boolean; }
+export interface PaymentSettingsPublic {
+  onlinePaymentEnabled: boolean;
+  cashOnDeliveryEnabled: boolean;
+  pixConfigured?: boolean;
+  pixKeyPreview?: string;
+  mercadoPagoReady?: boolean;
+}
 export interface PaymentSettingsAdmin {
   id: number; onlinePaymentEnabled: boolean; gatewayProvider: string; cashOnDeliveryEnabled: boolean;
   updatedAt: string;
   mercadoPagoConfigured: boolean; mercadoPagoAccessTokenPreview: string; mercadoPagoPublicKey: string;
+  pixKey?: string; pixMerchantName?: string; pixMerchantCity?: string; pixConfigured?: boolean;
 }
 export const getPaymentSettings = () => api.get("/payment-settings") as Promise<PaymentSettingsPublic>;
 export const getAdminPaymentSettings = () => api.get("/admin/payment-settings") as Promise<PaymentSettingsAdmin>;
 export const updatePaymentSettings = (d: {
   onlinePaymentEnabled?: boolean; gatewayProvider?: string; cashOnDeliveryEnabled?: boolean;
   mercadoPagoAccessToken?: string; mercadoPagoPublicKey?: string; clearMercadoPagoCredentials?: boolean;
+  pixKey?: string; pixMerchantName?: string; pixMerchantCity?: string;
 }) => api.put("/admin/payment-settings", d) as Promise<PaymentSettingsAdmin>;
 
 // ── External Links ────────────────────────────────────────────────────────────
@@ -201,7 +227,17 @@ export function normalizePhoneForWhatsapp(phone: string): string {
 
 export const ORDER_TYPE_LABELS: Record<OrderType, string> = { delivery: "Delivery", pickup: "Retirada no balcão", local: "Comer no local" };
 export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = { pix: "Pix", cash: "Dinheiro", card: "Cartão" };
+export const CARD_TYPE_LABELS: Record<CardType, string> = { credit: "Crédito", debit: "Débito" };
 export const STATUS_LABELS: Record<OrderStatus, string> = { new: "Novo Pedido", preparing: "Em Preparo", delivery: "Saiu p/ Entrega", done: "Finalizado", cancelled: "Cancelado" };
+export const WORKFLOW_LABELS: Record<WorkflowStage | "cancelled", string> = {
+  new: "Novo Pedido",
+  accepted: "Pedido Aceito",
+  preparing: "Em Preparo",
+  ready: "Pronto",
+  out: "Saiu para Entrega",
+  done: "Finalizado",
+  cancelled: "Cancelado",
+};
 export const PAYMENT_STATUS_LABELS: Record<PaymentStatus, string> = { pending: "Pendente", paid: "Pago", failed: "Falhou" };
 
 // ── Financial Report ────────────────────────────────────────────────────────
