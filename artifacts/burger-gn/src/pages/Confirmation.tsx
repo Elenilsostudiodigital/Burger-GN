@@ -8,6 +8,7 @@ import {
   ORDER_TYPE_LABELS, PAYMENT_METHOD_LABELS, CARD_TYPE_LABELS,
   PaymentStatus, PixPaymentResult, uploadOrderReceipt, CardType, WorkflowStage,
 } from '../lib/api';
+import { saveMyOrder } from '../lib/myOrder';
 import { Button } from '@/components/ui/button';
 
 interface StoredOrder {
@@ -80,6 +81,13 @@ export default function Confirmation() {
       if (!raw) return;
       const stored = JSON.parse(raw) as StoredOrder;
       setOrder(stored);
+      if (stored.trackingId && stored.orderNumber) {
+        saveMyOrder({
+          trackingId: stored.trackingId,
+          orderNumber: stored.orderNumber,
+          createdAt: stored.createdAt || new Date().toISOString(),
+        });
+      }
       sessionStorage.removeItem('lastOrder');
     } catch (err) {
       console.error('[BurgerGN] Failed to restore last order:', err);

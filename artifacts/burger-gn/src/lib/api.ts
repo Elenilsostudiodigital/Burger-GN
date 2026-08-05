@@ -260,12 +260,15 @@ export interface PaymentSettingsPublic {
   pixConfigured?: boolean;
   pixKeyPreview?: string;
   mercadoPagoReady?: boolean;
+  prepTimeMin?: number;
+  prepTimeMax?: number;
 }
 export interface PaymentSettingsAdmin {
   id: number; onlinePaymentEnabled: boolean; gatewayProvider: string; cashOnDeliveryEnabled: boolean;
   updatedAt: string;
   mercadoPagoConfigured: boolean; mercadoPagoAccessTokenPreview: string; mercadoPagoPublicKey: string;
   pixKey?: string; pixMerchantName?: string; pixMerchantCity?: string; pixConfigured?: boolean;
+  prepTimeMin?: number; prepTimeMax?: number;
 }
 export const getPaymentSettings = () => api.get("/payment-settings") as Promise<PaymentSettingsPublic>;
 export const getAdminPaymentSettings = () => api.get("/admin/payment-settings") as Promise<PaymentSettingsAdmin>;
@@ -273,6 +276,7 @@ export const updatePaymentSettings = (d: {
   onlinePaymentEnabled?: boolean; gatewayProvider?: string; cashOnDeliveryEnabled?: boolean;
   mercadoPagoAccessToken?: string; mercadoPagoPublicKey?: string; clearMercadoPagoCredentials?: boolean;
   pixKey?: string; pixMerchantName?: string; pixMerchantCity?: string;
+  prepTimeMin?: number; prepTimeMax?: number;
 }) => api.put("/admin/payment-settings", d) as Promise<PaymentSettingsAdmin>;
 
 // ── External Links ────────────────────────────────────────────────────────────

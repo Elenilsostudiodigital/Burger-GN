@@ -4,7 +4,7 @@ import { paymentSettingsTable, externalLinksTable, whatsappSettingsTable } from 
 import { eq, asc, and } from "drizzle-orm";
 import { requireCompanyAuth } from "../middlewares/auth";
 import { resolvePublicCompany } from "../middlewares/company";
-import { decodePixSettings, encodePixSettings } from "../lib/staticPix";
+import { decodePixSettings, decodeGatewayConfig, encodePixSettings } from "../lib/staticPix";
 
 const router = Router();
 const DEFAULT_WHATSAPP_NUMBER = "5571996981707";
@@ -41,6 +41,7 @@ router.get("/payment-settings", resolvePublicCompany, async (req, res) => {
   try {
     const settings = await getOrCreatePaymentSettings(req.companyId!);
     const mercadoPagoConfigured = !!settings.mercadoPagoAccessToken;
+    const storeCfg = decodeGatewayConfig(settings.gatewayProvider);
     const pixCfg = decodePixSettings(settings.gatewayProvider);
     res.json({
       onlinePaymentEnabled: false, // Mercado Pago reserved for future — static Pix is active
@@ -48,6 +49,8 @@ router.get("/payment-settings", resolvePublicCompany, async (req, res) => {
       pixConfigured: !!pixCfg?.key,
       pixKeyPreview: pixCfg?.key ? maskPixKey(pixCfg.key) : "",
       mercadoPagoReady: mercadoPagoConfigured,
+      prepTimeMin: storeCfg.prepTimeMin,
+      prepTimeMax: storeCfg.prepTimeMax,
     });
   } catch (err) {
     req.log.error({ err }, "Failed to get payment settings");
@@ -83,16 +86,19 @@ router.get("/external-links", resolvePublicCompany, async (req, res) => {
 
 function toAdminPaymentSettings(settings: typeof paymentSettingsTable.$inferSelect) {
   const { mercadoPagoAccessToken, mercadoPagoPublicKey, ...rest } = settings;
+  const storeCfg = decodeGatewayConfig(settings.gatewayProvider);
   const pixCfg = decodePixSettings(settings.gatewayProvider);
   return {
     ...rest,
     mercadoPagoConfigured: !!mercadoPagoAccessToken,
     mercadoPagoAccessTokenPreview: maskToken(mercadoPagoAccessToken),
     mercadoPagoPublicKey: mercadoPagoPublicKey ?? "",
-    pixKey: pixCfg?.key ?? "",
-    pixMerchantName: pixCfg?.name ?? "THE BURGER GN",
-    pixMerchantCity: pixCfg?.city ?? "LAURO DE FREITAS",
+    pixKey: pixCfg?.key ?? storeCfg.key ?? "",
+    pixMerchantName: storeCfg.name ?? "THE BURGER GN",
+    pixMerchantCity: storeCfg.city ?? "LAURO DE FREITAS",
     pixConfigured: !!pixCfg?.key,
+    prepTimeMin: storeCfg.prepTimeMin,
+    prepTimeMax: storeCfg.prepTimeMax,
   };
 }
 
@@ -112,8 +118,10 @@ router.put("/admin/payment-settings", requireCompanyAuth, async (req, res) => {
       onlinePaymentEnabled?: boolean; gatewayProvider?: string; cashOnDeliveryEnabled?: boolean;
       mercadoPagoAccessToken?: string; mercadoPagoPublicKey?: string; clearMercadoPagoCredentials?: boolean;
       pixKey?: string; pixMerchantName?: string; pixMerchantCity?: string;
+      prepTimeMin?: number; prepTimeMax?: number;
     };
     const settings = await getOrCreatePaymentSettings(req.companyId!);
+    const existingCfg = decodeGatewayConfig(settings.gatewayProvider);
     const patch: Record<string, unknown> = {
       // Keep MP toggle stored, but storefront uses static Pix until MP is intentionally enabled later.
       onlinePaymentEnabled: body.onlinePaymentEnabled,
@@ -122,12 +130,19 @@ router.put("/admin/payment-settings", requireCompanyAuth, async (req, res) => {
     };
     Object.keys(patch).forEach((k) => patch[k] === undefined && delete patch[k]);
 
-    if (body.pixKey !== undefined) {
-      const existingPix = decodePixSettings(settings.gatewayProvider);
+    if (
+      body.pixKey !== undefined ||
+      body.pixMerchantName !== undefined ||
+      body.pixMerchantCity !== undefined ||
+      body.prepTimeMin !== undefined ||
+      body.prepTimeMax !== undefined
+    ) {
       patch["gatewayProvider"] = encodePixSettings(
-        body.pixKey.trim(),
-        body.pixMerchantName ?? existingPix?.name ?? "THE BURGER GN",
-        body.pixMerchantCity ?? existingPix?.city ?? "LAURO DE FREITAS",
+        body.pixKey !== undefined ? body.pixKey.trim() : existingCfg.key,
+        body.pixMerchantName ?? existingCfg.name,
+        body.pixMerchantCity ?? existingCfg.city,
+        body.prepTimeMin ?? existingCfg.prepTimeMin,
+        body.prepTimeMax ?? existingCfg.prepTimeMax,
       );
     } else if (body.gatewayProvider !== undefined) {
       patch["gatewayProvider"] = body.gatewayProvider;

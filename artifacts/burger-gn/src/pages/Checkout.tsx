@@ -7,6 +7,8 @@ import {
   geocodeAddress, reverseGeocode, haversineKm, findKmTier, getPaymentSettings, getWhatsappSettings,
   WHATSAPP_NUMBER, ValidateCouponResult, DeliveryZone, KmDeliveryConfig, PaymentSettingsPublic,
 } from '../lib/api';
+import { saveMyOrder } from '../lib/myOrder';
+import { ErrorBoundary } from '../components/ErrorBoundary';
 import {
   ArrowLeft, Bike, Store, Utensils, CreditCard, Banknote, QrCode,
   Loader2, Tag, X, CheckCircle2, MapPin, AlertCircle, ChevronDown, LocateFixed, Navigation, Home,
@@ -540,6 +542,13 @@ export default function Checkout() {
         console.error('[BurgerGN] sessionStorage lastOrder failed:', storageErr);
       }
 
+      // Persist for "Meu Pedido" across Home / Cardápio / return visits.
+      saveMyOrder({
+        trackingId: result.trackingId,
+        orderNumber: result.orderNumber,
+        createdAt: new Date().toISOString(),
+      });
+
       if (result.cardCheckoutUrl) {
         window.location.href = result.cardCheckoutUrl;
         return;
@@ -559,6 +568,23 @@ export default function Checkout() {
       <PageTransition className="bg-[#0a0a0a]">
         <div className="min-h-screen flex items-center justify-center">
           <div className="w-8 h-8 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
+        </div>
+      </PageTransition>
+    );
+  }
+
+  // Defensive: never render checkout when cart lines are malformed (mobile black-screen root cause).
+  const safeCart = Array.isArray(cartItems)
+    ? cartItems.filter(ci => ci && ci.item && typeof ci.quantity === 'number')
+    : [];
+  if (safeCart.length === 0) {
+    return (
+      <PageTransition className="bg-[#0a0a0a]">
+        <div className="min-h-screen flex flex-col items-center justify-center gap-3 px-6 text-center">
+          <p className="text-zinc-400 text-sm">Não foi possível carregar o carrinho.</p>
+          <Button type="button" onClick={() => setLocation('/cardapio')} className="bg-amber-500 text-zinc-950 font-bold">
+            Voltar ao cardápio
+          </Button>
         </div>
       </PageTransition>
     );
@@ -607,6 +633,7 @@ export default function Checkout() {
   );
 
   return (
+    <ErrorBoundary>
     <PageTransition className="bg-[#0a0a0a]">
       <header className="sticky top-0 z-40 bg-zinc-950/95 border-b border-zinc-800 px-4 py-4">
         <div className="max-w-md mx-auto flex items-center gap-2">
@@ -640,7 +667,7 @@ export default function Checkout() {
                   {
                     key: 'local' as const,
                     icon: <Utensils size={26} />,
-                    emoji: '🍔',
+                    emoji: '🍽️',
                     title: 'Consumir na loja',
                     desc: 'Peça agora e aproveite no salão. Em breve, identificação pela mesa via QR Code.',
                   },
@@ -1132,7 +1159,7 @@ export default function Checkout() {
           <div className="max-w-md mx-auto space-y-3">
             <div className="flex justify-between text-sm text-zinc-400">
               <span>
-                {cartItems.length} {cartItems.length === 1 ? 'item' : 'itens'}
+                {safeCart.length} {safeCart.length === 1 ? 'item' : 'itens'}
                 {isDelivery && usingKm && distanceKm !== null ? ` · ${distanceKm.toFixed(1)}km` : ''}
               </span>
               <span className="text-amber-500 font-black text-lg">{fmt(total)}</span>
@@ -1153,5 +1180,6 @@ export default function Checkout() {
         </div>
       )}
     </PageTransition>
+    </ErrorBoundary>
   );
 }

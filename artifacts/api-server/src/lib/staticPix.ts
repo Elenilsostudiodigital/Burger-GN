@@ -1,6 +1,7 @@
 /**
  * Static PIX (BR Code / EMV) generator — no Mercado Pago required.
  * Uses CRC16-CCITT as specified by Bacen Pix.
+ * Also stores lightweight store ops (prep time) in the same JSON blob — no schema change.
  */
 
 function crc16(payload: string): string {
@@ -28,6 +29,17 @@ export interface StaticPixInput {
   txid?: string;
 }
 
+export interface GatewayStoreConfig {
+  key: string;
+  name: string;
+  city: string;
+  prepTimeMin: number;
+  prepTimeMax: number;
+}
+
+const DEFAULT_PREP_MIN = 35;
+const DEFAULT_PREP_MAX = 45;
+
 /** Build Pix Copia e Cola (EMV) payload for a static/dynamic amount QR. */
 export function buildStaticPixPayload(input: StaticPixInput): string {
   const key = input.key.trim();
@@ -54,14 +66,59 @@ export function buildStaticPixPayload(input: StaticPixInput): string {
   return payload;
 }
 
-/** Encode PIX key into existing payment_settings columns without schema changes. */
-export function encodePixSettings(pixKey: string, merchantName: string, merchantCity: string): string {
+function clampPrep(min: number, max: number): { prepTimeMin: number; prepTimeMax: number } {
+  let prepTimeMin = Number.isFinite(min) ? Math.max(5, Math.min(180, Math.round(min))) : DEFAULT_PREP_MIN;
+  let prepTimeMax = Number.isFinite(max) ? Math.max(5, Math.min(240, Math.round(max))) : DEFAULT_PREP_MAX;
+  if (prepTimeMax < prepTimeMin) prepTimeMax = prepTimeMin;
+  return { prepTimeMin, prepTimeMax };
+}
+
+/** Encode PIX + prep-time into existing payment_settings.gatewayProvider without schema changes. */
+export function encodePixSettings(
+  pixKey: string,
+  merchantName: string,
+  merchantCity: string,
+  prepTimeMin = DEFAULT_PREP_MIN,
+  prepTimeMax = DEFAULT_PREP_MAX,
+): string {
+  const prep = clampPrep(prepTimeMin, prepTimeMax);
   return JSON.stringify({
     mode: "static_pix",
     key: pixKey.trim(),
     name: merchantName.trim() || "THE BURGER GN",
     city: merchantCity.trim() || "LAURO DE FREITAS",
+    prepTimeMin: prep.prepTimeMin,
+    prepTimeMax: prep.prepTimeMax,
   });
+}
+
+export function decodeGatewayConfig(gatewayProvider: string | null | undefined): GatewayStoreConfig {
+  const fallback: GatewayStoreConfig = {
+    key: "",
+    name: "THE BURGER GN",
+    city: "LAURO DE FREITAS",
+    prepTimeMin: DEFAULT_PREP_MIN,
+    prepTimeMax: DEFAULT_PREP_MAX,
+  };
+  if (!gatewayProvider) return fallback;
+  try {
+    const parsed = JSON.parse(gatewayProvider) as {
+      mode?: string; key?: string; name?: string; city?: string;
+      prepTimeMin?: number; prepTimeMax?: number;
+    };
+    if (parsed && typeof parsed === "object") {
+      const prep = clampPrep(Number(parsed.prepTimeMin), Number(parsed.prepTimeMax));
+      return {
+        key: typeof parsed.key === "string" ? parsed.key : "",
+        name: parsed.name || fallback.name,
+        city: parsed.city || fallback.city,
+        ...prep,
+      };
+    }
+  } catch {
+    /* legacy plain string */
+  }
+  return fallback;
 }
 
 export function decodePixSettings(gatewayProvider: string | null | undefined): {
@@ -69,18 +126,7 @@ export function decodePixSettings(gatewayProvider: string | null | undefined): {
   name: string;
   city: string;
 } | null {
-  if (!gatewayProvider) return null;
-  try {
-    const parsed = JSON.parse(gatewayProvider) as { mode?: string; key?: string; name?: string; city?: string };
-    if (parsed.mode === "static_pix" && parsed.key) {
-      return {
-        key: parsed.key,
-        name: parsed.name || "THE BURGER GN",
-        city: parsed.city || "LAURO DE FREITAS",
-      };
-    }
-  } catch {
-    /* legacy plain string */
-  }
-  return null;
+  const cfg = decodeGatewayConfig(gatewayProvider);
+  if (!cfg.key?.trim()) return null;
+  return { key: cfg.key, name: cfg.name, city: cfg.city };
 }

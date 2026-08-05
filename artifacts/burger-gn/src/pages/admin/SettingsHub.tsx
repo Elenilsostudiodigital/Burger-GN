@@ -58,6 +58,8 @@ function PaymentTab() {
   const [pixKey, setPixKey] = useState('');
   const [pixName, setPixName] = useState('THE BURGER GN');
   const [pixCity, setPixCity] = useState('LAURO DE FREITAS');
+  const [prepTimeMin, setPrepTimeMin] = useState('35');
+  const [prepTimeMax, setPrepTimeMax] = useState('45');
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState('');
 
@@ -71,6 +73,8 @@ function PaymentTab() {
     setPixKey(s.pixKey ?? '');
     setPixName(s.pixMerchantName ?? 'THE BURGER GN');
     setPixCity(s.pixMerchantCity ?? 'LAURO DE FREITAS');
+    setPrepTimeMin(String(s.prepTimeMin ?? 35));
+    setPrepTimeMax(String(s.prepTimeMax ?? 45));
     setLoading(false);
   };
 
@@ -87,10 +91,14 @@ function PaymentTab() {
         pixKey,
         pixMerchantName: pixName,
         pixMerchantCity: pixCity,
+        prepTimeMin: Number(prepTimeMin) || 35,
+        prepTimeMax: Number(prepTimeMax) || 45,
       });
       setSettings(updated);
       setAccessToken('');
       setPixKey(updated.pixKey ?? pixKey);
+      setPrepTimeMin(String(updated.prepTimeMin ?? 35));
+      setPrepTimeMax(String(updated.prepTimeMax ?? 45));
       setSaving(false); setSuccess(true);
       setTimeout(() => setSuccess(false), 3000);
     } catch {
@@ -220,6 +228,29 @@ function PaymentTab() {
             {cashOnDelivery ? <ToggleRight size={34} /> : <ToggleLeft size={34} />}
           </button>
         </div>
+      </div>
+
+      {/* Estimated prep time — shown on Meu Pedido after accept */}
+      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-3">
+        <div>
+          <h3 className="text-white font-black uppercase tracking-wide text-sm">⏱️ Tempo estimado de preparo</h3>
+          <p className="text-zinc-500 text-xs mt-1">Exibido ao cliente em Meu Pedido após o pedido ser aceito.</p>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1.5">
+            <Label className="text-zinc-500 text-xs">Mínimo (minutos)</Label>
+            <Input type="number" min={5} max={180} value={prepTimeMin}
+              onChange={e => setPrepTimeMin(e.target.value)}
+              className="bg-zinc-950 border-zinc-800 text-white h-11 text-sm focus:border-amber-500" />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-zinc-500 text-xs">Máximo (minutos)</Label>
+            <Input type="number" min={5} max={240} value={prepTimeMax}
+              onChange={e => setPrepTimeMax(e.target.value)}
+              className="bg-zinc-950 border-zinc-800 text-white h-11 text-sm focus:border-amber-500" />
+          </div>
+        </div>
+        <p className="text-zinc-600 text-xs">Padrão sugerido: 35 a 45 minutos.</p>
       </div>
 
       {success && <p className="text-green-400 text-sm px-1 flex items-center gap-2"><Check size={16} /> Configurações salvas!</p>}
