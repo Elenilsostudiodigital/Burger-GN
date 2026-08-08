@@ -11,15 +11,19 @@ import {
   LayoutDashboard, UtensilsCrossed, Tag, MapPin, Navigation, Settings,
   LogOut, Plus, Pencil, Trash2, Check, X, ToggleLeft, ToggleRight,
   Loader2, CreditCard, Link as LinkIcon, ShieldAlert, ShieldCheck, Upload,
-  MessageCircle, TrendingUp, Crown, Star,
+  MessageCircle, TrendingUp, Crown, Star, Clock, Printer, Image as ImageIcon, Users,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { StoreHoursTab } from './settings/StoreHoursTab';
+import { BannersTab } from './settings/BannersTab';
+import { PrinterTab } from './settings/PrinterTab';
 
 function AdminNav({ active }: { active: string }) {
   const items = [
     { href: '/admin', icon: <LayoutDashboard size={17} />, label: 'Pedidos' },
+    { href: '/admin/clientes', icon: <Users size={17} />, label: 'Clientes' },
     { href: '/admin/avaliacoes', icon: <Star size={17} />, label: 'Avaliações' },
     { href: '/admin/cardapio', icon: <UtensilsCrossed size={17} />, label: 'Cardápio' },
     { href: '/admin/financeiro', icon: <TrendingUp size={17} />, label: 'Financeiro' },
@@ -46,7 +50,7 @@ function AdminNav({ active }: { active: string }) {
   );
 }
 
-type Tab = 'pagamento' | 'links' | 'whatsapp';
+type Tab = 'pagamento' | 'links' | 'whatsapp' | 'funcionamento' | 'banners' | 'impressora';
 
 function PaymentTab() {
   const [settings, setSettings] = useState<PaymentSettingsAdmin | null>(null);
@@ -462,7 +466,7 @@ export default function SettingsHub() {
             <Settings size={20} className="text-amber-500" />
             <div>
               <h1 className="text-white font-black uppercase text-base leading-none">Configurações</h1>
-              <p className="text-zinc-600 text-xs">Pagamento e Links Externos</p>
+              <p className="text-zinc-600 text-xs">Pagamento, funcionamento e impressora</p>
             </div>
           </div>
           <button onClick={handleLogout} className="p-2 text-zinc-400 hover:text-red-400 transition-colors">
@@ -472,22 +476,33 @@ export default function SettingsHub() {
       </header>
 
       <main className="max-w-2xl mx-auto px-4 py-5 space-y-5">
-        <div className="flex gap-2">
-          <button onClick={() => setTab('pagamento')}
-            className={`flex-1 h-11 rounded-xl font-bold text-sm uppercase tracking-wide transition-all flex items-center justify-center gap-2 ${tab === 'pagamento' ? 'bg-amber-500 text-zinc-950' : 'bg-zinc-900 text-zinc-400 border border-zinc-800'}`}>
-            <CreditCard size={16} /> Pagamento
-          </button>
-          <button onClick={() => setTab('links')}
-            className={`flex-1 h-11 rounded-xl font-bold text-sm uppercase tracking-wide transition-all flex items-center justify-center gap-2 ${tab === 'links' ? 'bg-amber-500 text-zinc-950' : 'bg-zinc-900 text-zinc-400 border border-zinc-800'}`}>
-            <LinkIcon size={16} /> Links Externos
-          </button>
-          <button onClick={() => setTab('whatsapp')}
-            className={`flex-1 h-11 rounded-xl font-bold text-sm uppercase tracking-wide transition-all flex items-center justify-center gap-2 ${tab === 'whatsapp' ? 'bg-amber-500 text-zinc-950' : 'bg-zinc-900 text-zinc-400 border border-zinc-800'}`}>
-            <MessageCircle size={16} /> WhatsApp
-          </button>
+        <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
+          {([
+            { id: 'pagamento' as Tab, label: 'Pagamento', icon: <CreditCard size={15} /> },
+            { id: 'funcionamento' as Tab, label: 'Funcionamento', icon: <Clock size={15} /> },
+            { id: 'impressora' as Tab, label: 'Impressora', icon: <Printer size={15} /> },
+            { id: 'banners' as Tab, label: 'Banners', icon: <ImageIcon size={15} /> },
+            { id: 'links' as Tab, label: 'Links', icon: <LinkIcon size={15} /> },
+            { id: 'whatsapp' as Tab, label: 'WhatsApp', icon: <MessageCircle size={15} /> },
+          ]).map((t) => (
+            <button
+              key={t.id}
+              onClick={() => setTab(t.id)}
+              className={`shrink-0 h-11 px-3.5 rounded-xl font-bold text-xs uppercase tracking-wide transition-all flex items-center justify-center gap-1.5 ${
+                tab === t.id ? 'bg-amber-500 text-zinc-950' : 'bg-zinc-900 text-zinc-400 border border-zinc-800'
+              }`}
+            >
+              {t.icon} {t.label}
+            </button>
+          ))}
         </div>
 
-        {tab === 'pagamento' ? <PaymentTab /> : tab === 'links' ? <LinksTab /> : <WhatsappTab />}
+        {tab === 'pagamento' && <PaymentTab />}
+        {tab === 'funcionamento' && <StoreHoursTab />}
+        {tab === 'impressora' && <PrinterTab />}
+        {tab === 'banners' && <BannersTab />}
+        {tab === 'links' && <LinksTab />}
+        {tab === 'whatsapp' && <WhatsappTab />}
       </main>
 
       <AdminNav active="/admin/config" />

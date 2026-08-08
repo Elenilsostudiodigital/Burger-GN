@@ -15,6 +15,7 @@ import Checkout from "./pages/Checkout";
 import Confirmation from "./pages/Confirmation";
 import OrderTracking, { MyOrderPage } from "./pages/OrderTracking";
 import { MyOrderFab } from "./components/MyOrderFab";
+import { SupportButton } from "./components/SupportButton";
 import AdminLogin from "./pages/admin/Login";
 import AdminDashboard from "./pages/admin/Dashboard";
 import AdminMenuAdmin from "./pages/admin/MenuAdmin";
@@ -26,6 +27,8 @@ import AdminImportMenu from "./pages/admin/ImportMenu";
 import AdminFinancial from "./pages/admin/Financial";
 import AdminClubeBurger from "./pages/admin/ClubeBurger";
 import AdminReviews from "./pages/admin/Reviews";
+import AdminClientsList from "./pages/admin/ClientsList";
+import AdminClientsImport from "./pages/admin/ClientsImport";
 
 const queryClient = new QueryClient();
 
@@ -76,6 +79,8 @@ function Router() {
         <Route path="/admin/financeiro" component={() => <ProtectedAdminRoute component={AdminFinancial} />} />
         <Route path="/admin/cupons" component={() => <ProtectedAdminRoute component={AdminCoupons} />} />
         <Route path="/admin/clube" component={() => <ProtectedAdminRoute component={AdminClubeBurger} />} />
+        <Route path="/admin/clientes" component={() => <ProtectedAdminRoute component={AdminClientsList} />} />
+        <Route path="/admin/clientes/importar" component={() => <ProtectedAdminRoute component={AdminClientsImport} />} />
         <Route path="/admin/avaliacoes" component={() => <ProtectedAdminRoute component={AdminReviews} />} />
         <Route path="/admin/taxas" component={() => <ProtectedAdminRoute component={AdminDeliveryZones} />} />
         <Route path="/admin/entrega-km" component={() => <ProtectedAdminRoute component={AdminKmDelivery} />} />
@@ -85,8 +90,16 @@ function Router() {
         <Route component={NotFound} />
       </Switch>
       <MyOrderFab />
+      <CustomerSupportFab />
     </>
   );
+}
+
+/** Support bubble only on customer routes (not admin). */
+function CustomerSupportFab() {
+  const [location] = useLocation();
+  if (location.startsWith("/admin")) return null;
+  return <SupportButton />;
 }
 
 function App() {

@@ -9,15 +9,16 @@ import {
   getClubeExclusiveCoupons, createClubeExclusiveCoupon, updateClubeExclusiveCoupon, deleteClubeExclusiveCoupon,
   getClubeBirthdayBenefits, createClubeBirthdayBenefit, updateClubeBirthdayBenefit, deleteClubeBirthdayBenefit,
   getClubeEarlyPromotions, createClubeEarlyPromotion, updateClubeEarlyPromotion, deleteClubeEarlyPromotion,
+  getAdminClubeProgram, updateClubeProgram, addClubeStamp,
   ClubeDashboard, ClubeSettings, ClubeMember, ClubeLoyaltyReward,
   ClubeExclusiveCoupon, ClubeBirthdayBenefit, ClubeEarlyPromotion,
-  ClubeMemberTier, ClubeDiscountType, ClubeCashbackData,
+  ClubeMemberTier, ClubeDiscountType, ClubeCashbackData, ClubeProgram,
 } from '../../lib/api';
 import { useAdmin } from '../../context/AdminContext';
 import {
   LayoutDashboard, UtensilsCrossed, Tag, MapPin, Navigation, Settings, LogOut,
   Plus, Pencil, Trash2, ToggleLeft, ToggleRight, Loader2, Upload, TrendingUp,
-  Crown, Gift, Wallet, Ticket, Cake, Zap, Users, BarChart3, Percent, DollarSign,
+  Crown, Gift, Wallet, Ticket, Cake, Zap, Users, BarChart3, Percent, DollarSign, Star,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -54,6 +55,8 @@ const TIER_LABEL: Record<ClubeMemberTier, string> = {
 function AdminNav({ active }: { active: string }) {
   const navItems = [
     { href: '/admin', icon: <LayoutDashboard size={18} />, label: 'Pedidos' },
+    { href: '/admin/clientes', icon: <Users size={18} />, label: 'Clientes' },
+    { href: '/admin/avaliacoes', icon: <Star size={18} />, label: 'Avaliações' },
     { href: '/admin/cardapio', icon: <UtensilsCrossed size={18} />, label: 'Cardápio' },
     { href: '/admin/financeiro', icon: <TrendingUp size={18} />, label: 'Financeiro' },
     { href: '/admin/cupons', icon: <Tag size={18} />, label: 'Cupons' },
@@ -104,6 +107,7 @@ export default function ClubeBurger() {
   const [exclusive, setExclusive] = useState<ClubeExclusiveCoupon[]>([]);
   const [birthdays, setBirthdays] = useState<ClubeBirthdayBenefit[]>([]);
   const [promos, setPromos] = useState<ClubeEarlyPromotion[]>([]);
+  const [program, setProgram] = useState<ClubeProgram | null>(null);
 
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState<number | null>(null);
@@ -118,13 +122,24 @@ export default function ClubeBurger() {
     setEditId(null);
     try {
       if (t === 'dashboard') setDashboard(await getClubeDashboard());
-      else if (t === 'fidelidade') setLoyalty(await getClubeLoyalty());
-      else if (t === 'cashback') setCashback(await getClubeCashback());
+      else if (t === 'fidelidade') {
+        const [loy, prog, mems] = await Promise.all([
+          getClubeLoyalty(), getAdminClubeProgram(), getClubeMembers(),
+        ]);
+        setLoyalty(loy); setProgram(prog); setMembers(mems);
+      }
+      else if (t === 'cashback') {
+        const [cb, prog] = await Promise.all([getClubeCashback(), getAdminClubeProgram()]);
+        setCashback(cb); setProgram(prog);
+      }
       else if (t === 'cupons') setExclusive(await getClubeExclusiveCoupons());
       else if (t === 'aniversario') setBirthdays(await getClubeBirthdayBenefits());
       else if (t === 'promocoes') setPromos(await getClubeEarlyPromotions());
       else if (t === 'membros') setMembers(await getClubeMembers());
-      else if (t === 'config') setSettings(await getClubeSettings());
+      else if (t === 'config') {
+        const [s, prog] = await Promise.all([getClubeSettings(), getAdminClubeProgram()]);
+        setSettings(s); setProgram(prog);
+      }
     } catch {
       setError('Erro ao carregar dados do Clube Burger');
     } finally {
@@ -409,9 +424,109 @@ export default function ClubeBurger() {
               {/* ── Fidelidade ── */}
               {tab === 'fidelidade' && (
                 <>
+                  {program && (
+                    <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-4">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h3 className="text-white font-bold uppercase text-sm">Programa de Fidelidade</h3>
+                          <p className="text-zinc-500 text-xs mt-0.5">Cada compra gera 1 selo 🍔</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            const next = await updateClubeProgram({ ...program, fidelityEnabled: !program.fidelityEnabled });
+                            setProgram(next);
+                          }}
+                          className={program.fidelityEnabled ? 'text-green-400' : 'text-zinc-600'}
+                          title="Ativar / Desativar Fidelidade"
+                        >
+                          {program.fidelityEnabled ? <ToggleRight size={30} /> : <ToggleLeft size={30} />}
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-1.5">
+                          <Label className="text-zinc-400 text-xs">Selos para recompensa</Label>
+                          <Input type="number" min={1} max={50} value={program.stampsRequired}
+                            onChange={e => setProgram(p => p ? { ...p, stampsRequired: parseInt(e.target.value || '10', 10) } : p)}
+                            className="bg-zinc-950 border-zinc-800 text-white h-11 focus:border-amber-500" />
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label className="text-zinc-400 text-xs">Recompensa</Label>
+                          <Input value={program.stampRewardTitle}
+                            onChange={e => setProgram(p => p ? { ...p, stampRewardTitle: e.target.value } : p)}
+                            className="bg-zinc-950 border-zinc-800 text-white h-11 focus:border-amber-500" />
+                        </div>
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label className="text-zinc-400 text-xs">Descrição da recompensa</Label>
+                        <Input value={program.stampRewardDescription}
+                          onChange={e => setProgram(p => p ? { ...p, stampRewardDescription: e.target.value } : p)}
+                          className="bg-zinc-950 border-zinc-800 text-white h-11 focus:border-amber-500" />
+                      </div>
+                      <div className="rounded-xl bg-zinc-950 border border-zinc-800 px-3 py-2.5">
+                        <p className="text-zinc-500 text-[11px] mb-1">Prévia dos selos</p>
+                        <p className="text-lg tracking-wide leading-relaxed">
+                          {Array.from({ length: program.stampsRequired }).map((_, i) => (
+                            <span key={i} className="opacity-80">🍔 </span>
+                          ))}
+                        </p>
+                      </div>
+                      <Button
+                        type="button"
+                        disabled={saving}
+                        onClick={async () => {
+                          if (!program) return;
+                          setSaving(true);
+                          try {
+                            const next = await updateClubeProgram(program);
+                            setProgram(next);
+                          } catch { setError('Erro ao salvar fidelidade'); }
+                          finally { setSaving(false); }
+                        }}
+                        className="w-full h-11 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold rounded-xl"
+                      >
+                        {saving ? <Loader2 className="animate-spin" size={16} /> : 'Salvar fidelidade'}
+                      </Button>
+
+                      {members.length > 0 && (
+                        <div className="space-y-2 pt-2 border-t border-zinc-800">
+                          <h4 className="text-white font-bold text-xs uppercase">Selos dos membros</h4>
+                          {members.filter(m => m.active).slice(0, 12).map(m => {
+                            const stamps = m.points || 0;
+                            const need = program.stampsRequired || 10;
+                            return (
+                              <div key={m.id} className="flex items-center justify-between gap-2 bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2">
+                                <div className="min-w-0">
+                                  <p className="text-white text-sm font-bold truncate">{m.name}</p>
+                                  <p className="text-[11px] text-zinc-500">
+                                    {Array.from({ length: need }).map((_, i) => (
+                                      <span key={i} className={i < stamps ? '' : 'opacity-25'}>🍔</span>
+                                    ))}
+                                    <span className="ml-1">{stamps}/{need}</span>
+                                  </p>
+                                </div>
+                                <button
+                                  type="button"
+                                  className="shrink-0 h-8 px-2.5 rounded-lg bg-amber-500/15 text-amber-400 text-[10px] font-black uppercase"
+                                  onClick={async () => {
+                                    const res = await addClubeStamp(m.id, need);
+                                    setMembers(prev => prev.map(x => x.id === res.member.id ? res.member : x));
+                                    if (res.rewardUnlocked) alert(`Recompensa liberada para ${m.name}: ${program.stampRewardTitle}`);
+                                  }}
+                                >
+                                  + Selo
+                                </button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   <Button onClick={() => openCreate({ title: '', description: '', pointsCost: '', active: true })}
                     className="w-full h-11 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold rounded-xl">
-                    <Plus size={16} className="mr-2" /> Nova Recompensa
+                    <Plus size={16} className="mr-2" /> Nova Recompensa (pontos)
                   </Button>
                   {showForm && (
                     <div className="bg-zinc-900 border border-amber-500/30 rounded-2xl p-5 space-y-4">
@@ -469,6 +584,25 @@ export default function ClubeBurger() {
               {/* ── Cashback ── */}
               {tab === 'cashback' && cashback && (
                 <>
+                  {program && (
+                    <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 flex items-center justify-between">
+                      <div>
+                        <h3 className="text-white font-bold uppercase text-sm">Cashback</h3>
+                        <p className="text-zinc-500 text-xs">Disponível em compras futuras</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          const next = await updateClubeProgram({ ...program, cashbackEnabled: !program.cashbackEnabled });
+                          setProgram(next);
+                        }}
+                        className={program.cashbackEnabled ? 'text-green-400' : 'text-zinc-600'}
+                        title="Ativar / Desativar Cashback"
+                      >
+                        {program.cashbackEnabled ? <ToggleRight size={30} /> : <ToggleLeft size={30} />}
+                      </button>
+                    </div>
+                  )}
                   <div className="grid grid-cols-2 gap-3">
                     <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 text-center">
                       <p className="text-2xl font-black text-amber-500">{parseFloat(cashback.cashbackPercent).toFixed(0)}%</p>
@@ -483,6 +617,29 @@ export default function ClubeBurger() {
                     <h3 className="text-white font-bold uppercase text-sm flex items-center gap-2">
                       <Wallet size={16} className="text-amber-500" /> Regras de Cashback
                     </h3>
+                    <div className="space-y-1.5">
+                      <Label className="text-zinc-400 text-xs">Atalhos de porcentagem</Label>
+                      <div className="flex gap-2">
+                        {[5, 10, 15].map((pct) => (
+                          <button
+                            key={pct}
+                            type="button"
+                            onClick={() => setForm(f => ({
+                              ...f,
+                              cashbackPercent: String(pct),
+                              cashbackMinOrder: f.cashbackMinOrder ?? cashback.cashbackMinOrder,
+                            }))}
+                            className={`flex-1 h-10 rounded-xl text-sm font-bold ${
+                              String(form.cashbackPercent ?? cashback.cashbackPercent) === String(pct)
+                                ? 'bg-amber-500 text-zinc-950'
+                                : 'bg-zinc-950 border border-zinc-800 text-zinc-400'
+                            }`}
+                          >
+                            {pct}%
+                          </button>
+                        ))}
+                      </div>
+                    </div>
                     <div className="space-y-1.5">
                       <Label className="text-zinc-400 text-xs">Percentual de cashback (%)</Label>
                       <Input type="number" value={String(form.cashbackPercent ?? cashback.cashbackPercent)}

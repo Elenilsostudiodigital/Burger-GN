@@ -10,6 +10,7 @@ import {
 } from "@workspace/db";
 import { eq, and, sql, desc } from "drizzle-orm";
 import { requireCompanyAuth } from "../middlewares/auth";
+import { parseClientNotes, serializeClientNotes } from "../lib/clientMeta";
 
 const router = Router();
 
@@ -223,7 +224,7 @@ router.post("/admin/clube/members", requireCompanyAuth, async (req, res) => {
         cashbackBalance: body.cashbackBalance ?? "0",
         tier: body.tier ?? "bronze",
         active: body.active ?? true,
-        notes: body.notes ?? "",
+        notes: serializeClientNotes(body.notes ?? "", { origin: "sistema_burger_gn" }),
       })
       .returning();
     res.status(201).json(member);
@@ -256,6 +257,23 @@ router.put("/admin/clube/members/:id", requireCompanyAuth, async (req, res) => {
     if (body.phone !== undefined) updateData["phone"] = body.phone.trim();
     if (body.name !== undefined) updateData["name"] = body.name.trim();
     if (body.birthDate !== undefined) updateData["birthDate"] = body.birthDate || null;
+
+    // Preserve client origin meta embedded in notes (Clientes module).
+    if (body.notes !== undefined) {
+      const [existing] = await db
+        .select()
+        .from(clubeMembersTable)
+        .where(
+          and(
+            eq(clubeMembersTable.id, id),
+            eq(clubeMembersTable.companyId, req.companyId!),
+          ),
+        );
+      if (existing) {
+        const { meta } = parseClientNotes(existing.notes);
+        updateData["notes"] = serializeClientNotes(String(body.notes || ""), meta);
+      }
+    }
 
     const [member] = await db
       .update(clubeMembersTable)
@@ -442,6 +460,87 @@ router.put("/admin/clube/cashback", requireCompanyAuth, async (req, res) => {
     res.json(settings);
   } catch (err) {
     req.log.error({ err }, "Failed to update cashback settings");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+/** Add one fidelity stamp (uses member.points as stamp count). Does not touch orders/checkout. */
+router.post("/admin/clube/members/:id/add-stamp", requireCompanyAuth, async (req, res) => {
+  try {
+    const id = Number(req.params["id"]);
+    const stampsRequired = Math.max(1, Math.min(50, Number(req.body?.stampsRequired) || 10));
+    const [member] = await db
+      .select()
+      .from(clubeMembersTable)
+      .where(and(eq(clubeMembersTable.id, id), eq(clubeMembersTable.companyId, req.companyId!)));
+    if (!member) {
+      res.status(404).json({ error: "Membro não encontrado" });
+      return;
+    }
+
+    let stamps = (member.points || 0) + 1;
+    let rewardUnlocked = false;
+    const { publicNotes, meta } = parseClientNotes(member.notes);
+    let nextPublic = publicNotes;
+    if (stamps >= stampsRequired) {
+      rewardUnlocked = true;
+      stamps = 0;
+      const stamp = new Date().toISOString();
+      nextPublic = `${nextPublic}${nextPublic ? "\n" : ""}[RECOMPENSA ${stamp}] Selos completos — recompensa liberada.`;
+    }
+
+    const [updated] = await db
+      .update(clubeMembersTable)
+      .set({ points: stamps, notes: serializeClientNotes(nextPublic, meta) })
+      .where(and(eq(clubeMembersTable.id, id), eq(clubeMembersTable.companyId, req.companyId!)))
+      .returning();
+
+    res.json({ member: updated, stamps: updated.points, stampsRequired, rewardUnlocked });
+  } catch (err) {
+    req.log.error({ err }, "Failed to add fidelity stamp");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+/** Credit cashback balance from an order total (admin-triggered; no checkout changes). */
+router.post("/admin/clube/members/:id/add-cashback", requireCompanyAuth, async (req, res) => {
+  try {
+    const id = Number(req.params["id"]);
+    const orderTotal = Number(req.body?.orderTotal);
+    if (!Number.isFinite(orderTotal) || orderTotal <= 0) {
+      res.status(400).json({ error: "orderTotal inválido" });
+      return;
+    }
+
+    const settings = await ensureSettings(req.companyId!);
+    const percent = parseFloat(String(settings.cashbackPercent)) || 0;
+    const minOrder = parseFloat(String(settings.cashbackMinOrder)) || 0;
+    if (orderTotal < minOrder) {
+      res.status(400).json({ error: `Pedido mínimo para cashback: R$ ${minOrder.toFixed(2)}` });
+      return;
+    }
+
+    const credit = Math.round((orderTotal * percent) / 100 * 100) / 100;
+    const [member] = await db
+      .select()
+      .from(clubeMembersTable)
+      .where(and(eq(clubeMembersTable.id, id), eq(clubeMembersTable.companyId, req.companyId!)));
+    if (!member) {
+      res.status(404).json({ error: "Membro não encontrado" });
+      return;
+    }
+
+    const current = parseFloat(String(member.cashbackBalance)) || 0;
+    const next = (current + credit).toFixed(2);
+    const [updated] = await db
+      .update(clubeMembersTable)
+      .set({ cashbackBalance: next })
+      .where(and(eq(clubeMembersTable.id, id), eq(clubeMembersTable.companyId, req.companyId!)))
+      .returning();
+
+    res.json({ member: updated, credited: credit, percent });
+  } catch (err) {
+    req.log.error({ err }, "Failed to add cashback");
     res.status(500).json({ error: "Internal server error" });
   }
 });

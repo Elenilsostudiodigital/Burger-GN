@@ -5,6 +5,15 @@ import { eq, asc, and } from "drizzle-orm";
 import { requireCompanyAuth } from "../middlewares/auth";
 import { resolvePublicCompany } from "../middlewares/company";
 import { decodePixSettings, decodeGatewayConfig, encodePixSettings } from "../lib/staticPix";
+import {
+  decodePlatformExtras,
+  patchPlatformExtras,
+  evaluateStoreOpen,
+  type StoreHoursConfig,
+  type BannerItem,
+  type PrintPrefs,
+  type ClubeProgramExtras,
+} from "../lib/platformExtras";
 
 const router = Router();
 const DEFAULT_WHATSAPP_NUMBER = "5571996981707";
@@ -143,6 +152,7 @@ router.put("/admin/payment-settings", requireCompanyAuth, async (req, res) => {
         body.pixMerchantCity ?? existingCfg.city,
         body.prepTimeMin ?? existingCfg.prepTimeMin,
         body.prepTimeMax ?? existingCfg.prepTimeMax,
+        settings.gatewayProvider,
       );
     } else if (body.gatewayProvider !== undefined) {
       patch["gatewayProvider"] = body.gatewayProvider;
@@ -255,6 +265,189 @@ router.delete("/admin/external-links/:id", requireCompanyAuth, async (req, res) 
     res.json({ ok: true });
   } catch (err) {
     req.log.error({ err }, "Failed to delete external link");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ── Platform extras (store hours / banners / print / clube program) ───────────
+// Stored inside payment_settings.gatewayProvider.platform — no schema changes.
+
+async function savePlatformPatch(
+  companyId: number,
+  patch: Parameters<typeof patchPlatformExtras>[1],
+) {
+  const settings = await getOrCreatePaymentSettings(companyId);
+  const next = patchPlatformExtras(settings.gatewayProvider, patch);
+  const [updated] = await db
+    .update(paymentSettingsTable)
+    .set({ gatewayProvider: next, updatedAt: new Date() })
+    .where(and(eq(paymentSettingsTable.id, settings.id), eq(paymentSettingsTable.companyId, companyId)))
+    .returning();
+  return decodePlatformExtras(updated.gatewayProvider);
+}
+
+router.get("/store-hours", resolvePublicCompany, async (req, res) => {
+  try {
+    const settings = await getOrCreatePaymentSettings(req.companyId!);
+    const extras = decodePlatformExtras(settings.gatewayProvider);
+    const status = evaluateStoreOpen(extras.storeHours);
+    res.json({
+      ...extras.storeHours,
+      isOpen: status.isOpen,
+      statusReason: status.reason,
+    });
+  } catch (err) {
+    req.log.error({ err }, "Failed to get store hours");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.get("/admin/store-hours", requireCompanyAuth, async (req, res) => {
+  try {
+    const settings = await getOrCreatePaymentSettings(req.companyId!);
+    const extras = decodePlatformExtras(settings.gatewayProvider);
+    const status = evaluateStoreOpen(extras.storeHours);
+    res.json({
+      ...extras.storeHours,
+      isOpen: status.isOpen,
+      statusReason: status.reason,
+    });
+  } catch (err) {
+    req.log.error({ err }, "Failed to get admin store hours");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.put("/admin/store-hours", requireCompanyAuth, async (req, res) => {
+  try {
+    const body = req.body as Partial<StoreHoursConfig>;
+    const extras = await savePlatformPatch(req.companyId!, {
+      storeHours: {
+        openTime: body.openTime ?? "18:00",
+        closeTime: body.closeTime ?? "23:30",
+        days: Array.isArray(body.days) ? body.days : [0, 1, 2, 3, 4, 5, 6],
+        forceClosed: Boolean(body.forceClosed),
+        forceOpen: Boolean(body.forceOpen),
+      },
+    });
+    const status = evaluateStoreOpen(extras.storeHours);
+    res.json({
+      ...extras.storeHours,
+      isOpen: status.isOpen,
+      statusReason: status.reason,
+    });
+  } catch (err) {
+    req.log.error({ err }, "Failed to update store hours");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.get("/banners", resolvePublicCompany, async (req, res) => {
+  try {
+    const settings = await getOrCreatePaymentSettings(req.companyId!);
+    const extras = decodePlatformExtras(settings.gatewayProvider);
+    res.json(extras.banners.filter((b) => b.active).sort((a, b) => a.order - b.order));
+  } catch (err) {
+    req.log.error({ err }, "Failed to get banners");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.get("/admin/banners", requireCompanyAuth, async (req, res) => {
+  try {
+    const settings = await getOrCreatePaymentSettings(req.companyId!);
+    const extras = decodePlatformExtras(settings.gatewayProvider);
+    res.json(extras.banners.sort((a, b) => a.order - b.order));
+  } catch (err) {
+    req.log.error({ err }, "Failed to get admin banners");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.put("/admin/banners", requireCompanyAuth, async (req, res) => {
+  try {
+    const body = req.body as { banners?: BannerItem[] };
+    if (!Array.isArray(body.banners)) {
+      res.status(400).json({ error: "banners array is required" });
+      return;
+    }
+    const extras = await savePlatformPatch(req.companyId!, { banners: body.banners });
+    res.json(extras.banners.sort((a, b) => a.order - b.order));
+  } catch (err) {
+    req.log.error({ err }, "Failed to update banners");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.get("/admin/print-prefs", requireCompanyAuth, async (req, res) => {
+  try {
+    const settings = await getOrCreatePaymentSettings(req.companyId!);
+    const extras = decodePlatformExtras(settings.gatewayProvider);
+    res.json(extras.printPrefs);
+  } catch (err) {
+    req.log.error({ err }, "Failed to get print prefs");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.put("/admin/print-prefs", requireCompanyAuth, async (req, res) => {
+  try {
+    const body = req.body as Partial<PrintPrefs>;
+    const extras = await savePlatformPatch(req.companyId!, {
+      printPrefs: {
+        autoPrintOnAccept: Boolean(body.autoPrintOnAccept),
+        autoPrintOnPaid: Boolean(body.autoPrintOnPaid),
+        autoPrintOnDone: Boolean(body.autoPrintOnDone),
+        connectionType: body.connectionType ?? "usb",
+        selectedPrinterId: body.selectedPrinterId ?? "",
+        selectedPrinterName: body.selectedPrinterName ?? "",
+        networkAddress: body.networkAddress ?? "",
+      },
+    });
+    res.json(extras.printPrefs);
+  } catch (err) {
+    req.log.error({ err }, "Failed to update print prefs");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.get("/clube-program", resolvePublicCompany, async (req, res) => {
+  try {
+    const settings = await getOrCreatePaymentSettings(req.companyId!);
+    const extras = decodePlatformExtras(settings.gatewayProvider);
+    res.json(extras.clubeProgram);
+  } catch (err) {
+    req.log.error({ err }, "Failed to get clube program");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.get("/admin/clube-program", requireCompanyAuth, async (req, res) => {
+  try {
+    const settings = await getOrCreatePaymentSettings(req.companyId!);
+    const extras = decodePlatformExtras(settings.gatewayProvider);
+    res.json(extras.clubeProgram);
+  } catch (err) {
+    req.log.error({ err }, "Failed to get admin clube program");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.put("/admin/clube-program", requireCompanyAuth, async (req, res) => {
+  try {
+    const body = req.body as Partial<ClubeProgramExtras>;
+    const extras = await savePlatformPatch(req.companyId!, {
+      clubeProgram: {
+        cashbackEnabled: body.cashbackEnabled !== false,
+        fidelityEnabled: body.fidelityEnabled !== false,
+        stampsRequired: Number(body.stampsRequired) || 10,
+        stampRewardTitle: body.stampRewardTitle ?? "Hambúrguer grátis",
+        stampRewardDescription: body.stampRewardDescription ?? "",
+      },
+    });
+    res.json(extras.clubeProgram);
+  } catch (err) {
+    req.log.error({ err }, "Failed to update clube program");
     res.status(500).json({ error: "Internal server error" });
   }
 });

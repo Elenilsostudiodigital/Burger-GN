@@ -12,6 +12,7 @@ import importRouter from "./import";
 import paymentsRouter from "./payments";
 import financialRouter from "./financial";
 import clubeRouter from "./clube";
+import clientesRouter from "./clientes";
 
 const router: IRouter = Router();
 
@@ -28,5 +29,6 @@ router.use(importRouter);
 router.use(paymentsRouter);
 router.use(financialRouter);
 router.use(clubeRouter);
+router.use(clientesRouter);
 
 export default router;

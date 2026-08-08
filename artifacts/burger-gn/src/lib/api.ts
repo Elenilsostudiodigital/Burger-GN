@@ -222,6 +222,8 @@ export interface OrderReview {
   orderNumber: number;
 }
 
+export type ReviewModerationStatus = "pending" | "approved" | "hidden";
+
 export interface AdminReviewRow {
   orderId: number;
   orderNumber: number;
@@ -233,6 +235,19 @@ export interface AdminReviewRow {
   deliveredOk: boolean;
   createdAt: string;
   orderCreatedAt: string;
+  status?: ReviewModerationStatus;
+}
+
+export interface AdminReviewsResponse {
+  average: number;
+  count: number;
+  reviews: AdminReviewRow[];
+}
+
+export interface PublicReviewsResponse {
+  average: number;
+  count: number;
+  reviews: Array<{ customerName: string; stars: number; comment: string; createdAt: string }>;
 }
 export interface CreateOrderPayload {
   customerName: string; phone: string;
@@ -266,7 +281,24 @@ export const submitOrderReview = (
   trackingId: string,
   d: { deliveredOk: boolean; stars?: number; comment?: string },
 ) => api.post(`/orders/track/${trackingId}/review`, d) as Promise<Order & { alreadyReviewed?: boolean }>;
-export const getAdminReviews = () => api.get("/admin/reviews") as Promise<AdminReviewRow[]>;
+export const getAdminReviews = async (): Promise<AdminReviewsResponse> => {
+  const data = await api.get("/admin/reviews");
+  // Backward-compatible: older servers returned a bare array.
+  if (Array.isArray(data)) {
+    const reviews = data as AdminReviewRow[];
+    const withStars = reviews.filter((r) => r.stars > 0);
+    const average = withStars.length
+      ? withStars.reduce((a, r) => a + r.stars, 0) / withStars.length
+      : 0;
+    return { average, count: reviews.length, reviews };
+  }
+  return data as AdminReviewsResponse;
+};
+export const getPublicReviews = () => api.get("/reviews") as Promise<PublicReviewsResponse>;
+export const moderateReview = (orderId: number, status: ReviewModerationStatus) =>
+  api.patch(`/admin/reviews/${orderId}`, { status }) as Promise<AdminReviewRow>;
+export const deleteReview = (orderId: number) =>
+  api.delete(`/admin/reviews/${orderId}`) as Promise<{ ok: boolean }>;
 export const updateOrderPaymentStatus = (
   id: number,
   paymentStatus: PaymentStatus,
@@ -679,3 +711,141 @@ export const updateClubeEarlyPromotion = (id: number, d: Partial<ClubeEarlyPromo
   api.put(`/admin/clube/early-promotions/${id}`, d) as Promise<ClubeEarlyPromotion>;
 export const deleteClubeEarlyPromotion = (id: number) =>
   api.delete(`/admin/clube/early-promotions/${id}`);
+
+export const addClubeStamp = (memberId: number, stampsRequired?: number) =>
+  api.post(`/admin/clube/members/${memberId}/add-stamp`, { stampsRequired }) as Promise<{
+    member: ClubeMember; stamps: number; stampsRequired: number; rewardUnlocked: boolean;
+  }>;
+export const addClubeCashback = (memberId: number, orderTotal: number) =>
+  api.post(`/admin/clube/members/${memberId}/add-cashback`, { orderTotal }) as Promise<{
+    member: ClubeMember; credited: number; percent: number;
+  }>;
+
+// ── Platform extras (store hours / banners / printer / clube program) ─────────
+export type BannerType = "mais_vendidos" | "combos" | "promocoes" | "novidades";
+
+export interface StoreHours {
+  openTime: string;
+  closeTime: string;
+  days: number[];
+  forceClosed: boolean;
+  forceOpen: boolean;
+  isOpen?: boolean;
+  statusReason?: string;
+}
+
+export interface BannerItem {
+  id: string;
+  title: string;
+  subtitle: string;
+  imageUrl: string;
+  type: BannerType;
+  active: boolean;
+  order: number;
+  link: string;
+}
+
+export interface PrintPrefs {
+  autoPrintOnAccept: boolean;
+  autoPrintOnPaid: boolean;
+  autoPrintOnDone: boolean;
+  connectionType: "usb" | "bluetooth" | "network";
+  selectedPrinterId: string;
+  selectedPrinterName: string;
+  networkAddress: string;
+}
+
+export interface ClubeProgram {
+  cashbackEnabled: boolean;
+  fidelityEnabled: boolean;
+  stampsRequired: number;
+  stampRewardTitle: string;
+  stampRewardDescription: string;
+}
+
+export const getStoreHours = () => api.get("/store-hours") as Promise<StoreHours>;
+export const getAdminStoreHours = () => api.get("/admin/store-hours") as Promise<StoreHours>;
+export const updateStoreHours = (d: Partial<StoreHours>) =>
+  api.put("/admin/store-hours", d) as Promise<StoreHours>;
+
+export const getBanners = () => api.get("/banners") as Promise<BannerItem[]>;
+export const getAdminBanners = () => api.get("/admin/banners") as Promise<BannerItem[]>;
+export const updateBanners = (banners: BannerItem[]) =>
+  api.put("/admin/banners", { banners }) as Promise<BannerItem[]>;
+
+export const getPrintPrefs = () => api.get("/admin/print-prefs") as Promise<PrintPrefs>;
+export const updatePrintPrefs = (d: Partial<PrintPrefs>) =>
+  api.put("/admin/print-prefs", d) as Promise<PrintPrefs>;
+
+export const getClubeProgram = () => api.get("/clube-program") as Promise<ClubeProgram>;
+export const getAdminClubeProgram = () => api.get("/admin/clube-program") as Promise<ClubeProgram>;
+export const updateClubeProgram = (d: Partial<ClubeProgram>) =>
+  api.put("/admin/clube-program", d) as Promise<ClubeProgram>;
+
+// ── Clientes (Clube members — lista + importação manual) ─────────────────────
+export type ClientOrigin = "manual" | "sistema_burger_gn" | "importado";
+
+export const CLIENT_ORIGIN_OPTIONS: { id: ClientOrigin; label: string }[] = [
+  { id: "manual", label: "Manual" },
+  { id: "sistema_burger_gn", label: "Sistema Burger GN" },
+  { id: "importado", label: "Importado" },
+];
+
+export interface ClubClient {
+  id: number;
+  name: string;
+  phone: string;
+  stamps: number;
+  cashbackBalance: string;
+  origin: ClientOrigin;
+  notes: string;
+  joinedAt: string;
+  createdAt: string;
+  active: boolean;
+}
+
+export interface ClientsListResponse {
+  count: number;
+  origins: Record<ClientOrigin, string>;
+  clients: ClubClient[];
+}
+
+export const getClients = (opts?: { q?: string; origin?: string }) => {
+  const params = new URLSearchParams();
+  if (opts?.q) params.set("q", opts.q);
+  if (opts?.origin) params.set("origin", opts.origin);
+  const qs = params.toString();
+  return api.get(`/admin/clientes${qs ? `?${qs}` : ""}`) as Promise<ClientsListResponse>;
+};
+
+export const createClient = (d: {
+  name: string;
+  phone: string;
+  stamps?: number;
+  cashbackBalance?: number | string;
+  origin?: ClientOrigin;
+  notes?: string;
+}) => api.post("/admin/clientes", d) as Promise<ClubClient>;
+
+export const updateClient = (id: number, d: Partial<{
+  name: string;
+  phone: string;
+  stamps: number;
+  cashbackBalance: number | string;
+  origin: ClientOrigin;
+  notes: string;
+  active: boolean;
+}>) => api.put(`/admin/clientes/${id}`, d) as Promise<ClubClient>;
+
+export const deleteClient = (id: number) =>
+  api.delete(`/admin/clientes/${id}`) as Promise<{ ok: boolean }>;
+
+export const adjustClientStamps = (id: number, delta: 1 | -1) =>
+  api.post(`/admin/clientes/${id}/stamps`, { delta }) as Promise<{
+    client: ClubClient; rewardUnlocked: boolean; stampsRequired: number;
+  }>;
+
+export const adjustClientCashback = (id: number, amount: number) =>
+  api.post(`/admin/clientes/${id}/cashback`, { amount }) as Promise<{
+    client: ClubClient; previous: number; next: number;
+  }>;

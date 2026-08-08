@@ -154,23 +154,39 @@ function clampPrep(min: number, max: number): { prepTimeMin: number; prepTimeMax
   return { prepTimeMin, prepTimeMax };
 }
 
-/** Encode PIX + prep-time into existing payment_settings.gatewayProvider without schema changes. */
+/** Encode PIX + prep-time into existing payment_settings.gatewayProvider without schema changes.
+ *  Preserves nested `platform` extras (store hours, banners, print prefs, clube program).
+ */
 export function encodePixSettings(
   pixKey: string,
   merchantName: string,
   merchantCity: string,
   prepTimeMin = DEFAULT_PREP_MIN,
   prepTimeMax = DEFAULT_PREP_MAX,
+  existingGatewayProvider?: string | null,
 ): string {
   const prep = clampPrep(prepTimeMin, prepTimeMax);
-  return JSON.stringify({
+  let platform: unknown;
+  if (existingGatewayProvider) {
+    try {
+      const parsed = JSON.parse(existingGatewayProvider) as { platform?: unknown };
+      if (parsed && typeof parsed === "object" && parsed.platform) {
+        platform = parsed.platform;
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+  const payload: Record<string, unknown> = {
     mode: "static_pix",
     key: pixKey.trim(),
     name: merchantName.trim() || "THE BURGER GN",
     city: merchantCity.trim() || "LAURO DE FREITAS",
     prepTimeMin: prep.prepTimeMin,
     prepTimeMax: prep.prepTimeMax,
-  });
+  };
+  if (platform !== undefined) payload.platform = platform;
+  return JSON.stringify(payload);
 }
 
 export function decodeGatewayConfig(gatewayProvider: string | null | undefined): GatewayStoreConfig {

@@ -4,11 +4,12 @@ import { useCart } from '../context/CartContext';
 import { PageTransition } from '../components/PageTransition';
 import {
   createOrder, validateCoupon, getDeliveryZones, getDeliveryFee, getKmDeliveryConfig,
-  geocodeAddress, reverseGeocode, haversineKm, findKmTier, getPaymentSettings,
+  geocodeAddress, reverseGeocode, haversineKm, findKmTier, getPaymentSettings, getStoreHours,
   WHATSAPP_EXTERNAL_ENABLED, ValidateCouponResult, DeliveryZone, KmDeliveryConfig, PaymentSettingsPublic,
 } from '../lib/api';
 import { saveMyOrder } from '../lib/myOrder';
 import { ErrorBoundary } from '../components/ErrorBoundary';
+import { StoreClosedBanner } from '../components/StoreClosedBanner';
 import {
   ArrowLeft, Bike, Store, Utensils, CreditCard, Banknote, QrCode,
   Loader2, Tag, X, CheckCircle2, MapPin, AlertCircle, ChevronDown, LocateFixed, Navigation, Home,
@@ -431,6 +432,14 @@ export default function Checkout() {
     if (cartItems.length === 0) { setLocation('/cardapio'); return; }
     if (!orderType) { setStep('fulfillment'); return; }
 
+    try {
+      const hours = await getStoreHours();
+      if (hours && hours.isOpen === false) {
+        setSubmitError('A loja está fechada no momento. Você pode navegar no cardápio, mas novos pedidos estão indisponíveis.');
+        return;
+      }
+    } catch { /* if hours API fails, allow order (fail-open) */ }
+
     if (orderType !== 'local') {
       const phoneDigits = form.telefone.replace(/\D/g, '');
       if (!form.nome.trim() || phoneDigits.length < 10) {
@@ -643,6 +652,8 @@ export default function Checkout() {
           </div>
         </div>
       </header>
+
+      <StoreClosedBanner compact />
 
       <main className="max-w-md mx-auto px-4 py-6 pb-36">
         <AnimatePresence mode="wait">

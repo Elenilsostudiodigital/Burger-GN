@@ -10,14 +10,16 @@ import {
   getOrders, updateOrderWorkflow, updateOrderPaymentStatus,
   openCustomerWhatsapp, buildCustomerNotifyMessage, WHATSAPP_EXTERNAL_ENABLED,
   REJECT_REASON_SUGGESTIONS, RECEIPT_REJECT_SUGGESTIONS,
+  getPrintPrefs,
   Order, WorkflowStage,
   ORDER_TYPE_LABELS, PAYMENT_METHOD_LABELS, PAYMENT_STATUS_LABELS, CARD_TYPE_LABELS, WORKFLOW_LABELS,
 } from '../../lib/api';
+import { buildOrderReceiptHTML, printHtml } from '../../lib/printer';
 import {
   LayoutDashboard, UtensilsCrossed, LogOut, Bell, BellOff,
   Printer, Clock, MessageCircle, History,
   XCircle, Tag, MapPin, Navigation, Settings, Route, Upload, TrendingUp,
-  ChevronLeft, ChevronRight, GripVertical, X, Crown, Filter, ImageIcon, CheckCircle2, Check, Ban, Star,
+  ChevronLeft, ChevronRight, GripVertical, X, Crown, Filter, ImageIcon, CheckCircle2, Check, Ban, Star, Users,
 } from 'lucide-react';
 
 /** Board columns — pending orders never auto-advance. */
@@ -126,35 +128,29 @@ function notifyCustomer(
 }
 
 function buildReceiptHTML(order: Order): string {
-  const items = order.items.map(i =>
-    `<tr><td>${i.quantity}x ${i.productName}</td><td style="text-align:right">${fmt(i.subtotal)}</td></tr>`
-  ).join('');
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Pedido #${order.orderNumber}</title>
-  <style>
-    body { font-family: monospace; font-size: 12px; max-width: 300px; margin: 0 auto; padding: 10px; }
-    h1 { text-align: center; font-size: 14px; border-bottom: 1px dashed #000; padding-bottom: 6px; }
-    table { width: 100%; border-collapse: collapse; margin: 8px 0; }
-    td { padding: 2px 0; }
-    .total { font-weight: bold; border-top: 1px dashed #000; padding-top: 4px; }
-  </style></head><body>
-  <h1>THE BURGER GN<br>Pedido #${order.orderNumber}</h1>
-  <p><b>Cliente:</b> ${order.customerName}<br>
-  <b>Tel:</b> ${order.phone}<br>
-  <b>Tipo:</b> ${ORDER_TYPE_LABELS[order.orderType]}<br>
-  ${order.orderType === 'delivery' ? `<b>End.:</b> ${order.address}, ${order.neighborhood}<br>` : ''}
-  <b>Pagamento:</b> ${PAYMENT_METHOD_LABELS[order.paymentMethod]}
-  ${order.cardType ? ` (${CARD_TYPE_LABELS[order.cardType]})` : ''}
-  ${order.changeFor ? ` (troco p/ ${fmt(order.changeFor)})` : ''}</p>
-  <table>${items}</table>
-  <table class="total">
-    <tr><td>Subtotal</td><td style="text-align:right">${fmt(order.subtotal)}</td></tr>
-    <tr><td>Entrega</td><td style="text-align:right">${parseFloat(order.deliveryFee) > 0 ? fmt(order.deliveryFee) : 'Grátis'}</td></tr>
-    ${parseFloat(order.discountAmount) > 0 ? `<tr><td>Desconto</td><td style="text-align:right">-${fmt(order.discountAmount)}</td></tr>` : ''}
-    <tr><td><b>TOTAL</b></td><td style="text-align:right"><b>${fmt(order.total)}</b></td></tr>
-  </table>
-  ${order.notes ? `<p><b>Obs.:</b> ${order.notes}</p>` : ''}
-  <script>window.onload=()=>{window.print();window.close();}</script>
-  </body></html>`;
+  const paymentLabel = `${PAYMENT_METHOD_LABELS[order.paymentMethod]}${
+    order.cardType ? ` (${CARD_TYPE_LABELS[order.cardType]})` : ''
+  }${order.changeFor ? ` (troco p/ ${fmt(order.changeFor)})` : ''}`;
+  return buildOrderReceiptHTML({
+    orderNumber: order.orderNumber,
+    customerName: order.customerName,
+    phone: order.phone,
+    address: order.address,
+    neighborhood: order.neighborhood,
+    paymentMethod: `${ORDER_TYPE_LABELS[order.orderType]} · ${paymentLabel}`,
+    notes: order.notes,
+    createdAt: order.createdAt,
+    items: order.items,
+    subtotal: order.subtotal,
+    deliveryFee: order.deliveryFee,
+    discountAmount: order.discountAmount,
+    total: order.total,
+    orderType: order.orderType,
+  });
+}
+
+function printOrder(order: Order) {
+  printHtml(buildReceiptHTML(order));
 }
 
 function OrderCard({ order, highlight, dragging, onAccept, onRefuse, onAdvance, onBack, onConfirmPayment, onRefuseReceipt }: {
@@ -369,13 +365,10 @@ function OrderCard({ order, highlight, dragging, onAccept, onRefuse, onAdvance, 
               <MessageCircle size={15} />
             </button>
           )}
-          <button onClick={() => {
-            const win = window.open('', '_blank', 'width=350,height=600');
-            if (!win) return;
-            win.document.write(buildReceiptHTML(order));
-            win.document.close();
-          }} className="p-2 text-zinc-500 hover:text-white bg-zinc-800 rounded-lg" title="Imprimir">
-            <Printer size={15} />
+          <button onClick={() => printOrder(order)}
+            className="h-9 px-2.5 text-amber-400 hover:text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded-lg text-[10px] font-black uppercase tracking-wide flex items-center gap-1.5"
+            title="Imprimir Pedido">
+            <Printer size={14} /> Imprimir Pedido
           </button>
           <button onClick={() => setShowHistory(v => !v)}
             className={`p-2 rounded-lg transition-colors ${showHistory ? 'text-amber-500 bg-amber-500/10' : 'text-zinc-500 hover:text-white bg-zinc-800'}`}
@@ -412,12 +405,8 @@ function OrderCard({ order, highlight, dragging, onAccept, onRefuse, onAdvance, 
               <MessageCircle size={15} />
             </button>
           )}
-          <button onClick={() => {
-            const win = window.open('', '_blank', 'width=350,height=600');
-            if (!win) return;
-            win.document.write(buildReceiptHTML(order));
-            win.document.close();
-          }} className="p-2 text-zinc-500 hover:text-white bg-zinc-800 rounded-lg" title="Imprimir">
+          <button onClick={() => printOrder(order)}
+            className="p-2 text-zinc-500 hover:text-white bg-zinc-800 rounded-lg" title="Imprimir Pedido">
             <Printer size={15} />
           </button>
           <button onClick={() => setShowHistory(v => !v)}
@@ -595,6 +584,11 @@ export default function AdminDashboard() {
       const updated = await updateOrderWorkflow(order.id, 'preparing');
       applyUpdated(order.id, updated);
       notifyCustomer(order, 'preparing', null, updated.customerNotifyMessage);
+      // Auto-print is OFF by default — only runs when admin enables it in Config > Impressora.
+      try {
+        const prefs = await getPrintPrefs();
+        if (prefs.autoPrintOnAccept) printOrder({ ...order, ...updated, items: updated.items?.length ? updated.items : order.items });
+      } catch { /* ignore print prefs errors */ }
     } catch (err) {
       setNotification(err instanceof Error ? err.message : 'Não foi possível aceitar o pedido.');
       setTimeout(() => setNotification(null), 4000);
@@ -609,6 +603,10 @@ export default function AdminDashboard() {
       notifyCustomer(order, 'payment_confirmed', null, updated.customerNotifyMessage);
       setNotification(`Pagamento confirmado — pedido #${order.orderNumber} na fila Pendente`);
       setTimeout(() => setNotification(null), 5000);
+      try {
+        const prefs = await getPrintPrefs();
+        if (prefs.autoPrintOnPaid) printOrder({ ...order, ...updated, items: updated.items?.length ? updated.items : order.items });
+      } catch { /* ignore */ }
     } catch (err) {
       setNotification(err instanceof Error ? err.message : 'Erro ao confirmar pagamento');
       setTimeout(() => setNotification(null), 4000);
@@ -652,6 +650,12 @@ export default function AdminDashboard() {
       const updated = await updateOrderWorkflow(order.id, workflow);
       applyUpdated(order.id, updated);
       notifyCustomer(order, workflow, null, updated.customerNotifyMessage);
+      if (workflow === 'done') {
+        try {
+          const prefs = await getPrintPrefs();
+          if (prefs.autoPrintOnDone) printOrder({ ...order, ...updated, items: updated.items?.length ? updated.items : order.items });
+        } catch { /* ignore */ }
+      }
     } catch {
       fetchOrders();
     }
@@ -990,6 +994,7 @@ export default function AdminDashboard() {
         <div className="max-w-[1800px] mx-auto flex overflow-x-auto no-scrollbar">
           {[
             { href: '/admin', icon: LayoutDashboard, label: 'Pedidos', active: true },
+            { href: '/admin/clientes', icon: Users, label: 'Clientes', active: false },
             { href: '/admin/avaliacoes', icon: Star, label: 'Avaliações', active: false },
             { href: '/admin/cardapio', icon: UtensilsCrossed, label: 'Cardápio' },
             { href: '/admin/financeiro', icon: TrendingUp, label: 'Financeiro' },

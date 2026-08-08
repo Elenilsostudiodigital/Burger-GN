@@ -16,12 +16,16 @@ export interface StatusHistoryEntry {
   at: string;
 }
 
+export type ReviewModerationStatus = "pending" | "approved" | "hidden";
+
 export interface OrderReview {
   stars: number;
   comment: string;
   deliveredOk: boolean;
   createdAt: string;
   orderNumber: number;
+  /** Moderation — new reviews start as pending; legacy without status treated as approved. */
+  status?: ReviewModerationStatus;
 }
 
 export interface OrderMeta {
