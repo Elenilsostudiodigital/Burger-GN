@@ -1,12 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useLocation } from 'wouter';
 import {
-  getAdminReviews, AdminReviewRow,
+  getAdminReviews, moderateReview, deleteReview, AdminReviewRow,
 } from '../../lib/api';
 import { useAdmin } from '../../context/AdminContext';
 import {
   LayoutDashboard, UtensilsCrossed, Tag, MapPin, Navigation, Settings,
   LogOut, Loader2, Upload, TrendingUp, Crown, Star, MessageSquareQuote,
+  Check, EyeOff, Trash2,
 } from 'lucide-react';
 
 function AdminNav({ active }: { active: string }) {
@@ -50,22 +51,37 @@ function Stars({ n }: { n: number }) {
   );
 }
 
+const STATUS_LABEL: Record<string, { text: string; className: string }> = {
+  pending: { text: 'Pendente', className: 'text-amber-400 bg-amber-500/10 border-amber-500/20' },
+  approved: { text: 'Aprovada', className: 'text-green-400 bg-green-500/10 border-green-500/20' },
+  hidden: { text: 'Oculta', className: 'text-zinc-400 bg-zinc-800 border-zinc-700' },
+};
+
 export default function AdminReviews() {
   const [, setLocation] = useLocation();
   const { logout } = useAdmin();
   const [reviews, setReviews] = useState<AdminReviewRow[]>([]);
+  const [average, setAverage] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [busyId, setBusyId] = useState<number | null>(null);
+
+  const load = async () => {
+    const data = await getAdminReviews();
+    setReviews(data.reviews);
+    setAverage(data.average);
+  };
 
   useEffect(() => {
-    getAdminReviews()
-      .then(setReviews)
-      .catch(() => setReviews([]))
+    load()
+      .catch(() => { setReviews([]); setAverage(0); })
       .finally(() => setLoading(false));
   }, []);
 
-  const avg = reviews.filter(r => r.stars > 0).length
-    ? (reviews.filter(r => r.stars > 0).reduce((a, r) => a + r.stars, 0) / reviews.filter(r => r.stars > 0).length)
-    : 0;
+  const run = async (orderId: number, fn: () => Promise<void>) => {
+    setBusyId(orderId);
+    try { await fn(); await load(); }
+    finally { setBusyId(null); }
+  };
 
   return (
     <div className="min-h-screen bg-[#0a0a0a] pb-24">
@@ -75,7 +91,7 @@ export default function AdminReviews() {
             <h1 className="text-white font-black uppercase text-base flex items-center gap-2">
               <MessageSquareQuote size={18} className="text-amber-500" /> Avaliações
             </h1>
-            <p className="text-zinc-600 text-xs">Somente administradores</p>
+            <p className="text-zinc-600 text-xs">Aprovar, ocultar ou excluir</p>
           </div>
           <button type="button" onClick={async () => { await logout(); setLocation('/'); }}
             className="p-2 text-zinc-400 hover:text-red-400" title="Sair">
@@ -91,8 +107,8 @@ export default function AdminReviews() {
             <p className="text-amber-500 font-black text-2xl">{reviews.length}</p>
           </div>
           <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
-            <p className="text-zinc-500 text-[10px] uppercase font-bold">Média</p>
-            <p className="text-amber-500 font-black text-2xl">{avg ? avg.toFixed(1) : '—'}</p>
+            <p className="text-zinc-500 text-[10px] uppercase font-bold">Média geral</p>
+            <p className="text-amber-500 font-black text-2xl">{average ? average.toFixed(1) : '—'}</p>
           </div>
         </div>
 
@@ -106,30 +122,65 @@ export default function AdminReviews() {
           </div>
         ) : (
           <div className="space-y-3">
-            {reviews.map(r => (
-              <article key={`${r.orderId}-${r.createdAt}`}
-                className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4 space-y-2">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-amber-500 font-black">#{r.orderNumber}</p>
-                    <p className="text-white font-bold text-sm">{r.customerName}</p>
-                    <p className="text-zinc-600 text-xs">
-                      {new Date(r.createdAt).toLocaleString('pt-BR')}
+            {reviews.map(r => {
+              const status = STATUS_LABEL[r.status || 'approved'] || STATUS_LABEL.pending;
+              return (
+                <article key={`${r.orderId}-${r.createdAt}`}
+                  className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4 space-y-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-amber-500 font-black">#{r.orderNumber}</p>
+                      <p className="text-white font-bold text-sm">{r.customerName}</p>
+                      <p className="text-zinc-600 text-xs">
+                        {new Date(r.createdAt).toLocaleString('pt-BR')}
+                      </p>
+                    </div>
+                    <div className="text-right space-y-1">
+                      {r.deliveredOk ? <Stars n={r.stars} /> : (
+                        <span className="text-red-400 text-[10px] font-black uppercase">Não chegou ok</span>
+                      )}
+                      <span className={`inline-block text-[10px] font-bold uppercase px-2 py-0.5 rounded-full border ${status.className}`}>
+                        {status.text}
+                      </span>
+                    </div>
+                  </div>
+                  {r.comment && (
+                    <p className="text-zinc-300 text-sm bg-zinc-950 rounded-xl px-3 py-2 border border-zinc-800">
+                      “{r.comment}”
                     </p>
+                  )}
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      disabled={busyId === r.orderId}
+                      onClick={() => run(r.orderId, async () => { await moderateReview(r.orderId, 'approved'); })}
+                      className="h-9 px-3 rounded-lg bg-green-500/15 text-green-400 text-xs font-bold uppercase flex items-center gap-1.5 hover:bg-green-500/25"
+                    >
+                      <Check size={14} /> Aprovar
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busyId === r.orderId}
+                      onClick={() => run(r.orderId, async () => { await moderateReview(r.orderId, 'hidden'); })}
+                      className="h-9 px-3 rounded-lg bg-zinc-800 text-zinc-300 text-xs font-bold uppercase flex items-center gap-1.5 hover:bg-zinc-700"
+                    >
+                      <EyeOff size={14} /> Ocultar
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busyId === r.orderId}
+                      onClick={() => {
+                        if (!confirm('Excluir esta avaliação?')) return;
+                        void run(r.orderId, async () => { await deleteReview(r.orderId); });
+                      }}
+                      className="h-9 px-3 rounded-lg bg-red-950/40 text-red-400 text-xs font-bold uppercase flex items-center gap-1.5 hover:bg-red-900/40"
+                    >
+                      <Trash2 size={14} /> Excluir
+                    </button>
                   </div>
-                  <div className="text-right space-y-1">
-                    {r.deliveredOk ? <Stars n={r.stars} /> : (
-                      <span className="text-red-400 text-[10px] font-black uppercase">Não chegou ok</span>
-                    )}
-                  </div>
-                </div>
-                {r.comment && (
-                  <p className="text-zinc-300 text-sm bg-zinc-950 rounded-xl px-3 py-2 border border-zinc-800">
-                    “{r.comment}”
-                  </p>
-                )}
-              </article>
-            ))}
+                </article>
+              );
+            })}
           </div>
         )}
       </main>

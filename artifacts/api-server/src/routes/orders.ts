@@ -543,6 +543,7 @@ router.post("/orders/track/:trackingId/review", async (req, res) => {
       deliveredOk,
       createdAt: new Date().toISOString(),
       orderNumber: existing.orderNumber,
+      status: "pending",
     };
 
     const nextMeta: OrderMeta = { ...meta, review };
@@ -561,6 +562,45 @@ router.post("/orders/track/:trackingId/review", async (req, res) => {
     res.json(enrichOrder(order));
   } catch (err) {
     req.log.error({ err }, "Failed to save review");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+function reviewStatus(review: OrderReview): "pending" | "approved" | "hidden" {
+  return review.status ?? "approved";
+}
+
+// Public: approved reviews for storefront
+router.get("/reviews", resolvePublicCompany, async (req, res) => {
+  try {
+    const orders = await db.select().from(ordersTable)
+      .where(eq(ordersTable.companyId, req.companyId!))
+      .orderBy(desc(ordersTable.createdAt));
+
+    const approved = orders
+      .map((o) => {
+        const enriched = enrichOrder(o);
+        if (!enriched.review || !enriched.review.deliveredOk) return null;
+        if (reviewStatus(enriched.review) !== "approved") return null;
+        if (enriched.review.stars < 1) return null;
+        return {
+          customerName: o.customerName.split(" ")[0] || o.customerName,
+          stars: enriched.review.stars,
+          comment: enriched.review.comment,
+          createdAt: enriched.review.createdAt,
+        };
+      })
+      .filter((r): r is NonNullable<typeof r> => !!r)
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+      .slice(0, 20);
+
+    const avg = approved.length
+      ? approved.reduce((a, r) => a + r.stars, 0) / approved.length
+      : 0;
+
+    res.json({ average: avg, count: approved.length, reviews: approved });
+  } catch (err) {
+    req.log.error({ err }, "Failed to list public reviews");
     res.status(500).json({ error: "Internal server error" });
   }
 });
@@ -587,14 +627,89 @@ router.get("/admin/reviews", requireCompanyAuth, async (req, res) => {
           deliveredOk: enriched.review.deliveredOk,
           createdAt: enriched.review.createdAt,
           orderCreatedAt: o.createdAt,
+          status: reviewStatus(enriched.review),
         };
       })
       .filter((r): r is NonNullable<typeof r> => !!r)
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
-    res.json(reviews);
+    const withStars = reviews.filter((r) => r.stars > 0);
+    const average = withStars.length
+      ? withStars.reduce((a, r) => a + r.stars, 0) / withStars.length
+      : 0;
+
+    res.json({ average, count: reviews.length, reviews });
   } catch (err) {
     req.log.error({ err }, "Failed to list reviews");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Admin: approve / hide review
+router.patch("/admin/reviews/:orderId", requireCompanyAuth, async (req, res) => {
+  try {
+    const orderId = Number(req.params["orderId"]);
+    const body = req.body as { status?: "pending" | "approved" | "hidden" };
+    if (!body.status || !["pending", "approved", "hidden"].includes(body.status)) {
+      res.status(400).json({ error: "status inválido" });
+      return;
+    }
+
+    const [existing] = await db.select().from(ordersTable)
+      .where(and(eq(ordersTable.id, orderId), eq(ordersTable.companyId, req.companyId!)));
+    if (!existing) { res.status(404).json({ error: "Not found" }); return; }
+
+    const { publicNotes, meta } = parseOrderNotes(existing.notes);
+    if (!meta.review) { res.status(404).json({ error: "Avaliação não encontrada" }); return; }
+
+    const nextMeta: OrderMeta = {
+      ...meta,
+      review: { ...meta.review, status: body.status },
+    };
+    const [order] = await db.update(ordersTable)
+      .set({ notes: serializeOrderNotes(publicNotes, nextMeta), updatedAt: new Date() })
+      .where(eq(ordersTable.id, existing.id))
+      .returning();
+
+    const enriched = enrichOrder(order);
+    res.json({
+      orderId: order.id,
+      orderNumber: order.orderNumber,
+      trackingId: order.trackingId,
+      customerName: order.customerName,
+      phone: order.phone,
+      stars: enriched.review!.stars,
+      comment: enriched.review!.comment,
+      deliveredOk: enriched.review!.deliveredOk,
+      createdAt: enriched.review!.createdAt,
+      status: reviewStatus(enriched.review!),
+    });
+  } catch (err) {
+    req.log.error({ err }, "Failed to moderate review");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Admin: delete review
+router.delete("/admin/reviews/:orderId", requireCompanyAuth, async (req, res) => {
+  try {
+    const orderId = Number(req.params["orderId"]);
+    const [existing] = await db.select().from(ordersTable)
+      .where(and(eq(ordersTable.id, orderId), eq(ordersTable.companyId, req.companyId!)));
+    if (!existing) { res.status(404).json({ error: "Not found" }); return; }
+
+    const { publicNotes, meta } = parseOrderNotes(existing.notes);
+    if (!meta.review) { res.status(404).json({ error: "Avaliação não encontrada" }); return; }
+
+    const { review: _removed, ...rest } = meta;
+    const nextMeta: OrderMeta = { ...rest };
+    await db.update(ordersTable)
+      .set({ notes: serializeOrderNotes(publicNotes, nextMeta), updatedAt: new Date() })
+      .where(eq(ordersTable.id, existing.id));
+
+    res.json({ ok: true });
+  } catch (err) {
+    req.log.error({ err }, "Failed to delete review");
     res.status(500).json({ error: "Internal server error" });
   }
 });

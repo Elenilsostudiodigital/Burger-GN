@@ -4,7 +4,7 @@ import { useCart } from '../context/CartContext';
 import { getCategories, getProducts, getExternalLinks, Category, Product, ExternalLink, Addon } from '../lib/api';
 import { filterProductsByQuery } from '../lib/homeSections';
 import { BottomNav } from '../components/BottomNav';
-import { WhatsAppButton } from '../components/WhatsAppButton';
+import { StoreClosedBanner } from '../components/StoreClosedBanner';
 import { PageTransition } from '../components/PageTransition';
 import { ProductDetailModal } from '../components/ProductDetailModal';
 import { ProductRowCard } from '../components/ProductRowCard';
@@ -189,9 +189,10 @@ export default function Menu() {
         )}
       </main>
 
+      <StoreClosedBanner compact />
+
       <ProductDetailModal product={detailProduct} onClose={() => setDetailProduct(null)} onAdd={handleModalAdd} />
 
-      <WhatsAppButton />
       <BottomNav />
     </PageTransition>
   );

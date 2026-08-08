@@ -15,6 +15,7 @@ import Checkout from "./pages/Checkout";
 import Confirmation from "./pages/Confirmation";
 import OrderTracking, { MyOrderPage } from "./pages/OrderTracking";
 import { MyOrderFab } from "./components/MyOrderFab";
+import { SupportButton } from "./components/SupportButton";
 import AdminLogin from "./pages/admin/Login";
 import AdminDashboard from "./pages/admin/Dashboard";
 import AdminMenuAdmin from "./pages/admin/MenuAdmin";
@@ -85,8 +86,16 @@ function Router() {
         <Route component={NotFound} />
       </Switch>
       <MyOrderFab />
+      <CustomerSupportFab />
     </>
   );
+}
+
+/** Support bubble only on customer routes (not admin). */
+function CustomerSupportFab() {
+  const [location] = useLocation();
+  if (location.startsWith("/admin")) return null;
+  return <SupportButton />;
 }
 
 function App() {

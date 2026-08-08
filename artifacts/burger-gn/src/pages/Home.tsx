@@ -9,6 +9,9 @@ import { BottomNav } from '../components/BottomNav';
 import { PageTransition } from '../components/PageTransition';
 import { ProductDetailModal } from '../components/ProductDetailModal';
 import { ProductRowCard } from '../components/ProductRowCard';
+import { HomeBannerCarousel } from '../components/HomeBannerCarousel';
+import { StoreClosedBanner } from '../components/StoreClosedBanner';
+import { ReviewsSection } from '../components/ReviewsSection';
 import { Button } from '@/components/ui/button';
 
 export default function Home() {
@@ -148,6 +151,9 @@ export default function Home() {
         </div>
       </section>
 
+      <StoreClosedBanner />
+      <HomeBannerCarousel />
+
       {/* Search + section chips */}
       <div className="sticky top-[57px] z-30 bg-[#0a0a0a] border-b border-zinc-800/70">
         <div className="max-w-md mx-auto px-4 pt-3 pb-2">
@@ -254,6 +260,8 @@ export default function Home() {
           ))
         )}
       </main>
+
+      <ReviewsSection />
 
       <ProductDetailModal
         product={detailProduct}

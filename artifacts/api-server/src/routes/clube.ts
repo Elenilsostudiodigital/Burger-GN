@@ -446,6 +446,86 @@ router.put("/admin/clube/cashback", requireCompanyAuth, async (req, res) => {
   }
 });
 
+/** Add one fidelity stamp (uses member.points as stamp count). Does not touch orders/checkout. */
+router.post("/admin/clube/members/:id/add-stamp", requireCompanyAuth, async (req, res) => {
+  try {
+    const id = Number(req.params["id"]);
+    const stampsRequired = Math.max(1, Math.min(50, Number(req.body?.stampsRequired) || 10));
+    const [member] = await db
+      .select()
+      .from(clubeMembersTable)
+      .where(and(eq(clubeMembersTable.id, id), eq(clubeMembersTable.companyId, req.companyId!)));
+    if (!member) {
+      res.status(404).json({ error: "Membro não encontrado" });
+      return;
+    }
+
+    let stamps = (member.points || 0) + 1;
+    let rewardUnlocked = false;
+    let notes = member.notes || "";
+    if (stamps >= stampsRequired) {
+      rewardUnlocked = true;
+      stamps = 0;
+      const stamp = new Date().toISOString();
+      notes = `${notes}${notes ? "\n" : ""}[RECOMPENSA ${stamp}] Selos completos — recompensa liberada.`;
+    }
+
+    const [updated] = await db
+      .update(clubeMembersTable)
+      .set({ points: stamps, notes })
+      .where(and(eq(clubeMembersTable.id, id), eq(clubeMembersTable.companyId, req.companyId!)))
+      .returning();
+
+    res.json({ member: updated, stamps: updated.points, stampsRequired, rewardUnlocked });
+  } catch (err) {
+    req.log.error({ err }, "Failed to add fidelity stamp");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+/** Credit cashback balance from an order total (admin-triggered; no checkout changes). */
+router.post("/admin/clube/members/:id/add-cashback", requireCompanyAuth, async (req, res) => {
+  try {
+    const id = Number(req.params["id"]);
+    const orderTotal = Number(req.body?.orderTotal);
+    if (!Number.isFinite(orderTotal) || orderTotal <= 0) {
+      res.status(400).json({ error: "orderTotal inválido" });
+      return;
+    }
+
+    const settings = await ensureSettings(req.companyId!);
+    const percent = parseFloat(String(settings.cashbackPercent)) || 0;
+    const minOrder = parseFloat(String(settings.cashbackMinOrder)) || 0;
+    if (orderTotal < minOrder) {
+      res.status(400).json({ error: `Pedido mínimo para cashback: R$ ${minOrder.toFixed(2)}` });
+      return;
+    }
+
+    const credit = Math.round((orderTotal * percent) / 100 * 100) / 100;
+    const [member] = await db
+      .select()
+      .from(clubeMembersTable)
+      .where(and(eq(clubeMembersTable.id, id), eq(clubeMembersTable.companyId, req.companyId!)));
+    if (!member) {
+      res.status(404).json({ error: "Membro não encontrado" });
+      return;
+    }
+
+    const current = parseFloat(String(member.cashbackBalance)) || 0;
+    const next = (current + credit).toFixed(2);
+    const [updated] = await db
+      .update(clubeMembersTable)
+      .set({ cashbackBalance: next })
+      .where(and(eq(clubeMembersTable.id, id), eq(clubeMembersTable.companyId, req.companyId!)))
+      .returning();
+
+    res.json({ member: updated, credited: credit, percent });
+  } catch (err) {
+    req.log.error({ err }, "Failed to add cashback");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 // ── Exclusive coupons ────────────────────────────────────────────────────────
 router.get("/admin/clube/exclusive-coupons", requireCompanyAuth, async (req, res) => {
   try {
