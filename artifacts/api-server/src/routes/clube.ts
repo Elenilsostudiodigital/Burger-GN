@@ -10,6 +10,7 @@ import {
 } from "@workspace/db";
 import { eq, and, sql, desc } from "drizzle-orm";
 import { requireCompanyAuth } from "../middlewares/auth";
+import { parseClientNotes, serializeClientNotes } from "../lib/clientMeta";
 
 const router = Router();
 
@@ -223,7 +224,7 @@ router.post("/admin/clube/members", requireCompanyAuth, async (req, res) => {
         cashbackBalance: body.cashbackBalance ?? "0",
         tier: body.tier ?? "bronze",
         active: body.active ?? true,
-        notes: body.notes ?? "",
+        notes: serializeClientNotes(body.notes ?? "", { origin: "sistema_burger_gn" }),
       })
       .returning();
     res.status(201).json(member);
@@ -256,6 +257,23 @@ router.put("/admin/clube/members/:id", requireCompanyAuth, async (req, res) => {
     if (body.phone !== undefined) updateData["phone"] = body.phone.trim();
     if (body.name !== undefined) updateData["name"] = body.name.trim();
     if (body.birthDate !== undefined) updateData["birthDate"] = body.birthDate || null;
+
+    // Preserve client origin meta embedded in notes (Clientes module).
+    if (body.notes !== undefined) {
+      const [existing] = await db
+        .select()
+        .from(clubeMembersTable)
+        .where(
+          and(
+            eq(clubeMembersTable.id, id),
+            eq(clubeMembersTable.companyId, req.companyId!),
+          ),
+        );
+      if (existing) {
+        const { meta } = parseClientNotes(existing.notes);
+        updateData["notes"] = serializeClientNotes(String(body.notes || ""), meta);
+      }
+    }
 
     const [member] = await db
       .update(clubeMembersTable)
@@ -462,17 +480,18 @@ router.post("/admin/clube/members/:id/add-stamp", requireCompanyAuth, async (req
 
     let stamps = (member.points || 0) + 1;
     let rewardUnlocked = false;
-    let notes = member.notes || "";
+    const { publicNotes, meta } = parseClientNotes(member.notes);
+    let nextPublic = publicNotes;
     if (stamps >= stampsRequired) {
       rewardUnlocked = true;
       stamps = 0;
       const stamp = new Date().toISOString();
-      notes = `${notes}${notes ? "\n" : ""}[RECOMPENSA ${stamp}] Selos completos — recompensa liberada.`;
+      nextPublic = `${nextPublic}${nextPublic ? "\n" : ""}[RECOMPENSA ${stamp}] Selos completos — recompensa liberada.`;
     }
 
     const [updated] = await db
       .update(clubeMembersTable)
-      .set({ points: stamps, notes })
+      .set({ points: stamps, notes: serializeClientNotes(nextPublic, meta) })
       .where(and(eq(clubeMembersTable.id, id), eq(clubeMembersTable.companyId, req.companyId!)))
       .returning();
 

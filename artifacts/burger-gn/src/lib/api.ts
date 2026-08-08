@@ -781,3 +781,71 @@ export const getClubeProgram = () => api.get("/clube-program") as Promise<ClubeP
 export const getAdminClubeProgram = () => api.get("/admin/clube-program") as Promise<ClubeProgram>;
 export const updateClubeProgram = (d: Partial<ClubeProgram>) =>
   api.put("/admin/clube-program", d) as Promise<ClubeProgram>;
+
+// ── Clientes (Clube members — lista + importação manual) ─────────────────────
+export type ClientOrigin = "manual" | "sistema_burger_gn" | "importado";
+
+export const CLIENT_ORIGIN_OPTIONS: { id: ClientOrigin; label: string }[] = [
+  { id: "manual", label: "Manual" },
+  { id: "sistema_burger_gn", label: "Sistema Burger GN" },
+  { id: "importado", label: "Importado" },
+];
+
+export interface ClubClient {
+  id: number;
+  name: string;
+  phone: string;
+  stamps: number;
+  cashbackBalance: string;
+  origin: ClientOrigin;
+  notes: string;
+  joinedAt: string;
+  createdAt: string;
+  active: boolean;
+}
+
+export interface ClientsListResponse {
+  count: number;
+  origins: Record<ClientOrigin, string>;
+  clients: ClubClient[];
+}
+
+export const getClients = (opts?: { q?: string; origin?: string }) => {
+  const params = new URLSearchParams();
+  if (opts?.q) params.set("q", opts.q);
+  if (opts?.origin) params.set("origin", opts.origin);
+  const qs = params.toString();
+  return api.get(`/admin/clientes${qs ? `?${qs}` : ""}`) as Promise<ClientsListResponse>;
+};
+
+export const createClient = (d: {
+  name: string;
+  phone: string;
+  stamps?: number;
+  cashbackBalance?: number | string;
+  origin?: ClientOrigin;
+  notes?: string;
+}) => api.post("/admin/clientes", d) as Promise<ClubClient>;
+
+export const updateClient = (id: number, d: Partial<{
+  name: string;
+  phone: string;
+  stamps: number;
+  cashbackBalance: number | string;
+  origin: ClientOrigin;
+  notes: string;
+  active: boolean;
+}>) => api.put(`/admin/clientes/${id}`, d) as Promise<ClubClient>;
+
+export const deleteClient = (id: number) =>
+  api.delete(`/admin/clientes/${id}`) as Promise<{ ok: boolean }>;
+
+export const adjustClientStamps = (id: number, delta: 1 | -1) =>
+  api.post(`/admin/clientes/${id}/stamps`, { delta }) as Promise<{
+    client: ClubClient; rewardUnlocked: boolean; stampsRequired: number;
+  }>;
+
+export const adjustClientCashback = (id: number, amount: number) =>
+  api.post(`/admin/clientes/${id}/cashback`, { amount }) as Promise<{
+    client: ClubClient; previous: number; next: number;
+  }>;

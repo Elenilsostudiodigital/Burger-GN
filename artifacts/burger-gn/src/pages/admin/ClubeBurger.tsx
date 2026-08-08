@@ -18,7 +18,7 @@ import { useAdmin } from '../../context/AdminContext';
 import {
   LayoutDashboard, UtensilsCrossed, Tag, MapPin, Navigation, Settings, LogOut,
   Plus, Pencil, Trash2, ToggleLeft, ToggleRight, Loader2, Upload, TrendingUp,
-  Crown, Gift, Wallet, Ticket, Cake, Zap, Users, BarChart3, Percent, DollarSign,
+  Crown, Gift, Wallet, Ticket, Cake, Zap, Users, BarChart3, Percent, DollarSign, Star,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -55,6 +55,8 @@ const TIER_LABEL: Record<ClubeMemberTier, string> = {
 function AdminNav({ active }: { active: string }) {
   const navItems = [
     { href: '/admin', icon: <LayoutDashboard size={18} />, label: 'Pedidos' },
+    { href: '/admin/clientes', icon: <Users size={18} />, label: 'Clientes' },
+    { href: '/admin/avaliacoes', icon: <Star size={18} />, label: 'Avaliações' },
     { href: '/admin/cardapio', icon: <UtensilsCrossed size={18} />, label: 'Cardápio' },
     { href: '/admin/financeiro', icon: <TrendingUp size={18} />, label: 'Financeiro' },
     { href: '/admin/cupons', icon: <Tag size={18} />, label: 'Cupons' },

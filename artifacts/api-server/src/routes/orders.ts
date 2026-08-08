@@ -13,6 +13,7 @@ import {
   type WorkflowStage, type CardType, type OrderMeta, type OrderReview,
 } from "../lib/orderMeta";
 import { buildStaticPixPayload, decodePixSettings, normalizePixKey } from "../lib/staticPix";
+import { syncClubeMemberOnOrder } from "../lib/clubeClientSync";
 import crypto from "node:crypto";
 
 const router = Router();
@@ -325,6 +326,18 @@ router.post("/orders", resolvePublicCompany, async (req, res) => {
     // Pix only enters the admin "new order" queue after receipt upload.
     if (!isPix) {
       broadcastSSE(companyId, "new_order", fullOrder);
+    }
+
+    // Clube sync: locate by WhatsApp or auto-create (origin Sistema Burger GN).
+    // Never blocks or alters the order response if sync fails.
+    try {
+      await syncClubeMemberOnOrder({
+        companyId,
+        customerName: body.customerName,
+        phone: body.phone,
+      });
+    } catch (syncErr) {
+      req.log.warn({ err: syncErr }, "Clube member sync skipped");
     }
 
     // cardCheckoutUrl kept null — Mercado Pago intentionally not wired yet (future-ready)

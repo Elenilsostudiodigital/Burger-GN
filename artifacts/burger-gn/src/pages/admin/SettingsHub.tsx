@@ -11,7 +11,7 @@ import {
   LayoutDashboard, UtensilsCrossed, Tag, MapPin, Navigation, Settings,
   LogOut, Plus, Pencil, Trash2, Check, X, ToggleLeft, ToggleRight,
   Loader2, CreditCard, Link as LinkIcon, ShieldAlert, ShieldCheck, Upload,
-  MessageCircle, TrendingUp, Crown, Star, Clock, Printer, Image as ImageIcon,
+  MessageCircle, TrendingUp, Crown, Star, Clock, Printer, Image as ImageIcon, Users,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -23,6 +23,7 @@ import { PrinterTab } from './settings/PrinterTab';
 function AdminNav({ active }: { active: string }) {
   const items = [
     { href: '/admin', icon: <LayoutDashboard size={17} />, label: 'Pedidos' },
+    { href: '/admin/clientes', icon: <Users size={17} />, label: 'Clientes' },
     { href: '/admin/avaliacoes', icon: <Star size={17} />, label: 'Avaliações' },
     { href: '/admin/cardapio', icon: <UtensilsCrossed size={17} />, label: 'Cardápio' },
     { href: '/admin/financeiro', icon: <TrendingUp size={17} />, label: 'Financeiro' },

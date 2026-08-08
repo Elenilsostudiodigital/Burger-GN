@@ -7,12 +7,13 @@ import { useAdmin } from '../../context/AdminContext';
 import {
   LayoutDashboard, UtensilsCrossed, Tag, MapPin, Navigation, Settings,
   LogOut, Loader2, Upload, TrendingUp, Crown, Star, MessageSquareQuote,
-  Check, EyeOff, Trash2,
+  Check, EyeOff, Trash2, Users,
 } from 'lucide-react';
 
 function AdminNav({ active }: { active: string }) {
   const items = [
     { href: '/admin', icon: <LayoutDashboard size={17} />, label: 'Pedidos' },
+    { href: '/admin/clientes', icon: <Users size={17} />, label: 'Clientes' },
     { href: '/admin/avaliacoes', icon: <Star size={17} />, label: 'Avaliações' },
     { href: '/admin/cardapio', icon: <UtensilsCrossed size={17} />, label: 'Cardápio' },
     { href: '/admin/financeiro', icon: <TrendingUp size={17} />, label: 'Financeiro' },
