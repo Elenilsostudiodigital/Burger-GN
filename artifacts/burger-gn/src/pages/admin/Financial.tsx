@@ -22,7 +22,8 @@ import { Label } from '@/components/ui/label';
 
 function AdminNav({ active }: { active: string }) {
   const items = [
-    { href: '/admin', icon: <LayoutDashboard size={17} />, label: 'Pedidos' },
+    { href: '/admin', icon: <TrendingUp size={17} />, label: 'Início' },
+    { href: '/admin/pedidos', icon: <LayoutDashboard size={17} />, label: 'Pedidos' },
     { href: '/admin/cardapio', icon: <UtensilsCrossed size={17} />, label: 'Cardápio' },
     { href: '/admin/financeiro', icon: <TrendingUp size={17} />, label: 'Financeiro' },
     { href: '/admin/cupons', icon: <Tag size={17} />, label: 'Cupons' },

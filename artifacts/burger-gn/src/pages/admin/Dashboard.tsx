@@ -989,7 +989,8 @@ export default function AdminDashboard() {
       <nav className="sticky bottom-0 left-0 right-0 bg-zinc-950/95 backdrop-blur border-t border-zinc-800 z-40">
         <div className="max-w-[1800px] mx-auto flex overflow-x-auto no-scrollbar">
           {[
-            { href: '/admin', icon: LayoutDashboard, label: 'Pedidos', active: true },
+            { href: '/admin', icon: TrendingUp, label: 'Início', active: false },
+            { href: '/admin/pedidos', icon: LayoutDashboard, label: 'Pedidos', active: true },
             { href: '/admin/clientes', icon: Users, label: 'Clientes', active: false },
             { href: '/admin/avaliacoes', icon: Star, label: 'Avaliações', active: false },
             { href: '/admin/cardapio', icon: UtensilsCrossed, label: 'Cardápio' },

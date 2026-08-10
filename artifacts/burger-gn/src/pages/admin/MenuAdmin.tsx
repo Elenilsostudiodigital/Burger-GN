@@ -411,7 +411,7 @@ export default function MenuAdmin() {
       {/* Bottom nav */}
       <nav className="fixed bottom-0 left-0 right-0 bg-zinc-950/95 backdrop-blur border-t border-zinc-800 z-40">
         <div className="max-w-2xl mx-auto flex">
-          <Link href="/admin" className="flex-1">
+          <Link href="/admin/pedidos" className="flex-1">
             <div className="flex flex-col items-center gap-0.5 py-2.5 text-zinc-500 hover:text-white transition-colors">
               <LayoutDashboard size={18} />
               <span className="text-[9px] font-bold uppercase">Pedidos</span>

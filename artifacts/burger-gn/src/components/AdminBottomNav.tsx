@@ -1,11 +1,12 @@
 import { Link } from 'wouter';
 import {
   LayoutDashboard, UtensilsCrossed, Tag, MapPin, Settings, Crown,
-  TrendingUp, Star, Upload, Navigation, Users,
+  TrendingUp, Star, Upload, Navigation, Users, BarChart3,
 } from 'lucide-react';
 
 const ITEMS = [
-  { href: '/admin', icon: LayoutDashboard, label: 'Pedidos' },
+  { href: '/admin', icon: BarChart3, label: 'Início' },
+  { href: '/admin/pedidos', icon: LayoutDashboard, label: 'Pedidos' },
   { href: '/admin/clientes', icon: Users, label: 'Clientes' },
   { href: '/admin/avaliacoes', icon: Star, label: 'Avaliações' },
   { href: '/admin/cardapio', icon: UtensilsCrossed, label: 'Cardápio' },

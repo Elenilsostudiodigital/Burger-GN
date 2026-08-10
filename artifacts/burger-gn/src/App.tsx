@@ -16,6 +16,7 @@ import Confirmation from "./pages/Confirmation";
 import OrderTracking, { MyOrderPage } from "./pages/OrderTracking";
 import { MyOrderFab } from "./components/MyOrderFab";
 import AdminLogin from "./pages/admin/Login";
+import AdminSalesDashboard from "./pages/admin/SalesDashboard";
 import AdminDashboard from "./pages/admin/Dashboard";
 import AdminMenuAdmin from "./pages/admin/MenuAdmin";
 import AdminCoupons from "./pages/admin/Coupons";
@@ -75,7 +76,7 @@ function Router() {
 
         {/* Admin routes */}
         <Route path="/admin/login" component={AdminLogin} />
-        <Route path="/admin" component={() => <ProtectedAdminRoute component={AdminDashboard} />} />
+        <Route path="/admin/pedidos" component={() => <ProtectedAdminRoute component={AdminDashboard} />} />
         <Route path="/admin/cardapio" component={() => <ProtectedAdminRoute component={AdminMenuAdmin} />} />
         <Route path="/admin/financeiro" component={() => <ProtectedAdminRoute component={AdminFinancial} />} />
         <Route path="/admin/cupons" component={() => <ProtectedAdminRoute component={AdminCoupons} />} />
@@ -89,6 +90,8 @@ function Router() {
         <Route path="/admin/entrega-km" component={() => <ProtectedAdminRoute component={AdminKmDelivery} />} />
         <Route path="/admin/config" component={() => <ProtectedAdminRoute component={AdminSettingsHub} />} />
         <Route path="/admin/importar" component={() => <ProtectedAdminRoute component={AdminImportMenu} />} />
+        {/* Home: sales dashboard — keep after more specific /admin/* routes */}
+        <Route path="/admin" component={() => <ProtectedAdminRoute component={AdminSalesDashboard} />} />
 
         <Route component={NotFound} />
       </Switch>

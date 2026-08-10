@@ -11,6 +11,7 @@ import ordersRouter from "./orders";
 import importRouter from "./import";
 import paymentsRouter from "./payments";
 import financialRouter from "./financial";
+import salesDashboardRouter from "./salesDashboard";
 import clubeRouter from "./clube";
 import clientesRouter from "./clientes";
 
@@ -28,6 +29,7 @@ router.use(ordersRouter);
 router.use(importRouter);
 router.use(paymentsRouter);
 router.use(financialRouter);
+router.use(salesDashboardRouter);
 router.use(clubeRouter);
 router.use(clientesRouter);
 

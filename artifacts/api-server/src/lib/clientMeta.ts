@@ -328,29 +328,63 @@ export function grantAvailableReward(
   return { meta: { ...meta, availableRewards }, reward: full };
 }
 
-/** Normalize Brazilian WhatsApp/phone to digits (prefer 55…). */
+/**
+ * Canonical Brazilian WhatsApp/phone (digits only, with country code 55).
+ * Used as comparison/storage key — not for UI display formatting.
+ *
+ * Equivalent inputs collapse to the same value, e.g.:
+ * (71) 99999-9999 | 71 99999-9999 | 71999999999 | +55 71 99999-9999 | 5571999999999
+ * → 5571999999999
+ */
 export function normalizeClientPhone(phone: string): string {
-  const digits = String(phone || "").replace(/\D/g, "");
+  let digits = String(phone || "").replace(/\D/g, "");
   if (!digits) return "";
+
+  // Drop trunk/leading zeros: 0719… → 719… ; 0055719… → 55719…
+  digits = digits.replace(/^0+/, "");
+  if (!digits) return "";
+
+  if (digits.startsWith("55")) {
+    const national = digits.slice(2);
+    if (national.length === 10 || national.length === 11) return `55${national}`;
+    if (national.length > 11) return `55${national.slice(-11)}`;
+    return digits;
+  }
+
+  // National DDD + number (landline 10 / mobile 11)
   if (digits.length === 10 || digits.length === 11) return `55${digits}`;
+
+  // Extra digits / unknown prefix — keep trailing national mobile (11)
+  if (digits.length > 11) return `55${digits.slice(-11)}`;
+
   return digits;
+}
+
+/**
+ * Stable identity key for de-duplication across formats.
+ * National part only (DDD + subscriber), 10 or 11 digits.
+ */
+export function phoneIdentityKey(phone: string): string {
+  const n = normalizeClientPhone(phone);
+  if (!n) return "";
+  const national = n.startsWith("55") ? n.slice(2) : n;
+  if (!national) return "";
+  if (national.length >= 11) return national.slice(-11);
+  return national;
 }
 
 /** Placeholder / local-store phones that must not create CRM clients. */
 export function isPlaceholderPhone(phone: string): boolean {
-  const n = normalizeClientPhone(phone);
-  if (!n || n.length < 10) return true;
-  const national = n.startsWith("55") ? n.slice(2) : n;
-  if (/^0+$/.test(national)) return true;
+  const key = phoneIdentityKey(phone);
+  if (!key || key.length < 10) return true;
+  if (/^0+$/.test(key)) return true;
   return false;
 }
 
-/** Compare two phones by normalized digits (last 10–11 national digits). */
+/** Compare two phones ignoring formatting / optional +55. */
 export function phonesMatch(a: string, b: string): boolean {
-  const na = normalizeClientPhone(a);
-  const nb = normalizeClientPhone(b);
-  if (!na || !nb) return false;
-  if (na === nb) return true;
-  const tail = (p: string) => (p.length > 11 ? p.slice(-11) : p);
-  return tail(na) === tail(nb);
+  const ka = phoneIdentityKey(a);
+  const kb = phoneIdentityKey(b);
+  if (!ka || !kb) return false;
+  return ka === kb;
 }

@@ -293,7 +293,7 @@ export default function ClientDetail() {
                 <p className="text-zinc-600 text-sm py-8 text-center">Nenhum pedido vinculado a este WhatsApp.</p>
               ) : (
                 data.history.map((o) => (
-                  <Link key={o.id} href={`/admin`} className="block">
+                  <Link key={o.id} href={`/admin/pedidos`} className="block">
                     <article className="rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-3 flex items-center justify-between gap-3 hover:border-amber-500/40 transition-colors">
                       <div>
                         <p className="text-white font-bold text-sm">Pedido #{o.orderNumber}</p>

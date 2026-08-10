@@ -340,9 +340,23 @@ export const updateWhatsappSettings = (d: { number: string }) => api.put("/admin
 // Fallback used only until the value configured in the admin panel is fetched.
 export const WHATSAPP_NUMBER = "5571996981707";
 
+/**
+ * Canonical BR WhatsApp digits (with 55). Keep in sync with API
+ * `normalizeClientPhone` in artifacts/api-server/src/lib/clientMeta.ts.
+ */
 export function normalizePhoneForWhatsapp(phone: string): string {
-  const digits = phone.replace(/\D/g, "");
+  let digits = String(phone || "").replace(/\D/g, "");
+  if (!digits) return "";
+  digits = digits.replace(/^0+/, "");
+  if (!digits) return "";
+  if (digits.startsWith("55")) {
+    const national = digits.slice(2);
+    if (national.length === 10 || national.length === 11) return `55${national}`;
+    if (national.length > 11) return `55${national.slice(-11)}`;
+    return digits;
+  }
   if (digits.length === 10 || digits.length === 11) return `55${digits}`;
+  if (digits.length > 11) return `55${digits.slice(-11)}`;
   return digits;
 }
 
@@ -521,6 +535,73 @@ export const getFinancialReport = (from?: string, to?: string) => {
   if (to) params.set("to", to);
   const qs = params.toString();
   return api.get(`/admin/financial-report${qs ? `?${qs}` : ""}`) as Promise<FinancialReport>;
+};
+
+// ── Sales Dashboard (home) ───────────────────────────────────────────────────
+export type SalesPeriodPreset = "today" | "yesterday" | "7d" | "30d" | "month" | "custom";
+export type SalesChartGranularity = "hour" | "day" | "month";
+
+export interface SalesKpi {
+  value: number;
+  previous: number;
+  changePercent: number | null;
+}
+
+export interface SalesDashboardReport {
+  period: {
+    preset: SalesPeriodPreset;
+    from: string;
+    to: string;
+    fromAt: string;
+    toAt: string;
+    previousFrom: string;
+    previousTo: string;
+    granularity: SalesChartGranularity;
+    comparisonLabel: string;
+    timezone: string;
+  };
+  kpis: {
+    revenue: SalesKpi;
+    orders: SalesKpi;
+    averageTicket: SalesKpi;
+    uniqueCustomers: SalesKpi;
+  };
+  ordersBreakdown: {
+    completed: number;
+    cancelled: number;
+    inProgress: number;
+    total: number;
+    validRevenue: number;
+    cancelledExcludedFromRevenue: boolean;
+  };
+  customers: { new: number; returning: number; unique: number };
+  paymentMethods: Record<PaymentMethod, { revenue: number; count: number; percent: number }>;
+  orderTypes: Record<OrderType, { count: number; doneCount: number; revenue: number }>;
+  topProducts: Array<{ rank: number; name: string; quantity: number; revenue: number }>;
+  chart: {
+    granularity: SalesChartGranularity;
+    series: Array<{ label: string; total: number; orders: number }>;
+  };
+  performance: {
+    peakHour: { hour: string; orders: number } | null;
+    bestDay: { day: string; revenue: number; orders: number } | null;
+    topProduct: { name: string; quantity: number; revenue: number } | null;
+    averageTicket: number;
+    avgItemsPerOrder: number;
+  };
+}
+
+export const getSalesDashboard = (opts: {
+  preset?: SalesPeriodPreset;
+  from?: string;
+  to?: string;
+}) => {
+  const params = new URLSearchParams();
+  if (opts.preset) params.set("preset", opts.preset);
+  if (opts.from) params.set("from", opts.from);
+  if (opts.to) params.set("to", opts.to);
+  const qs = params.toString();
+  return api.get(`/admin/sales-dashboard${qs ? `?${qs}` : ""}`) as Promise<SalesDashboardReport>;
 };
 
 // ── Clube Burger ──────────────────────────────────────────────────────────────

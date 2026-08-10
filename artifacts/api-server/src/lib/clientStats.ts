@@ -1,4 +1,4 @@
-import { normalizeClientPhone, phonesMatch } from "./clientMeta";
+import { phoneIdentityKey, phonesMatch } from "./clientMeta";
 
 /** Recovery-ready segments — computed from order history, not stored. */
 export type ClientRecoverySegment =
@@ -189,38 +189,35 @@ export function filterOrdersForClient(
   orders: OrderForStats[],
   opts: { clientId: number; phone: string },
 ): OrderForStats[] {
-  const phone = normalizeClientPhone(opts.phone);
   return orders.filter((o) => {
     if (o.clientMemberId != null && o.clientMemberId === opts.clientId) return true;
-    return phonesMatch(o.phone, phone);
+    return phonesMatch(o.phone, opts.phone);
   });
 }
 
-/** Build phone → orders index for list aggregation. */
+/** Build phone-identity → orders index for list aggregation. */
 export function indexOrdersByPhone(orders: OrderForStats[]): Map<string, OrderForStats[]> {
   const map = new Map<string, OrderForStats[]>();
   for (const order of orders) {
-    const key = normalizeClientPhone(order.phone);
+    const key = phoneIdentityKey(order.phone);
     if (!key || isAllZeros(key)) continue;
-    const national = key.length > 11 ? key.slice(-11) : key;
-    const list = map.get(national) ?? [];
+    const list = map.get(key) ?? [];
     list.push(order);
-    map.set(national, list);
+    map.set(key, list);
   }
   return map;
 }
 
 function isAllZeros(phone: string): boolean {
-  const national = phone.startsWith("55") ? phone.slice(2) : phone;
-  return /^0+$/.test(national);
+  const key = phoneIdentityKey(phone);
+  return !key || /^0+$/.test(key);
 }
 
 export function ordersForPhone(
   index: Map<string, OrderForStats[]>,
   phone: string,
 ): OrderForStats[] {
-  const key = normalizeClientPhone(phone);
+  const key = phoneIdentityKey(phone);
   if (!key) return [];
-  const national = key.length > 11 ? key.slice(-11) : key;
-  return index.get(national) ?? [];
+  return index.get(key) ?? [];
 }

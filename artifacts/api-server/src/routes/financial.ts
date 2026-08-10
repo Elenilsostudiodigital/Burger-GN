@@ -1,8 +1,9 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
 import { ordersTable, orderItemsTable, productsTable, categoriesTable } from "@workspace/db";
-import { and, gte, lte, eq, inArray, isNotNull, sql, desc } from "drizzle-orm";
+import { and, gte, lte, eq, isNotNull, sql, desc } from "drizzle-orm";
 import { requireCompanyAuth } from "../middlewares/auth";
+import { phoneIdentityKey } from "../lib/clientMeta";
 
 const router = Router();
 
@@ -147,24 +148,43 @@ router.get("/admin/financial-report", requireCompanyAuth, async (req, res) => {
       .orderBy(desc(sql`SUM(${ordersTable.total})`))
       .limit(1);
 
-    // ── New vs. returning customers within the period ──
+    // ── New vs. returning customers within the period (WhatsApp identity) ──
     const periodPhones = await db
-      .select({ phone: ordersTable.phone })
+      .select({
+        phone: ordersTable.phone,
+        firstInPeriod: sql<string>`MIN(${ordersTable.createdAt})`,
+      })
       .from(ordersTable)
       .where(periodDoneFilter)
       .groupBy(ordersTable.phone);
-    const phoneList = periodPhones.map(p => p.phone);
+
+    const identityInPeriod = new Set<string>();
+    for (const row of periodPhones) {
+      const key = phoneIdentityKey(row.phone);
+      if (key) identityInPeriod.add(key);
+    }
 
     let newCustomers = 0;
     let returningCustomers = 0;
-    if (phoneList.length > 0) {
+    if (identityInPeriod.size > 0) {
       const firstOrders = await db
         .select({ phone: ordersTable.phone, first: sql<string>`MIN(${ordersTable.createdAt})` })
         .from(ordersTable)
-        .where(and(companyFilter, inArray(ordersTable.phone, phoneList)))
+        .where(companyFilter)
         .groupBy(ordersTable.phone);
+
+      const firstEverByIdentity = new Map<string, Date>();
       for (const row of firstOrders) {
-        if (new Date(row.first) >= from) newCustomers++;
+        const key = phoneIdentityKey(row.phone);
+        if (!key || !identityInPeriod.has(key)) continue;
+        const at = new Date(row.first);
+        const prev = firstEverByIdentity.get(key);
+        if (!prev || at < prev) firstEverByIdentity.set(key, at);
+      }
+
+      for (const key of identityInPeriod) {
+        const firstEver = firstEverByIdentity.get(key);
+        if (!firstEver || firstEver >= from) newCustomers++;
         else returningCustomers++;
       }
     }
