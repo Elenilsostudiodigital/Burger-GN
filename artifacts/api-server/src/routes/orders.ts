@@ -168,7 +168,12 @@ router.post("/orders", resolvePublicCompany, async (req, res) => {
 
     const subtotal = validatedItems.reduce((acc, i) => acc + i.subtotal, 0);
 
+    const DELIVERY_FEE_UNAVAILABLE =
+      "Ainda não conseguimos calcular a taxa de entrega para este endereço. Verifique o endereço ou fale conosco.";
+
     let deliveryFee = 0;
+    /** True only when a KM tier or active neighborhood zone produced a fee (0 is allowed if configured). */
+    let deliveryFeeResolved = false;
     let customerDistanceKm: number | null = null;
 
     if (body.orderType === "delivery") {
@@ -184,18 +189,39 @@ router.post("/orders", resolvePublicCompany, async (req, res) => {
             if (distKm <= maxDist) {
               const tiers = await db.select().from(kmDeliveryTiersTable).where(eq(kmDeliveryTiersTable.companyId, companyId)).orderBy(asc(kmDeliveryTiersTable.displayOrder));
               const { fee } = findKmTier(distKm, tiers);
-              if (fee !== null) deliveryFee = fee;
+              if (fee !== null && Number.isFinite(fee)) {
+                deliveryFee = fee;
+                deliveryFeeResolved = true;
+              }
             }
           }
         }
       }
 
-      if (deliveryFee === 0 && !customerDistanceKm && body.neighborhood) {
+      // Neighborhood fallback — same conditions as before (only when KM did not measure distance).
+      if (!deliveryFeeResolved && deliveryFee === 0 && !customerDistanceKm && body.neighborhood) {
         const [zone] = await db
           .select()
           .from(deliveryZonesTable)
-          .where(and(eq(deliveryZonesTable.companyId, companyId), sql`LOWER(neighborhood) = LOWER(${body.neighborhood})`));
-        if (zone) deliveryFee = parseFloat(zone.fee);
+          .where(
+            and(
+              eq(deliveryZonesTable.companyId, companyId),
+              eq(deliveryZonesTable.active, true),
+              sql`LOWER(neighborhood) = LOWER(${body.neighborhood})`,
+            ),
+          );
+        if (zone) {
+          const fee = parseFloat(zone.fee);
+          if (Number.isFinite(fee)) {
+            deliveryFee = fee;
+            deliveryFeeResolved = true;
+          }
+        }
+      }
+
+      if (!deliveryFeeResolved) {
+        res.status(400).json({ error: DELIVERY_FEE_UNAVAILABLE });
+        return;
       }
     }
 

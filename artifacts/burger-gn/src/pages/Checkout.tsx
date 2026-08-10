@@ -5,7 +5,7 @@ import { PageTransition } from '../components/PageTransition';
 import {
   createOrder, validateCoupon, getDeliveryZones, getDeliveryFee, getKmDeliveryConfig,
   geocodeAddress, reverseGeocode, haversineKm, findKmTier, getPaymentSettings,
-  WHATSAPP_EXTERNAL_ENABLED, ValidateCouponResult, DeliveryZone, KmDeliveryConfig, PaymentSettingsPublic,
+  ValidateCouponResult, DeliveryZone, KmDeliveryConfig, PaymentSettingsPublic,
 } from '../lib/api';
 import { saveMyOrder } from '../lib/myOrder';
 import { ErrorBoundary } from '../components/ErrorBoundary';
@@ -97,7 +97,11 @@ export default function Checkout() {
   const isDelivery = orderType === 'delivery';
   const usingKm = isDelivery && kmEnabled && customerCoords !== null;
   const discount = appliedCoupon?.discountAmount ?? 0;
-  const total = Math.max(0, subtotal + (isDelivery ? deliveryFee : 0) - discount);
+  const DELIVERY_FEE_UNAVAILABLE =
+    'Ainda não conseguimos calcular a taxa de entrega para este endereço. Verifique o endereço ou fale conosco.';
+  /** Delivery may only checkout when a fee was successfully resolved (R$ 0 is OK if configured). */
+  const hasValidDeliveryFee = !isDelivery || feeFound === true;
+  const total = Math.max(0, subtotal + (isDelivery && feeFound === true ? deliveryFee : 0) - discount);
   const fmt = (v: number) => `R$ ${v.toFixed(2).replace('.', ',')}`;
   const cashBlockedForDelivery = isDelivery && paySettings !== null && !paySettings.cashOnDeliveryEnabled;
 
@@ -397,6 +401,10 @@ export default function Checkout() {
       setGpsError('Aguarde a localização ou tente novamente.');
       return;
     }
+    if (feeFound !== true) {
+      setGpsError(DELIVERY_FEE_UNAVAILABLE);
+      return;
+    }
     setFieldError('');
     setStep('payment');
   };
@@ -406,8 +414,12 @@ export default function Checkout() {
     if (!form.numero.trim()) { setFieldError('Informe o número.'); return; }
     if (!form.bairro.trim() || form.bairro === '__outro__') {
       setFieldError(form.bairro === '__outro__'
-        ? 'Consulte a taxa com a loja ou escolha um bairro atendido.'
+        ? DELIVERY_FEE_UNAVAILABLE
         : 'Informe o bairro.');
+      return;
+    }
+    if (feeFound !== true) {
+      setFieldError(DELIVERY_FEE_UNAVAILABLE);
       return;
     }
     setFieldError('');
@@ -442,6 +454,10 @@ export default function Checkout() {
     if (orderType === 'delivery') {
       if (!form.endereco.trim() || !form.numero.trim() || !form.bairro.trim()) {
         setSubmitError('Endereço incompleto. Volte e confirme a localização ou o endereço.');
+        return;
+      }
+      if (feeFound !== true) {
+        setSubmitError(DELIVERY_FEE_UNAVAILABLE);
         return;
       }
     }
@@ -620,8 +636,7 @@ export default function Checkout() {
           className="flex items-start gap-2 bg-orange-900/20 border border-orange-800/40 rounded-xl px-4 py-3">
           <AlertCircle size={16} className="text-orange-400 mt-0.5 shrink-0" />
           <p className="text-orange-400 text-sm">
-            {feeMessage}
-            {WHATSAPP_EXTERNAL_ENABLED ? null : ' Ajuste o endereço ou escolha outra forma de retirada.'}
+            {DELIVERY_FEE_UNAVAILABLE}
           </p>
         </motion.div>
       ) : null}
@@ -1163,11 +1178,18 @@ export default function Checkout() {
             {isDelivery && (
               <div className="flex justify-between text-xs text-zinc-500 -mt-1">
                 <span>Taxa de entrega</span>
-                <span>{feeFound === true ? fmt(deliveryFee) : feeFound === false ? 'A consultar' : '—'}</span>
+                <span>{feeFound === true ? fmt(deliveryFee) : feeFound === false ? 'Indisponível' : '—'}</span>
               </div>
             )}
-            <Button type="button" onClick={onConfirmOrder} disabled={submitting} size="lg"
-              className="w-full min-h-[52px] font-bold tracking-wider rounded-xl bg-amber-500 hover:bg-amber-400 text-zinc-950 text-base">
+            {isDelivery && !hasValidDeliveryFee && !feeLoading && (
+              <p className="text-orange-400 text-xs leading-snug">{DELIVERY_FEE_UNAVAILABLE}</p>
+            )}
+            <Button
+              type="button"
+              onClick={onConfirmOrder}
+              disabled={submitting || !hasValidDeliveryFee || feeLoading}
+              size="lg"
+              className="w-full min-h-[52px] font-bold tracking-wider rounded-xl bg-amber-500 hover:bg-amber-400 text-zinc-950 text-base disabled:opacity-50 disabled:pointer-events-none">
               {submitting
                 ? <><Loader2 size={20} className="animate-spin mr-2" /> Enviando...</>
                 : 'CONFIRMAR PEDIDO'}
