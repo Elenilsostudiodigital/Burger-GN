@@ -679,3 +679,155 @@ export const updateClubeEarlyPromotion = (id: number, d: Partial<ClubeEarlyPromo
   api.put(`/admin/clube/early-promotions/${id}`, d) as Promise<ClubeEarlyPromotion>;
 export const deleteClubeEarlyPromotion = (id: number) =>
   api.delete(`/admin/clube/early-promotions/${id}`);
+
+// ── Clientes (CRM — reutiliza clube_members; telefone = identificador) ────────
+export type ClientOrigin =
+  | "pedido"
+  | "importacao_manual"
+  | "cadastro_administrativo"
+  | "outro";
+
+export type ClientRecoverySegment =
+  | "novo"
+  | "recorrente"
+  | "vip"
+  | "inativo_7"
+  | "inativo_15"
+  | "inativo_30"
+  | "ativo";
+
+export const CLIENT_ORIGIN_OPTIONS: { id: ClientOrigin; label: string }[] = [
+  { id: "pedido", label: "Pedido" },
+  { id: "importacao_manual", label: "Importação manual" },
+  { id: "cadastro_administrativo", label: "Cadastro administrativo" },
+  { id: "outro", label: "Outro" },
+];
+
+export interface ClubClient {
+  id: number;
+  name: string;
+  phone: string;
+  stamps: number;
+  cashbackBalance: string;
+  origin: ClientOrigin;
+  notes: string;
+  joinedAt: string;
+  createdAt: string;
+  active: boolean;
+  orderCount: number;
+  totalSpent: number;
+  lastOrderAt: string | null;
+  lastOrderNumber: number | null;
+  segments: ClientRecoverySegment[];
+}
+
+export interface ClientsListResponse {
+  count: number;
+  origins: Record<ClientOrigin, string>;
+  clients: ClubClient[];
+}
+
+export interface ClientOrderHistoryItem {
+  id: number;
+  orderNumber: number;
+  total: number;
+  status: string;
+  createdAt: string;
+}
+
+export interface ClientDetailResponse {
+  client: ClubClient;
+  history: ClientOrderHistoryItem[];
+  recoveryHints: {
+    novo: boolean;
+    recorrente: boolean;
+    vip: boolean;
+    semComprar7dias: boolean;
+    semComprar15dias: boolean;
+    semComprar30dias: boolean;
+  };
+}
+
+export const getClients = (opts?: { q?: string; origin?: string }) => {
+  const params = new URLSearchParams();
+  if (opts?.q) params.set("q", opts.q);
+  if (opts?.origin) params.set("origin", opts.origin);
+  const qs = params.toString();
+  return api.get(`/admin/clientes${qs ? `?${qs}` : ""}`) as Promise<ClientsListResponse>;
+};
+
+export const getClientDetail = (id: number) =>
+  api.get(`/admin/clientes/${id}`) as Promise<ClientDetailResponse>;
+
+export type CreateClientResult =
+  | { ok: true; updated: boolean; client: ClubClient }
+  | { ok: false; conflict: true; error: string; client: ClubClient };
+
+/** Create client; on duplicate WhatsApp returns conflict + existing client (no throw). */
+export async function createClient(d: {
+  name: string;
+  phone: string;
+  stamps?: number;
+  cashbackBalance?: number | string;
+  origin?: ClientOrigin;
+  notes?: string;
+  updateIfExists?: boolean;
+}): Promise<CreateClientResult> {
+  const res = await fetch(`${BASE}/admin/clientes`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(d),
+  });
+  const data = await res.json().catch(() => ({})) as {
+    error?: string;
+    client?: ClubClient;
+    updated?: boolean;
+  };
+  if (res.status === 409 && data.client) {
+    return {
+      ok: false,
+      conflict: true,
+      error: data.error || "Já existe um cliente com este WhatsApp.",
+      client: data.client,
+    };
+  }
+  if (!res.ok) {
+    throw new Error(data.error || `HTTP ${res.status}`);
+  }
+  return {
+    ok: true,
+    updated: Boolean(data.updated),
+    client: (data as { client: ClubClient }).client,
+  };
+}
+
+export const updateClient = (
+  id: number,
+  d: Partial<{
+    name: string;
+    phone: string;
+    stamps: number;
+    cashbackBalance: number | string;
+    origin: ClientOrigin;
+    notes: string;
+    active: boolean;
+  }>,
+) => api.put(`/admin/clientes/${id}`, d) as Promise<ClubClient>;
+
+export const deleteClient = (id: number) =>
+  api.delete(`/admin/clientes/${id}`) as Promise<{ ok: boolean }>;
+
+export const adjustClientStamps = (id: number, delta: 1 | -1) =>
+  api.post(`/admin/clientes/${id}/stamps`, { delta }) as Promise<{
+    client: ClubClient;
+    stamps: number;
+  }>;
+
+export const adjustClientCashback = (id: number, amount: number) =>
+  api.post(`/admin/clientes/${id}/cashback`, { amount }) as Promise<{
+    client: ClubClient;
+    previous: number;
+    next: number;
+  }>;
+

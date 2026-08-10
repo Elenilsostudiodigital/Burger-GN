@@ -26,6 +26,9 @@ import AdminImportMenu from "./pages/admin/ImportMenu";
 import AdminFinancial from "./pages/admin/Financial";
 import AdminClubeBurger from "./pages/admin/ClubeBurger";
 import AdminReviews from "./pages/admin/Reviews";
+import AdminClientsList from "./pages/admin/ClientsList";
+import AdminClientsImport from "./pages/admin/ClientsImport";
+import AdminClientDetail from "./pages/admin/ClientDetail";
 
 const queryClient = new QueryClient();
 
@@ -76,6 +79,9 @@ function Router() {
         <Route path="/admin/financeiro" component={() => <ProtectedAdminRoute component={AdminFinancial} />} />
         <Route path="/admin/cupons" component={() => <ProtectedAdminRoute component={AdminCoupons} />} />
         <Route path="/admin/clube" component={() => <ProtectedAdminRoute component={AdminClubeBurger} />} />
+        <Route path="/admin/clientes/importar" component={() => <ProtectedAdminRoute component={AdminClientsImport} />} />
+        <Route path="/admin/clientes/:id" component={() => <ProtectedAdminRoute component={AdminClientDetail} />} />
+        <Route path="/admin/clientes" component={() => <ProtectedAdminRoute component={AdminClientsList} />} />
         <Route path="/admin/avaliacoes" component={() => <ProtectedAdminRoute component={AdminReviews} />} />
         <Route path="/admin/taxas" component={() => <ProtectedAdminRoute component={AdminDeliveryZones} />} />
         <Route path="/admin/entrega-km" component={() => <ProtectedAdminRoute component={AdminKmDelivery} />} />

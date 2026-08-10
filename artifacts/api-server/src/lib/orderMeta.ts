@@ -42,6 +42,8 @@ export interface OrderMeta {
   review?: OrderReview;
   /** When admin marked as delivered (ISO). Used for post-delivery UX timing. */
   deliveredAt?: string;
+  /** Optional CRM link to clube_members.id (soft; phone match still works for legacy orders). */
+  clientMemberId?: number;
 }
 
 export const WORKFLOW_LABELS: Record<WorkflowStage | "cancelled", string> = {

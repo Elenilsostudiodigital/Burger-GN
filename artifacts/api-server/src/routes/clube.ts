@@ -10,6 +10,11 @@ import {
 } from "@workspace/db";
 import { eq, and, sql, desc } from "drizzle-orm";
 import { requireCompanyAuth } from "../middlewares/auth";
+import {
+  normalizeClientPhone,
+  parseClientNotes,
+  serializeClientNotes,
+} from "../lib/clientMeta";
 
 const router = Router();
 
@@ -211,19 +216,21 @@ router.post("/admin/clube/members", requireCompanyAuth, async (req, res) => {
       res.status(400).json({ error: "Nome é obrigatório" });
       return;
     }
+    const rawPhone = (body.phone ?? "").trim();
+    const phone = rawPhone ? normalizeClientPhone(rawPhone) || rawPhone : "";
     const [member] = await db
       .insert(clubeMembersTable)
       .values({
         companyId: req.companyId!,
         name: body.name.trim(),
         email: (body.email ?? "").trim().toLowerCase(),
-        phone: (body.phone ?? "").trim(),
+        phone,
         birthDate: body.birthDate || null,
         points: body.points ?? 0,
         cashbackBalance: body.cashbackBalance ?? "0",
         tier: body.tier ?? "bronze",
         active: body.active ?? true,
-        notes: body.notes ?? "",
+        notes: serializeClientNotes(body.notes ?? "", { origin: "cadastro_administrativo" }),
       })
       .returning();
     res.status(201).json(member);
@@ -253,9 +260,29 @@ router.put("/admin/clube/members/:id", requireCompanyAuth, async (req, res) => {
     }>;
     const updateData: Record<string, unknown> = { ...body };
     if (body.email !== undefined) updateData["email"] = body.email.trim().toLowerCase();
-    if (body.phone !== undefined) updateData["phone"] = body.phone.trim();
+    if (body.phone !== undefined) {
+      const raw = body.phone.trim();
+      updateData["phone"] = raw ? normalizeClientPhone(raw) || raw : "";
+    }
     if (body.name !== undefined) updateData["name"] = body.name.trim();
     if (body.birthDate !== undefined) updateData["birthDate"] = body.birthDate || null;
+
+    // Preserve CRM origin meta embedded in notes (Clientes module).
+    if (body.notes !== undefined) {
+      const [existing] = await db
+        .select()
+        .from(clubeMembersTable)
+        .where(
+          and(
+            eq(clubeMembersTable.id, id),
+            eq(clubeMembersTable.companyId, req.companyId!),
+          ),
+        );
+      if (existing) {
+        const { meta } = parseClientNotes(existing.notes);
+        updateData["notes"] = serializeClientNotes(String(body.notes || ""), meta);
+      }
+    }
 
     const [member] = await db
       .update(clubeMembersTable)

@@ -13,6 +13,8 @@ import {
   type WorkflowStage, type CardType, type OrderMeta, type OrderReview,
 } from "../lib/orderMeta";
 import { buildStaticPixPayload, decodePixSettings, normalizePixKey } from "../lib/staticPix";
+import { syncClubeMemberOnOrder } from "../lib/clubeClientSync";
+import { normalizeClientPhone } from "../lib/clientMeta";
 import crypto from "node:crypto";
 
 const router = Router();
@@ -280,13 +282,27 @@ router.post("/orders", resolvePublicCompany, async (req, res) => {
       }
     }
 
+    // CRM: find/create client by WhatsApp (origin "Pedido"). Never blocks the order.
+    const orderPhone = normalizeClientPhone(body.phone) || body.phone;
+    try {
+      const member = await syncClubeMemberOnOrder({
+        companyId,
+        customerName: body.customerName,
+        phone: orderPhone,
+        origin: "pedido",
+      });
+      if (member?.id) meta.clientMemberId = member.id;
+    } catch (syncErr) {
+      req.log.warn({ err: syncErr }, "Clube/CRM member sync skipped");
+    }
+
     const notesSerialized = serializeOrderNotes(body.notes ?? "", meta);
 
     const result = await db.transaction(async (tx) => {
       const [order] = await tx.insert(ordersTable).values({
         companyId,
         orderNumber, trackingId,
-        customerName: body.customerName, phone: body.phone,
+        customerName: body.customerName, phone: orderPhone,
         address: body.address ?? "", addressNumber: body.addressNumber ?? "",
         addressComplement: body.addressComplement ?? "",
         neighborhood: body.neighborhood ?? "", reference: body.reference ?? "",
