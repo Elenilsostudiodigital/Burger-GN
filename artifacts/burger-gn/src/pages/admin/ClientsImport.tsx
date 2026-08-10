@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
 import { Link, useLocation } from 'wouter';
-import { Users, LogOut, Plus, Check, Loader2, List, UserPlus, RefreshCw } from 'lucide-react';
+import { Users, LogOut, Plus, Check, Loader2, UserPlus, RefreshCw } from 'lucide-react';
 import { useAdmin } from '../../context/AdminContext';
 import {
   createClient, CLIENT_ORIGIN_OPTIONS, ClientOrigin, ClubClient,
 } from '../../lib/api';
 import { AdminBottomNav } from '../../components/AdminBottomNav';
+import { ClientsSubnav } from '../../components/ClientsSubnav';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -85,16 +86,7 @@ export default function ClientsImport() {
       </header>
 
       <main className="max-w-2xl mx-auto px-4 py-5 space-y-5">
-        <div className="flex gap-2">
-          <Link href="/admin/clientes" className="flex-1">
-            <div className="h-11 rounded-xl bg-zinc-900 border border-zinc-800 text-zinc-400 font-bold text-xs uppercase flex items-center justify-center gap-1.5">
-              <List size={15} /> Lista de Clientes
-            </div>
-          </Link>
-          <div className="flex-1 h-11 rounded-xl bg-amber-500 text-zinc-950 font-bold text-xs uppercase flex items-center justify-center gap-1.5">
-            <UserPlus size={15} /> Importação Manual
-          </div>
-        </div>
+        <ClientsSubnav active="importar" />
 
         <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
           <p className="text-zinc-500 text-xs leading-relaxed">

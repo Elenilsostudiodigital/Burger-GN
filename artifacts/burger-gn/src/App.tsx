@@ -29,6 +29,7 @@ import AdminReviews from "./pages/admin/Reviews";
 import AdminClientsList from "./pages/admin/ClientsList";
 import AdminClientsImport from "./pages/admin/ClientsImport";
 import AdminClientDetail from "./pages/admin/ClientDetail";
+import AdminClientsRecovery from "./pages/admin/ClientsRecovery";
 
 const queryClient = new QueryClient();
 
@@ -80,6 +81,7 @@ function Router() {
         <Route path="/admin/cupons" component={() => <ProtectedAdminRoute component={AdminCoupons} />} />
         <Route path="/admin/clube" component={() => <ProtectedAdminRoute component={AdminClubeBurger} />} />
         <Route path="/admin/clientes/importar" component={() => <ProtectedAdminRoute component={AdminClientsImport} />} />
+        <Route path="/admin/clientes/recuperacao" component={() => <ProtectedAdminRoute component={AdminClientsRecovery} />} />
         <Route path="/admin/clientes/:id" component={() => <ProtectedAdminRoute component={AdminClientDetail} />} />
         <Route path="/admin/clientes" component={() => <ProtectedAdminRoute component={AdminClientsList} />} />
         <Route path="/admin/avaliacoes" component={() => <ProtectedAdminRoute component={AdminReviews} />} />

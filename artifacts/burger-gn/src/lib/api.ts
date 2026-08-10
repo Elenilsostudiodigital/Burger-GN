@@ -703,6 +703,9 @@ export const CLIENT_ORIGIN_OPTIONS: { id: ClientOrigin; label: string }[] = [
   { id: "outro", label: "Outro" },
 ];
 
+export type RecoveryStatus = "ativo" | "esfriando" | "em_risco" | "perdido";
+export type RecoveryFilter = "todos" | "esfriando" | "em_risco" | "perdido" | "vip_inativo";
+
 export interface ClubClient {
   id: number;
   name: string;
@@ -719,6 +722,28 @@ export interface ClubClient {
   lastOrderAt: string | null;
   lastOrderNumber: number | null;
   segments: ClientRecoverySegment[];
+  daysWithoutOrder?: number | null;
+  recoveryStatus?: RecoveryStatus;
+  isVip?: boolean;
+  vipInativo?: boolean;
+  lastRecoveryAt?: string | null;
+  lastRecoveryCoupon?: string | null;
+}
+
+export interface RecoverySummary {
+  total: number;
+  esfriando: number;
+  emRisco: number;
+  perdidos: number;
+  vipsInativos: number;
+  historicalRevenue: number;
+}
+
+export interface RecoveryListResponse {
+  filter: RecoveryFilter;
+  summary: RecoverySummary;
+  count: number;
+  clients: ClubClient[];
 }
 
 export interface ClientsListResponse {
@@ -830,4 +855,81 @@ export const adjustClientCashback = (id: number, amount: number) =>
     previous: number;
     next: number;
   }>;
+
+export const getRecoveryClients = (opts?: { q?: string; status?: RecoveryFilter }) => {
+  const params = new URLSearchParams();
+  if (opts?.q) params.set("q", opts.q);
+  if (opts?.status) params.set("status", opts.status);
+  const qs = params.toString();
+  return api.get(`/admin/clientes/recuperacao${qs ? `?${qs}` : ""}`) as Promise<RecoveryListResponse>;
+};
+
+export const registerRecoveryContact = (
+  id: number,
+  d: { message: string; couponCode?: string | null },
+) =>
+  api.post(`/admin/clientes/${id}/recuperacao/contato`, d) as Promise<{
+    ok: boolean;
+    result: "contato_iniciado";
+    client: ClubClient;
+    lastRecoveryAt: string;
+    previousRecoveryAt: string | null;
+    daysSincePreviousContact: number | null;
+    warning: string | null;
+  }>;
+
+/** Admin recovery: always opens wa.me (manual send). Does not use storefront WhatsApp kill-switch. */
+export function openRecoveryWhatsapp(phone: string, message: string) {
+  const number = normalizePhoneForWhatsapp(phone);
+  if (!number || number.replace(/\D/g, "").replace(/^55/, "").length < 10) return false;
+  window.open(`https://wa.me/${number}?text=${encodeURIComponent(message)}`, "_blank", "noopener,noreferrer");
+  return true;
+}
+
+export function firstName(fullName: string): string {
+  const part = (fullName || "").trim().split(/\s+/)[0];
+  return part || "cliente";
+}
+
+/** Default recovery copy by status (VIP inactive uses dedicated template). */
+export function buildRecoveryMessage(
+  client: Pick<ClubClient, "name" | "recoveryStatus" | "vipInativo">,
+  couponCode?: string | null,
+): string {
+  const nome = firstName(client.name);
+  let body: string;
+  if (client.vipInativo) {
+    body =
+      `Fala, ${nome}! 👑\n` +
+      `Cliente especial não pode ficar tanto tempo longe da The Burger GN 😂🍔\n` +
+      `Passando para dizer que sentimos sua falta. Bora de Burger GN hoje?`;
+  } else if (client.recoveryStatus === "esfriando") {
+    body =
+      `Oi, ${nome}! 👋 Sentimos sua falta por aqui 😋\n` +
+      `Passando para lembrar que a The Burger GN está te esperando.\n` +
+      `Que tal matar a saudade hoje? 🍔🔥`;
+  } else if (client.recoveryStatus === "em_risco") {
+    body =
+      `Fala, ${nome}! 👀 Já faz um tempinho que você não aparece por aqui.\n` +
+      `A The Burger GN continua daquele jeito que você conhece. 🍔🔥\n` +
+      `Bora fazer seu pedido hoje?`;
+  } else {
+    // perdido (default)
+    body =
+      `${nome}, você sumiu! 😂🍔\n` +
+      `Já passou da hora de matar a saudade da The Burger GN.\n` +
+      `Estamos te esperando por aqui. 🔥`;
+  }
+  if (couponCode && couponCode.trim()) {
+    body += `\n\nUse o cupom ${couponCode.trim()} no seu próximo pedido.`;
+  }
+  return body;
+}
+
+export function daysSinceIso(iso: string | null | undefined, now = Date.now()): number | null {
+  if (!iso) return null;
+  const t = new Date(iso).getTime();
+  if (!Number.isFinite(t)) return null;
+  return Math.max(0, Math.floor((now - t) / (1000 * 60 * 60 * 24)));
+}
 

@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Link, useLocation } from 'wouter';
 import {
   Users, LogOut, Search, Pencil, Trash2, Plus, Minus, Loader2,
-  UserPlus, List, Wallet, X, Check, History,
+  Wallet, X, Check, History,
 } from 'lucide-react';
 import { useAdmin } from '../../context/AdminContext';
 import {
@@ -10,6 +10,7 @@ import {
   ClubClient, ClientOrigin, CLIENT_ORIGIN_OPTIONS,
 } from '../../lib/api';
 import { AdminBottomNav } from '../../components/AdminBottomNav';
+import { ClientsSubnav } from '../../components/ClientsSubnav';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -159,16 +160,7 @@ export default function ClientsList() {
       </header>
 
       <main className="max-w-2xl mx-auto px-4 py-5 space-y-4">
-        <div className="flex gap-2">
-          <div className="flex-1 h-11 rounded-xl bg-amber-500 text-zinc-950 font-bold text-xs uppercase flex items-center justify-center gap-1.5">
-            <List size={15} /> Lista de Clientes
-          </div>
-          <Link href="/admin/clientes/importar" className="flex-1">
-            <div className="h-11 rounded-xl bg-zinc-900 border border-zinc-800 text-zinc-400 font-bold text-xs uppercase flex items-center justify-center gap-1.5 hover:border-amber-500/40">
-              <UserPlus size={15} /> Importação Manual
-            </div>
-          </Link>
-        </div>
+        <ClientsSubnav active="lista" />
 
         <div className="space-y-2">
           <div className="relative">

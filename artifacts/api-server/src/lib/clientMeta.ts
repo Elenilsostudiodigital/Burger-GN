@@ -11,11 +11,23 @@ export type ClientOrigin =
   | "cadastro_administrativo"
   | "outro";
 
+/** Recovery attempt — not a WhatsApp delivery receipt (manual open only). */
+export interface RecoveryContactRecord {
+  at: string;
+  message: string;
+  couponCode?: string | null;
+  result: "contato_iniciado";
+}
+
 export interface ClientMeta {
   origin: ClientOrigin;
+  lastRecovery?: RecoveryContactRecord;
+  /** Newest first; capped on write. */
+  recoveryHistory?: RecoveryContactRecord[];
 }
 
 const META_RE = /<!--BGN_CLIENT:([\s\S]*?):BGN_CLIENT-->/;
+const MAX_RECOVERY_HISTORY = 20;
 
 /** Legacy origins from PR #2 — mapped on read. */
 const LEGACY_ORIGIN_MAP: Record<string, ClientOrigin> = {
@@ -52,6 +64,19 @@ function resolveOrigin(value: unknown): ClientOrigin {
   return "outro";
 }
 
+function parseRecoveryRecord(value: unknown): RecoveryContactRecord | null {
+  if (!value || typeof value !== "object") return null;
+  const o = value as Partial<RecoveryContactRecord>;
+  if (typeof o.at !== "string" || !o.at) return null;
+  if (typeof o.message !== "string") return null;
+  return {
+    at: o.at,
+    message: o.message,
+    couponCode: typeof o.couponCode === "string" && o.couponCode ? o.couponCode : null,
+    result: "contato_iniciado",
+  };
+}
+
 export function parseClientNotes(notes: string | null | undefined): {
   publicNotes: string;
   meta: ClientMeta;
@@ -61,24 +86,74 @@ export function parseClientNotes(notes: string | null | undefined): {
   if (!match) {
     return { publicNotes: raw.trim(), meta: { origin: "pedido" } };
   }
-  let origin: ClientOrigin = "pedido";
+  const meta: ClientMeta = { origin: "pedido" };
   try {
-    const parsed = JSON.parse(match[1] || "{}") as { origin?: unknown };
-    origin = resolveOrigin(parsed.origin);
+    const parsed = JSON.parse(match[1] || "{}") as {
+      origin?: unknown;
+      lastRecovery?: unknown;
+      recoveryHistory?: unknown;
+    };
+    meta.origin = resolveOrigin(parsed.origin);
+    const last = parseRecoveryRecord(parsed.lastRecovery);
+    if (last) meta.lastRecovery = last;
+    if (Array.isArray(parsed.recoveryHistory)) {
+      const history = parsed.recoveryHistory
+        .map(parseRecoveryRecord)
+        .filter((r): r is RecoveryContactRecord => !!r)
+        .slice(0, MAX_RECOVERY_HISTORY);
+      if (history.length) meta.recoveryHistory = history;
+    }
   } catch {
     /* keep default */
   }
   return {
     publicNotes: raw.replace(META_RE, "").trim(),
-    meta: { origin },
+    meta,
   };
 }
 
 export function serializeClientNotes(publicNotes: string, meta: ClientMeta): string {
-  const origin = resolveOrigin(meta.origin);
+  const payload: ClientMeta = {
+    origin: resolveOrigin(meta.origin),
+  };
+  if (meta.lastRecovery) {
+    payload.lastRecovery = {
+      at: meta.lastRecovery.at,
+      message: String(meta.lastRecovery.message || "").slice(0, 4000),
+      couponCode: meta.lastRecovery.couponCode || null,
+      result: "contato_iniciado",
+    };
+  }
+  if (meta.recoveryHistory?.length) {
+    payload.recoveryHistory = meta.recoveryHistory.slice(0, MAX_RECOVERY_HISTORY).map((r) => ({
+      at: r.at,
+      message: String(r.message || "").slice(0, 4000),
+      couponCode: r.couponCode || null,
+      result: "contato_iniciado" as const,
+    }));
+  }
   const body = (publicNotes || "").trim();
-  const tag = `<!--BGN_CLIENT:${JSON.stringify({ origin })}:BGN_CLIENT-->`;
+  const tag = `<!--BGN_CLIENT:${JSON.stringify(payload)}:BGN_CLIENT-->`;
   return body ? `${body}\n\n${tag}` : tag;
+}
+
+/** Append a recovery contact attempt (manual WhatsApp open). */
+export function appendRecoveryContact(
+  meta: ClientMeta,
+  record: Omit<RecoveryContactRecord, "result"> & { result?: "contato_iniciado" },
+): ClientMeta {
+  const entry: RecoveryContactRecord = {
+    at: record.at,
+    message: String(record.message || "").slice(0, 4000),
+    couponCode: record.couponCode || null,
+    result: "contato_iniciado",
+  };
+  const history = [entry, ...(meta.recoveryHistory ?? [])].slice(0, MAX_RECOVERY_HISTORY);
+  return {
+    ...meta,
+    lastRecovery: entry,
+    recoveryHistory: history,
+  };
 }
 
 /** Normalize Brazilian WhatsApp/phone to digits (prefer 55…). */

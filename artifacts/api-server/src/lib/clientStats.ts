@@ -10,12 +10,27 @@ export type ClientRecoverySegment =
   | "inativo_30"
   | "ativo";
 
+/** Operational recovery status for the Recuperação panel (computed, not stored). */
+export type RecoveryStatus = "ativo" | "esfriando" | "em_risco" | "perdido";
+
+export type RecoveryFilter =
+  | "todos"
+  | "esfriando"
+  | "em_risco"
+  | "perdido"
+  | "vip_inativo";
+
 export interface ClientOrderStats {
   orderCount: number;
   totalSpent: number;
   lastOrderAt: string | null;
   lastOrderNumber: number | null;
   segments: ClientRecoverySegment[];
+  /** Whole days since last non-cancelled order (or null if never). */
+  daysWithoutOrder: number | null;
+  recoveryStatus: RecoveryStatus;
+  isVip: boolean;
+  vipInativo: boolean;
 }
 
 export interface OrderForStats {
@@ -29,11 +44,38 @@ export interface OrderForStats {
   clientMemberId?: number | null;
 }
 
-const VIP_MIN_ORDERS = 5;
-const VIP_MIN_SPENT = 300;
+export const VIP_MIN_ORDERS = 5;
+export const VIP_MIN_SPENT = 300;
+const DAY_MS = 1000 * 60 * 60 * 24;
 
 function toDate(value: Date | string): Date {
   return value instanceof Date ? value : new Date(value);
+}
+
+export function daysBetween(from: Date | string, to: Date = new Date()): number {
+  const start = toDate(from).getTime();
+  if (!Number.isFinite(start)) return 0;
+  return Math.max(0, Math.floor((to.getTime() - start) / DAY_MS));
+}
+
+export function isVipClient(orderCount: number, totalSpent: number): boolean {
+  return orderCount >= VIP_MIN_ORDERS || totalSpent >= VIP_MIN_SPENT;
+}
+
+/** Map last-order age to recovery bucket. No orders ⇒ perdido. */
+export function computeRecoveryStatus(
+  lastOrderAt: string | null,
+  orderCount: number,
+  now: Date = new Date(),
+): { status: RecoveryStatus; daysWithoutOrder: number | null } {
+  if (!lastOrderAt || orderCount <= 0) {
+    return { status: "perdido", daysWithoutOrder: null };
+  }
+  const days = daysBetween(lastOrderAt, now);
+  if (days <= 7) return { status: "ativo", daysWithoutOrder: days };
+  if (days <= 15) return { status: "esfriando", daysWithoutOrder: days };
+  if (days <= 30) return { status: "em_risco", daysWithoutOrder: days };
+  return { status: "perdido", daysWithoutOrder: days };
 }
 
 export function emptyClientOrderStats(): ClientOrderStats {
@@ -42,7 +84,11 @@ export function emptyClientOrderStats(): ClientOrderStats {
     totalSpent: 0,
     lastOrderAt: null,
     lastOrderNumber: null,
-    segments: ["novo"],
+    segments: ["novo", "inativo_30"],
+    daysWithoutOrder: null,
+    recoveryStatus: "perdido",
+    isVip: false,
+    vipInativo: false,
   };
 }
 
@@ -65,6 +111,9 @@ export function computeClientOrderStats(
   const lastOrderNumber = last ? last.orderNumber : null;
 
   const segments = computeRecoverySegments({ orderCount, totalSpent, lastOrderAt }, now);
+  const { status, daysWithoutOrder } = computeRecoveryStatus(lastOrderAt, orderCount, now);
+  const vip = isVipClient(orderCount, totalSpent);
+  const vipInativo = vip && daysWithoutOrder !== null && daysWithoutOrder > 15;
 
   return {
     orderCount,
@@ -72,6 +121,10 @@ export function computeClientOrderStats(
     lastOrderAt,
     lastOrderNumber,
     segments,
+    daysWithoutOrder,
+    recoveryStatus: status,
+    isVip: vip,
+    vipInativo,
   };
 }
 
@@ -83,22 +136,52 @@ export function computeRecoverySegments(
 
   if (stats.orderCount <= 1) segments.push("novo");
   if (stats.orderCount >= 2) segments.push("recorrente");
-  if (stats.orderCount >= VIP_MIN_ORDERS || stats.totalSpent >= VIP_MIN_SPENT) {
+  if (isVipClient(stats.orderCount, stats.totalSpent)) {
     segments.push("vip");
   }
 
-  if (stats.lastOrderAt) {
-    const days = (now.getTime() - new Date(stats.lastOrderAt).getTime()) / (1000 * 60 * 60 * 24);
-    if (days >= 30) segments.push("inativo_30");
-    else if (days >= 15) segments.push("inativo_15");
-    else if (days >= 7) segments.push("inativo_7");
-    else segments.push("ativo");
-  } else if (stats.orderCount === 0) {
-    // Registered without orders — treat as inactive 30d for recovery readiness
-    segments.push("inativo_30");
+  const { status, daysWithoutOrder } = computeRecoveryStatus(
+    stats.lastOrderAt,
+    stats.orderCount,
+    now,
+  );
+  if (status === "ativo") segments.push("ativo");
+  else if (status === "esfriando") segments.push("inativo_7");
+  else if (status === "em_risco") segments.push("inativo_15");
+  else segments.push("inativo_30");
+
+  if (isVipClient(stats.orderCount, stats.totalSpent) && daysWithoutOrder !== null && daysWithoutOrder > 15) {
+    // vip + inactive already covered by vip + inativo_* flags
   }
 
   return segments;
+}
+
+/** Urgency sort: lost → risk → cooling; VIP inactive boosted; then more days first. */
+export function recoverySortScore(row: {
+  recoveryStatus: RecoveryStatus;
+  vipInativo: boolean;
+  daysWithoutOrder: number | null;
+}): number {
+  const statusWeight =
+    row.recoveryStatus === "perdido" ? 3000
+      : row.recoveryStatus === "em_risco" ? 2000
+        : row.recoveryStatus === "esfriando" ? 1000
+          : 0;
+  const vipBoost = row.vipInativo ? 500 : 0;
+  const days = row.daysWithoutOrder ?? 9999;
+  return statusWeight + vipBoost + days;
+}
+
+export function matchesRecoveryFilter(
+  row: { recoveryStatus: RecoveryStatus; vipInativo: boolean },
+  filter: RecoveryFilter,
+): boolean {
+  if (filter === "todos") {
+    return row.recoveryStatus !== "ativo";
+  }
+  if (filter === "vip_inativo") return row.vipInativo;
+  return row.recoveryStatus === filter;
 }
 
 /** Match company orders to a client by explicit meta id and/or phone. */
