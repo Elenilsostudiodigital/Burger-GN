@@ -66,7 +66,7 @@ Preferir Promote/Rollback na Vercel para não reescrever histórico sem necessid
 
 ## Migrações de banco
 
-Comandos locais (usam `.env`, que **não** deve ser commitado):
+Comandos manuais (usam `.env`, que **não** deve ser commitado):
 
 ```bash
 pnpm run db:migrate          # multi-tenant (quando aplicável)
@@ -79,12 +79,13 @@ pnpm run db:migrate-clube    # Clube / fidelidade / cashback / CRM (clube_member
 - `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` para fidelidade/cashback
 - Não remove tabelas, colunas nem dados
 
-Antes de rodar em produção:
+Em produção na Vercel, o API server também aplica automaticamente esse schema aditivo do Clube/CRM na subida (cold start / primeira request `/api`), usando a `DATABASE_URL` já configurada no ambiente — sem apagar dados.
+
+Ainda assim, para mudanças grandes de schema:
 
 1. Garantir backup/recuperação do Postgres (snapshot do provedor)
-2. Apontar `DATABASE_URL` para o banco de **produção** (variável do ambiente Vercel)
-3. Executar `pnpm run db:migrate-clube`
-4. Validar `/admin/clube` e `/admin/clientes`
+2. Preferir rodar `pnpm run db:migrate-clube` apontando para o banco de produção
+3. Validar `/admin/clube` e `/admin/clientes`
 
 ## Segredos
 

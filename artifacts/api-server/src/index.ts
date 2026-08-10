@@ -1,9 +1,15 @@
 import app from "./app";
 import { logger } from "./lib/logger";
 import { runSeed } from "./lib/seed";
+import { ensureClubeSchema } from "./lib/ensureClubeSchema";
 
 // On Vercel/serverless the platform invokes the exported app; do not call listen()
 const isServerless = Boolean(process.env["VERCEL"] || process.env["AWS_LAMBDA_FUNCTION_NAME"]);
+
+async function bootstrapData() {
+  await ensureClubeSchema();
+  await runSeed();
+}
 
 if (!isServerless) {
   const rawPort = process.env["PORT"];
@@ -26,11 +32,11 @@ if (!isServerless) {
       process.exit(1);
     }
     logger.info({ port }, "Server listening");
-    await runSeed();
+    await bootstrapData();
   });
 } else {
-  // Best-effort seed on cold start (non-blocking)
-  void runSeed().catch((err) => logger.error({ err }, "Seed failed on serverless start"));
+  // Best-effort schema + seed on cold start (non-blocking; middleware also awaits schema)
+  void bootstrapData().catch((err) => logger.error({ err }, "Bootstrap failed on serverless start"));
 }
 
 export default app;

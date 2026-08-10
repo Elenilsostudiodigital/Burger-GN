@@ -6,8 +6,27 @@ import fs from "node:fs";
 import pinoHttp from "pino-http";
 import router from "./routes";
 import { logger } from "./lib/logger";
+import { ensureClubeSchema } from "./lib/ensureClubeSchema";
 
 const app: Express = express();
+
+/** Ensures additive Clube/CRM schema before handlers that touch those tables. */
+app.use("/api", async (req, res, next) => {
+  const path = req.path || "";
+  const needsClubeSchema =
+    path.startsWith("/admin/clientes") ||
+    path.startsWith("/admin/clube") ||
+    path === "/orders" ||
+    path.startsWith("/orders/");
+  if (!needsClubeSchema) return next();
+  try {
+    await ensureClubeSchema();
+    next();
+  } catch (err) {
+    logger.error({ err }, "Failed to ensure Clube schema");
+    res.status(500).json({ error: "Falha ao preparar o banco de dados do Clube/CRM." });
+  }
+});
 
 app.use(
   pinoHttp({
