@@ -6,12 +6,13 @@ import {
   getClubeMembers, createClubeMember, updateClubeMember, deleteClubeMember,
   getClubeLoyalty, createClubeLoyalty, updateClubeLoyalty, deleteClubeLoyalty,
   getClubeCashback, updateClubeCashback,
+  getClubeFidelity, updateClubeFidelity,
   getClubeExclusiveCoupons, createClubeExclusiveCoupon, updateClubeExclusiveCoupon, deleteClubeExclusiveCoupon,
   getClubeBirthdayBenefits, createClubeBirthdayBenefit, updateClubeBirthdayBenefit, deleteClubeBirthdayBenefit,
   getClubeEarlyPromotions, createClubeEarlyPromotion, updateClubeEarlyPromotion, deleteClubeEarlyPromotion,
   ClubeDashboard, ClubeSettings, ClubeMember, ClubeLoyaltyReward,
   ClubeExclusiveCoupon, ClubeBirthdayBenefit, ClubeEarlyPromotion,
-  ClubeMemberTier, ClubeDiscountType, ClubeCashbackData,
+  ClubeMemberTier, ClubeDiscountType, ClubeCashbackData, ClubeFidelitySettings,
 } from '../../lib/api';
 import { useAdmin } from '../../context/AdminContext';
 import {
@@ -100,6 +101,7 @@ export default function ClubeBurger() {
   const [settings, setSettings] = useState<ClubeSettings | null>(null);
   const [members, setMembers] = useState<ClubeMember[]>([]);
   const [loyalty, setLoyalty] = useState<ClubeLoyaltyReward[]>([]);
+  const [fidelity, setFidelity] = useState<ClubeFidelitySettings | null>(null);
   const [cashback, setCashback] = useState<ClubeCashbackData | null>(null);
   const [exclusive, setExclusive] = useState<ClubeExclusiveCoupon[]>([]);
   const [birthdays, setBirthdays] = useState<ClubeBirthdayBenefit[]>([]);
@@ -118,7 +120,11 @@ export default function ClubeBurger() {
     setEditId(null);
     try {
       if (t === 'dashboard') setDashboard(await getClubeDashboard());
-      else if (t === 'fidelidade') setLoyalty(await getClubeLoyalty());
+      else if (t === 'fidelidade') {
+        const [rewards, fidelityCfg] = await Promise.all([getClubeLoyalty(), getClubeFidelity()]);
+        setLoyalty(rewards);
+        setFidelity(fidelityCfg);
+      }
       else if (t === 'cashback') setCashback(await getClubeCashback());
       else if (t === 'cupons') setExclusive(await getClubeExclusiveCoupons());
       else if (t === 'aniversario') setBirthdays(await getClubeBirthdayBenefits());
@@ -287,6 +293,11 @@ export default function ClubeBurger() {
         pointsRedeemValue: settings.pointsRedeemValue,
         cashbackPercent: settings.cashbackPercent,
         cashbackMinOrder: settings.cashbackMinOrder,
+        fidelityEnabled: settings.fidelityEnabled,
+        stampsRequired: settings.stampsRequired,
+        stampRewardTitle: settings.stampRewardTitle,
+        cashbackEnabled: settings.cashbackEnabled,
+        cashbackMaxPerOrder: settings.cashbackMaxPerOrder ?? null,
         birthdayDiscountType: settings.birthdayDiscountType,
         birthdayDiscountValue: settings.birthdayDiscountValue,
         birthdayDaysBefore: settings.birthdayDaysBefore,
@@ -409,6 +420,74 @@ export default function ClubeBurger() {
               {/* ── Fidelidade ── */}
               {tab === 'fidelidade' && (
                 <>
+                  {fidelity && (
+                    <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-4">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <h3 className="text-white font-bold uppercase text-sm flex items-center gap-2">
+                            <Gift size={16} className="text-amber-500" /> Cartão de selos
+                          </h3>
+                          <p className="text-zinc-500 text-xs mt-1">
+                            +1 selo automático quando o pedido é concluído (sem duplicar).
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setFidelity(f => f ? { ...f, fidelityEnabled: !f.fidelityEnabled } : f)}
+                          className={fidelity.fidelityEnabled ? 'text-green-400' : 'text-zinc-600'}
+                          aria-label="Ativar ou desativar fidelidade"
+                        >
+                          {fidelity.fidelityEnabled ? <ToggleRight size={28} /> : <ToggleLeft size={28} />}
+                        </button>
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label className="text-zinc-400 text-xs">Selos necessários para recompensa</Label>
+                        <Input
+                          type="number"
+                          min={1}
+                          max={100}
+                          value={String(fidelity.stampsRequired)}
+                          onChange={e => setFidelity(f => f ? { ...f, stampsRequired: parseInt(e.target.value || '10', 10) || 10 } : f)}
+                          className="bg-zinc-950 border-zinc-800 text-white h-11 focus:border-amber-500"
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label className="text-zinc-400 text-xs">Recompensa oferecida</Label>
+                        <Input
+                          value={fidelity.stampRewardTitle}
+                          onChange={e => setFidelity(f => f ? { ...f, stampRewardTitle: e.target.value } : f)}
+                          placeholder="Ex: 1 hambúrguer grátis"
+                          className="bg-zinc-950 border-zinc-800 text-white h-11 focus:border-amber-500"
+                        />
+                      </div>
+                      <p className="text-zinc-500 text-xs">
+                        Exemplo: {fidelity.stampsRequired || 10} selos = {fidelity.stampRewardTitle || '1 hambúrguer grátis'}.
+                      </p>
+                      <Button
+                        onClick={async () => {
+                          setSaving(true); setError('');
+                          try {
+                            const updated = await updateClubeFidelity({
+                              fidelityEnabled: fidelity.fidelityEnabled,
+                              stampsRequired: fidelity.stampsRequired,
+                              stampRewardTitle: fidelity.stampRewardTitle,
+                            });
+                            setFidelity(updated);
+                          } catch { setError('Erro ao salvar fidelidade'); }
+                          finally { setSaving(false); }
+                        }}
+                        disabled={saving}
+                        className="w-full h-11 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold rounded-xl"
+                      >
+                        {saving ? <Loader2 className="animate-spin" size={16} /> : 'Salvar cartão de selos'}
+                      </Button>
+                    </div>
+                  )}
+
+                  <div className="pt-1">
+                    <h3 className="text-white font-bold uppercase text-sm mb-2">Recompensas por pontos (catálogo)</h3>
+                    <p className="text-zinc-500 text-xs mb-3">Catálogo opcional separado do cartão de selos automático.</p>
+                  </div>
                   <Button onClick={() => openCreate({ title: '', description: '', pointsCost: '', active: true })}
                     className="w-full h-11 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold rounded-xl">
                     <Plus size={16} className="mr-2" /> Nova Recompensa
@@ -480,9 +559,22 @@ export default function ClubeBurger() {
                     </div>
                   </div>
                   <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-4">
-                    <h3 className="text-white font-bold uppercase text-sm flex items-center gap-2">
-                      <Wallet size={16} className="text-amber-500" /> Regras de Cashback
-                    </h3>
+                    <div className="flex items-center justify-between gap-3">
+                      <h3 className="text-white font-bold uppercase text-sm flex items-center gap-2">
+                        <Wallet size={16} className="text-amber-500" /> Regras de Cashback
+                      </h3>
+                      <button
+                        type="button"
+                        onClick={() => setCashback(c => c ? { ...c, cashbackEnabled: !(c.cashbackEnabled ?? true) } : c)}
+                        className={(cashback.cashbackEnabled ?? true) ? 'text-green-400' : 'text-zinc-600'}
+                        aria-label="Ativar ou desativar cashback"
+                      >
+                        {(cashback.cashbackEnabled ?? true) ? <ToggleRight size={28} /> : <ToggleLeft size={28} />}
+                      </button>
+                    </div>
+                    <p className="text-zinc-500 text-xs">
+                      Creditado automaticamente no pedido concluído (sem duplicar o mesmo pedido).
+                    </p>
                     <div className="space-y-1.5">
                       <Label className="text-zinc-400 text-xs">Percentual de cashback (%)</Label>
                       <Input type="number" value={String(form.cashbackPercent ?? cashback.cashbackPercent)}
@@ -495,17 +587,27 @@ export default function ClubeBurger() {
                         onChange={e => setForm(f => ({ ...f, cashbackMinOrder: e.target.value, cashbackPercent: f.cashbackPercent ?? cashback.cashbackPercent }))}
                         className="bg-zinc-950 border-zinc-800 text-white h-11 focus:border-amber-500" />
                     </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-zinc-400 text-xs">Limite máximo por pedido (R$) — vazio = sem limite</Label>
+                      <Input type="number" value={String(form.cashbackMaxPerOrder ?? cashback.cashbackMaxPerOrder ?? '')}
+                        onChange={e => setForm(f => ({
+                          ...f,
+                          cashbackMaxPerOrder: e.target.value,
+                          cashbackPercent: f.cashbackPercent ?? cashback.cashbackPercent,
+                          cashbackMinOrder: f.cashbackMinOrder ?? cashback.cashbackMinOrder,
+                        }))}
+                        placeholder="Opcional"
+                        className="bg-zinc-950 border-zinc-800 text-white h-11 focus:border-amber-500" />
+                    </div>
                     <Button onClick={async () => {
-                      setForm(f => ({
-                        ...f,
-                        cashbackPercent: f.cashbackPercent ?? cashback.cashbackPercent,
-                        cashbackMinOrder: f.cashbackMinOrder ?? cashback.cashbackMinOrder,
-                      }));
                       setSaving(true); setError('');
                       try {
+                        const maxRaw = String(form.cashbackMaxPerOrder ?? cashback.cashbackMaxPerOrder ?? '').trim();
                         await updateClubeCashback({
+                          cashbackEnabled: cashback.cashbackEnabled ?? true,
                           cashbackPercent: (parseFloat(String(form.cashbackPercent ?? cashback.cashbackPercent)) || 0).toFixed(2),
                           cashbackMinOrder: (parseFloat(String(form.cashbackMinOrder ?? cashback.cashbackMinOrder)) || 0).toFixed(2),
+                          cashbackMaxPerOrder: maxRaw === '' ? null : (parseFloat(maxRaw) || 0).toFixed(2),
                         });
                         setCashback(await getClubeCashback());
                       } catch { setError('Erro ao salvar cashback'); }

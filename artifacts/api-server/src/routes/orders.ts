@@ -15,6 +15,7 @@ import {
 import { buildStaticPixPayload, decodePixSettings, normalizePixKey } from "../lib/staticPix";
 import { syncClubeMemberOnOrder } from "../lib/clubeClientSync";
 import { normalizeClientPhone } from "../lib/clientMeta";
+import { applyOrderCompletionRewards } from "../lib/orderRewards";
 import crypto from "node:crypto";
 
 const router = Router();
@@ -472,6 +473,28 @@ router.patch("/orders/:id/status", requireCompanyAuth, async (req, res) => {
       }
     } else {
       res.status(400).json({ error: "Invalid status" }); return;
+    }
+
+    // Automatic fidelity + cashback when order reaches done (idempotent).
+    if (nextStatus === "done") {
+      try {
+        const rewardResult = await applyOrderCompletionRewards(
+          {
+            id: existing.id,
+            orderNumber: existing.orderNumber,
+            companyId: req.companyId!,
+            customerName: existing.customerName,
+            phone: existing.phone,
+            total: existing.total,
+            status: "done",
+          },
+          nextMeta,
+        );
+        nextMeta = rewardResult.meta;
+      } catch (rewardErr) {
+        // Never block order completion if CRM rewards fail.
+        req.log.error({ err: rewardErr }, "Failed to apply order completion rewards");
+      }
     }
 
     const [order] = await db.update(ordersTable)

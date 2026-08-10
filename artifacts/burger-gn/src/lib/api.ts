@@ -537,12 +537,23 @@ export interface ClubeSettings {
   pointsRedeemValue: string;
   cashbackPercent: string;
   cashbackMinOrder: string;
+  fidelityEnabled?: boolean;
+  stampsRequired?: number;
+  stampRewardTitle?: string;
+  cashbackEnabled?: boolean;
+  cashbackMaxPerOrder?: string | null;
   birthdayDiscountType: ClubeDiscountType;
   birthdayDiscountValue: string;
   birthdayDaysBefore: number;
   birthdayDaysAfter: number;
   earlyAccessHours: number;
   updatedAt: string;
+}
+
+export interface ClubeFidelitySettings {
+  fidelityEnabled: boolean;
+  stampsRequired: number;
+  stampRewardTitle: string;
 }
 
 export interface ClubeMember {
@@ -626,6 +637,8 @@ export interface ClubeDashboard {
 export interface ClubeCashbackData {
   cashbackPercent: string;
   cashbackMinOrder: string;
+  cashbackEnabled?: boolean;
+  cashbackMaxPerOrder?: string | null;
   totalBalance: number;
   membersWithBalance: ClubeMember[];
 }
@@ -650,8 +663,17 @@ export const updateClubeLoyalty = (id: number, d: Partial<ClubeLoyaltyReward>) =
 export const deleteClubeLoyalty = (id: number) => api.delete(`/admin/clube/loyalty/${id}`);
 
 export const getClubeCashback = () => api.get("/admin/clube/cashback") as Promise<ClubeCashbackData>;
-export const updateClubeCashback = (d: { cashbackPercent?: string; cashbackMinOrder?: string }) =>
-  api.put("/admin/clube/cashback", d) as Promise<ClubeSettings>;
+export const updateClubeCashback = (d: {
+  cashbackPercent?: string;
+  cashbackMinOrder?: string;
+  cashbackEnabled?: boolean;
+  cashbackMaxPerOrder?: string | null;
+}) => api.put("/admin/clube/cashback", d) as Promise<ClubeSettings>;
+
+export const getClubeFidelity = () =>
+  api.get("/admin/clube/fidelity") as Promise<ClubeFidelitySettings>;
+export const updateClubeFidelity = (d: Partial<ClubeFidelitySettings>) =>
+  api.put("/admin/clube/fidelity", d) as Promise<ClubeFidelitySettings>;
 
 export const getClubeExclusiveCoupons = () =>
   api.get("/admin/clube/exclusive-coupons") as Promise<ClubeExclusiveCoupon[]>;
@@ -760,9 +782,58 @@ export interface ClientOrderHistoryItem {
   createdAt: string;
 }
 
+export type ClientLedgerType =
+  | "selo_pedido"
+  | "cashback_pedido"
+  | "cashback_utilizado"
+  | "ajuste_selo"
+  | "ajuste_cashback"
+  | "recompensa_disponivel"
+  | "recompensa_resgatada";
+
+export interface ClientLedgerEntry {
+  id: string;
+  at: string;
+  type: ClientLedgerType;
+  orderId: number | null;
+  orderNumber: number | null;
+  stampsDelta: number | null;
+  cashbackDelta: number | null;
+  description: string | null;
+  rewardId: string | null;
+  rewardTitle: string | null;
+}
+
+export interface ClientAvailableReward {
+  id: string;
+  title: string;
+  earnedAt: string;
+  orderId: number | null;
+  orderNumber: number | null;
+  redeemedAt: string | null;
+  available: boolean;
+}
+
 export interface ClientDetailResponse {
   client: ClubClient;
   history: ClientOrderHistoryItem[];
+  fidelity: {
+    enabled: boolean;
+    stamps: number;
+    goal: number;
+    progress: number;
+    remaining: number;
+    rewardTitle: string;
+    availableRewards: ClientAvailableReward[];
+  };
+  cashbackProgram: {
+    enabled: boolean;
+    percent: string;
+    minOrder: string;
+    maxPerOrder: string | null;
+    balance: string;
+  };
+  ledger: ClientLedgerEntry[];
   recoveryHints: {
     novo: boolean;
     recorrente: boolean;
@@ -854,6 +925,13 @@ export const adjustClientCashback = (id: number, amount: number) =>
     client: ClubClient;
     previous: number;
     next: number;
+  }>;
+
+export const redeemClientReward = (clientId: number, rewardId: string) =>
+  api.post(`/admin/clientes/${clientId}/rewards/${rewardId}/redeem`, {}) as Promise<{
+    ok: boolean;
+    client: ClubClient;
+    reward: ClientAvailableReward;
   }>;
 
 export const getRecoveryClients = (opts?: { q?: string; status?: RecoveryFilter }) => {

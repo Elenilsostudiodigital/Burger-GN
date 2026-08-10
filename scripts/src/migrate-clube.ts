@@ -34,6 +34,18 @@ CREATE TABLE IF NOT EXISTS clube_settings (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS clube_settings_company_idx ON clube_settings(company_id);
 
+-- Extensões idempotentes: fidelidade por selos + cashback automático
+ALTER TABLE clube_settings
+  ADD COLUMN IF NOT EXISTS fidelity_enabled BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE clube_settings
+  ADD COLUMN IF NOT EXISTS stamps_required INTEGER NOT NULL DEFAULT 10;
+ALTER TABLE clube_settings
+  ADD COLUMN IF NOT EXISTS stamp_reward_title TEXT NOT NULL DEFAULT '1 hambúrguer grátis';
+ALTER TABLE clube_settings
+  ADD COLUMN IF NOT EXISTS cashback_enabled BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE clube_settings
+  ADD COLUMN IF NOT EXISTS cashback_max_per_order NUMERIC(10,2);
+
 CREATE TABLE IF NOT EXISTS clube_members (
   id SERIAL PRIMARY KEY,
   company_id INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,

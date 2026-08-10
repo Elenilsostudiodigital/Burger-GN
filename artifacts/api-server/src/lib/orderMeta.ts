@@ -44,6 +44,14 @@ export interface OrderMeta {
   deliveredAt?: string;
   /** Optional CRM link to clube_members.id (soft; phone match still works for legacy orders). */
   clientMemberId?: number;
+  /** Idempotency: stamp already awarded for this order. */
+  stampsAwarded?: boolean;
+  /** Idempotency: cashback already awarded for this order. */
+  cashbackAwarded?: boolean;
+  /** Cashback amount credited (BRL) when cashbackAwarded. */
+  cashbackAmountAwarded?: number;
+  /** When automatic rewards were last processed (ISO). */
+  rewardsProcessedAt?: string;
 }
 
 export const WORKFLOW_LABELS: Record<WorkflowStage | "cancelled", string> = {
@@ -99,6 +107,13 @@ export function serializeOrderNotes(publicNotes: string, meta: OrderMeta): strin
   if (meta.rejectReason) cleanMeta.rejectReason = meta.rejectReason;
   if (meta.review) cleanMeta.review = meta.review;
   if (meta.deliveredAt) cleanMeta.deliveredAt = meta.deliveredAt;
+  if (typeof meta.clientMemberId === "number") cleanMeta.clientMemberId = meta.clientMemberId;
+  if (meta.stampsAwarded) cleanMeta.stampsAwarded = true;
+  if (meta.cashbackAwarded) cleanMeta.cashbackAwarded = true;
+  if (typeof meta.cashbackAmountAwarded === "number") {
+    cleanMeta.cashbackAmountAwarded = meta.cashbackAmountAwarded;
+  }
+  if (meta.rewardsProcessedAt) cleanMeta.rewardsProcessedAt = meta.rewardsProcessedAt;
 
   const hasMeta = Object.keys(cleanMeta).length > 0;
   const body = (publicNotes || "").trim();

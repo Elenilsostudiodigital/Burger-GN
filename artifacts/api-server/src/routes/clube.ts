@@ -147,6 +147,11 @@ router.put("/admin/clube/settings", requireCompanyAuth, async (req, res) => {
       pointsRedeemValue: string;
       cashbackPercent: string;
       cashbackMinOrder: string;
+      fidelityEnabled: boolean;
+      stampsRequired: number;
+      stampRewardTitle: string;
+      cashbackEnabled: boolean;
+      cashbackMaxPerOrder: string | null;
       birthdayDiscountType: DiscountType;
       birthdayDiscountValue: string;
       birthdayDaysBefore: number;
@@ -163,6 +168,9 @@ router.put("/admin/clube/settings", requireCompanyAuth, async (req, res) => {
       "pointsRedeemValue",
       "cashbackPercent",
       "cashbackMinOrder",
+      "fidelityEnabled",
+      "stampRewardTitle",
+      "cashbackEnabled",
       "birthdayDiscountType",
       "birthdayDiscountValue",
       "birthdayDaysBefore",
@@ -170,6 +178,18 @@ router.put("/admin/clube/settings", requireCompanyAuth, async (req, res) => {
       "earlyAccessHours",
     ] as const) {
       if (body[key] !== undefined) updateData[key] = body[key];
+    }
+    if (body.stampsRequired !== undefined) {
+      const n = Math.round(Number(body.stampsRequired));
+      updateData["stampsRequired"] = Number.isFinite(n) ? Math.max(1, Math.min(100, n)) : 10;
+    }
+    if (body.cashbackMaxPerOrder !== undefined) {
+      if (body.cashbackMaxPerOrder === null || body.cashbackMaxPerOrder === "") {
+        updateData["cashbackMaxPerOrder"] = null;
+      } else {
+        const n = parseFloat(String(body.cashbackMaxPerOrder));
+        updateData["cashbackMaxPerOrder"] = Number.isFinite(n) && n >= 0 ? n.toFixed(2) : null;
+      }
     }
 
     const [settings] = await db
@@ -441,6 +461,8 @@ router.get("/admin/clube/cashback", requireCompanyAuth, async (req, res) => {
     res.json({
       cashbackPercent: settings.cashbackPercent,
       cashbackMinOrder: settings.cashbackMinOrder,
+      cashbackEnabled: settings.cashbackEnabled ?? true,
+      cashbackMaxPerOrder: settings.cashbackMaxPerOrder ?? null,
       totalBalance: parseFloat(totalBalance ?? "0"),
       membersWithBalance: members,
     });
@@ -456,10 +478,21 @@ router.put("/admin/clube/cashback", requireCompanyAuth, async (req, res) => {
     const body = req.body as Partial<{
       cashbackPercent: string;
       cashbackMinOrder: string;
+      cashbackEnabled: boolean;
+      cashbackMaxPerOrder: string | null;
     }>;
     const updateData: Record<string, unknown> = { updatedAt: new Date() };
     if (body.cashbackPercent !== undefined) updateData["cashbackPercent"] = body.cashbackPercent;
     if (body.cashbackMinOrder !== undefined) updateData["cashbackMinOrder"] = body.cashbackMinOrder;
+    if (body.cashbackEnabled !== undefined) updateData["cashbackEnabled"] = Boolean(body.cashbackEnabled);
+    if (body.cashbackMaxPerOrder !== undefined) {
+      if (body.cashbackMaxPerOrder === null || body.cashbackMaxPerOrder === "") {
+        updateData["cashbackMaxPerOrder"] = null;
+      } else {
+        const n = parseFloat(String(body.cashbackMaxPerOrder));
+        updateData["cashbackMaxPerOrder"] = Number.isFinite(n) && n >= 0 ? n.toFixed(2) : null;
+      }
+    }
 
     const [settings] = await db
       .update(clubeSettingsTable)
@@ -469,6 +502,55 @@ router.put("/admin/clube/cashback", requireCompanyAuth, async (req, res) => {
     res.json(settings);
   } catch (err) {
     req.log.error({ err }, "Failed to update cashback settings");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ── Fidelidade por selos (config do cartão) ───────────────────────────────────
+router.get("/admin/clube/fidelity", requireCompanyAuth, async (req, res) => {
+  try {
+    const settings = await ensureSettings(req.companyId!);
+    res.json({
+      fidelityEnabled: settings.fidelityEnabled ?? true,
+      stampsRequired: settings.stampsRequired ?? 10,
+      stampRewardTitle: settings.stampRewardTitle || "1 hambúrguer grátis",
+    });
+  } catch (err) {
+    req.log.error({ err }, "Failed to fetch fidelity settings");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.put("/admin/clube/fidelity", requireCompanyAuth, async (req, res) => {
+  try {
+    await ensureSettings(req.companyId!);
+    const body = req.body as Partial<{
+      fidelityEnabled: boolean;
+      stampsRequired: number;
+      stampRewardTitle: string;
+    }>;
+    const updateData: Record<string, unknown> = { updatedAt: new Date() };
+    if (body.fidelityEnabled !== undefined) updateData["fidelityEnabled"] = Boolean(body.fidelityEnabled);
+    if (body.stampsRequired !== undefined) {
+      const n = Math.round(Number(body.stampsRequired));
+      updateData["stampsRequired"] = Number.isFinite(n) ? Math.max(1, Math.min(100, n)) : 10;
+    }
+    if (body.stampRewardTitle !== undefined) {
+      updateData["stampRewardTitle"] =
+        String(body.stampRewardTitle || "").trim().slice(0, 200) || "1 hambúrguer grátis";
+    }
+    const [settings] = await db
+      .update(clubeSettingsTable)
+      .set(updateData)
+      .where(eq(clubeSettingsTable.companyId, req.companyId!))
+      .returning();
+    res.json({
+      fidelityEnabled: settings.fidelityEnabled,
+      stampsRequired: settings.stampsRequired,
+      stampRewardTitle: settings.stampRewardTitle,
+    });
+  } catch (err) {
+    req.log.error({ err }, "Failed to update fidelity settings");
     res.status(500).json({ error: "Internal server error" });
   }
 });

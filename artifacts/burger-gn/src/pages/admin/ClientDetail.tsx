@@ -1,13 +1,15 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useLocation, useParams } from 'wouter';
 import {
-  Users, LogOut, ArrowLeft, Loader2, Wallet, Award,
+  Users, LogOut, ArrowLeft, Loader2, Wallet, Award, Gift, History,
 } from 'lucide-react';
 import { useAdmin } from '../../context/AdminContext';
 import {
-  getClientDetail, ClientDetailResponse, ClientOrigin,
+  getClientDetail, redeemClientReward,
+  ClientDetailResponse, ClientOrigin, ClientLedgerType,
 } from '../../lib/api';
 import { AdminBottomNav } from '../../components/AdminBottomNav';
+import { Button } from '@/components/ui/button';
 
 const ORIGIN_LABEL: Record<ClientOrigin, string> = {
   pedido: 'Pedido',
@@ -22,6 +24,16 @@ const STATUS_LABEL: Record<string, string> = {
   delivery: 'Entrega',
   done: 'Concluído',
   cancelled: 'Cancelado',
+};
+
+const LEDGER_LABEL: Record<ClientLedgerType, string> = {
+  selo_pedido: 'Selo recebido',
+  cashback_pedido: 'Cashback recebido',
+  cashback_utilizado: 'Cashback utilizado',
+  ajuste_selo: 'Ajuste de selos',
+  ajuste_cashback: 'Ajuste de cashback',
+  recompensa_disponivel: 'Recompensa disponível',
+  recompensa_resgatada: 'Recompensa resgatada',
 };
 
 function fmt(v: string | number) {
@@ -51,6 +63,19 @@ export default function ClientDetail() {
   const [data, setData] = useState<ClientDetailResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [redeemingId, setRedeemingId] = useState<string | null>(null);
+
+  const load = async (id: number) => {
+    setLoading(true);
+    try {
+      setData(await getClientDetail(id));
+      setError('');
+    } catch {
+      setError('Não foi possível carregar o cliente');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
     const id = Number(params.id);
@@ -59,12 +84,22 @@ export default function ClientDetail() {
       setLoading(false);
       return;
     }
-    setLoading(true);
-    getClientDetail(id)
-      .then(setData)
-      .catch(() => setError('Não foi possível carregar o cliente'))
-      .finally(() => setLoading(false));
+    load(id);
   }, [params.id]);
+
+  const handleRedeem = async (rewardId: string) => {
+    if (!data) return;
+    if (!confirm('Confirmar resgate desta recompensa?')) return;
+    setRedeemingId(rewardId);
+    try {
+      await redeemClientReward(data.client.id, rewardId);
+      await load(data.client.id);
+    } catch {
+      setError('Não foi possível resgatar a recompensa');
+    } finally {
+      setRedeemingId(null);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-[#0a0a0a] pb-24">
@@ -134,7 +169,6 @@ export default function ClientDetail() {
                 {data.client.lastOrderNumber != null ? ` (#${data.client.lastOrderNumber})` : ''}
               </p>
 
-              {/* Recovery-ready hints (not a full recovery module). */}
               <div className="flex flex-wrap gap-1.5 pt-1">
                 {data.recoveryHints.novo && <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full border border-sky-500/30 text-sky-400">Novo</span>}
                 {data.recoveryHints.recorrente && <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full border border-green-500/30 text-green-400">Recorrente</span>}
@@ -143,6 +177,114 @@ export default function ClientDetail() {
                 {data.recoveryHints.semComprar15dias && <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full border border-orange-500/30 text-orange-300">Sem comprar 15d</span>}
                 {data.recoveryHints.semComprar30dias && <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full border border-red-500/30 text-red-400">Sem comprar 30d</span>}
               </div>
+            </section>
+
+            {data.fidelity && (
+              <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4 space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <h2 className="text-white font-black uppercase text-sm tracking-wide flex items-center gap-2">
+                    <Gift size={16} className="text-amber-500" /> Fidelidade
+                  </h2>
+                  <span className={`text-[10px] font-bold uppercase ${data.fidelity.enabled ? 'text-green-400' : 'text-zinc-500'}`}>
+                    {data.fidelity.enabled ? 'Ativa' : 'Desativada'}
+                  </span>
+                </div>
+                <div className="grid grid-cols-3 gap-2 text-center">
+                  <div className="rounded-xl bg-zinc-950 border border-zinc-800 px-2 py-2">
+                    <p className="text-zinc-500 text-[10px] uppercase font-bold">Selos atuais</p>
+                    <p className="text-amber-400 font-black text-lg">{data.fidelity.stamps}</p>
+                  </div>
+                  <div className="rounded-xl bg-zinc-950 border border-zinc-800 px-2 py-2">
+                    <p className="text-zinc-500 text-[10px] uppercase font-bold">Meta</p>
+                    <p className="text-white font-black text-lg">{data.fidelity.goal}</p>
+                  </div>
+                  <div className="rounded-xl bg-zinc-950 border border-zinc-800 px-2 py-2">
+                    <p className="text-zinc-500 text-[10px] uppercase font-bold">Faltam</p>
+                    <p className="text-white font-black text-lg">{data.fidelity.remaining}</p>
+                  </div>
+                </div>
+                <div>
+                  <div className="flex justify-between text-[10px] text-zinc-500 uppercase font-bold mb-1">
+                    <span>Progresso</span>
+                    <span>{data.fidelity.progress}%</span>
+                  </div>
+                  <div className="h-2 rounded-full bg-zinc-950 border border-zinc-800 overflow-hidden">
+                    <div
+                      className="h-full bg-amber-500 transition-all"
+                      style={{ width: `${Math.min(100, data.fidelity.progress)}%` }}
+                    />
+                  </div>
+                  <p className="text-zinc-500 text-xs mt-2">
+                    Recompensa: {data.fidelity.rewardTitle}
+                  </p>
+                </div>
+
+                <div className="space-y-2 pt-1">
+                  <p className="text-zinc-400 text-xs font-bold uppercase">Recompensas disponíveis</p>
+                  {data.fidelity.availableRewards.filter(r => r.available).length === 0 ? (
+                    <p className="text-zinc-600 text-sm">Nenhuma recompensa disponível no momento.</p>
+                  ) : (
+                    data.fidelity.availableRewards.filter(r => r.available).map((r) => (
+                      <div key={r.id} className="flex items-center justify-between gap-3 rounded-xl border border-amber-500/30 bg-zinc-950 px-3 py-2.5">
+                        <div className="min-w-0">
+                          <p className="text-white text-sm font-bold truncate">{r.title}</p>
+                          <p className="text-zinc-500 text-xs">
+                            {formatDateTime(r.earnedAt)}
+                            {r.orderNumber != null ? ` · Pedido #${r.orderNumber}` : ''}
+                          </p>
+                        </div>
+                        <Button
+                          type="button"
+                          disabled={redeemingId === r.id}
+                          onClick={() => handleRedeem(r.id)}
+                          className="h-9 px-3 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold text-xs rounded-lg shrink-0"
+                        >
+                          {redeemingId === r.id ? <Loader2 className="animate-spin" size={14} /> : 'Resgatar'}
+                        </Button>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </section>
+            )}
+
+            <section className="space-y-3">
+              <h2 className="text-white font-black uppercase text-sm tracking-wide flex items-center gap-2">
+                <History size={16} className="text-amber-500" /> Histórico de fidelidade
+              </h2>
+              {!data.ledger?.length ? (
+                <p className="text-zinc-600 text-sm py-6 text-center">Nenhum movimento de selo/cashback ainda.</p>
+              ) : (
+                data.ledger.map((e) => (
+                  <article key={e.id} className="rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-3 space-y-1">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-white font-bold text-sm">
+                          {LEDGER_LABEL[e.type] || e.type}
+                        </p>
+                        <p className="text-zinc-500 text-xs">{formatDateTime(e.at)}</p>
+                      </div>
+                      <div className="text-right shrink-0">
+                        {e.stampsDelta != null && e.stampsDelta !== 0 && (
+                          <p className={`text-sm font-black ${e.stampsDelta > 0 ? 'text-amber-400' : 'text-zinc-400'}`}>
+                            {e.stampsDelta > 0 ? '+' : ''}{e.stampsDelta} selo{Math.abs(e.stampsDelta) === 1 ? '' : 's'}
+                          </p>
+                        )}
+                        {e.cashbackDelta != null && e.cashbackDelta !== 0 && (
+                          <p className={`text-sm font-black ${e.cashbackDelta > 0 ? 'text-green-400' : 'text-red-400'}`}>
+                            {e.cashbackDelta > 0 ? '+' : ''}{fmt(e.cashbackDelta)}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    <p className="text-zinc-500 text-xs">
+                      {e.orderNumber != null ? `Pedido #${e.orderNumber}` : '—'}
+                      {e.rewardTitle ? ` · ${e.rewardTitle}` : ''}
+                      {e.description ? ` · ${e.description}` : ''}
+                    </p>
+                  </article>
+                ))
+              )}
             </section>
 
             <section className="space-y-3">

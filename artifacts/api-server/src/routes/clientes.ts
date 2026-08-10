@@ -1,9 +1,10 @@
 import { Router } from "express";
-import { db, clubeMembersTable, ordersTable, couponsTable } from "@workspace/db";
+import { db, clubeMembersTable, clubeSettingsTable, ordersTable, couponsTable } from "@workspace/db";
 import { and, eq, desc } from "drizzle-orm";
 import { requireCompanyAuth } from "../middlewares/auth";
 import {
   CLIENT_ORIGIN_LABELS,
+  appendClientLedger,
   appendRecoveryContact,
   isClientOrigin,
   isPlaceholderPhone,
@@ -12,6 +13,7 @@ import {
   parseClientNotes,
   serializeClientNotes,
   type ClientOrigin,
+  type ClientMeta,
 } from "../lib/clientMeta";
 import { toClientRow } from "../lib/clubeClientSync";
 import {
@@ -26,6 +28,48 @@ import {
   type RecoveryFilter,
 } from "../lib/clientStats";
 import { parseOrderNotes } from "../lib/orderMeta";
+
+async function loadFidelitySettings(companyId: number) {
+  const [settings] = await db
+    .select()
+    .from(clubeSettingsTable)
+    .where(eq(clubeSettingsTable.companyId, companyId));
+  return {
+    fidelityEnabled: settings?.fidelityEnabled ?? true,
+    stampsRequired: settings?.stampsRequired ?? 10,
+    stampRewardTitle: settings?.stampRewardTitle || "1 hambúrguer grátis",
+    cashbackEnabled: settings?.cashbackEnabled ?? true,
+    cashbackPercent: settings?.cashbackPercent ?? "5",
+    cashbackMinOrder: settings?.cashbackMinOrder ?? "0",
+    cashbackMaxPerOrder: settings?.cashbackMaxPerOrder ?? null,
+  };
+}
+
+function fidelityProgress(stamps: number, stampsRequired: number) {
+  const goal = Math.max(1, stampsRequired);
+  const current = Math.max(0, stamps);
+  return {
+    stamps: current,
+    goal,
+    progress: Math.min(100, Math.round((current / goal) * 100)),
+    remaining: Math.max(0, goal - current),
+  };
+}
+
+function ledgerPayload(meta: ClientMeta) {
+  return (meta.ledger ?? []).map((e) => ({
+    id: e.id,
+    at: e.at,
+    type: e.type,
+    orderId: e.orderId ?? null,
+    orderNumber: e.orderNumber ?? null,
+    stampsDelta: e.stampsDelta ?? null,
+    cashbackDelta: e.cashbackDelta ?? null,
+    description: e.description ?? null,
+    rewardId: e.rewardId ?? null,
+    rewardTitle: e.rewardTitle ?? null,
+  }));
+}
 
 const router = Router();
 
@@ -320,6 +364,18 @@ router.get("/admin/clientes/:id", requireCompanyAuth, async (req, res) => {
       }));
 
     const { meta } = parseClientNotes(member.notes);
+    const fidelity = await loadFidelitySettings(req.companyId!);
+    const progress = fidelityProgress(member.points ?? 0, fidelity.stampsRequired);
+    const availableRewards = (meta.availableRewards ?? []).map((r) => ({
+      id: r.id,
+      title: r.title,
+      earnedAt: r.earnedAt,
+      orderId: r.orderId ?? null,
+      orderNumber: r.orderNumber ?? null,
+      redeemedAt: r.redeemedAt ?? null,
+      available: !r.redeemedAt,
+    }));
+
     res.json({
       client: {
         ...toClientRow(member),
@@ -336,6 +392,23 @@ router.get("/admin/clientes/:id", requireCompanyAuth, async (req, res) => {
         lastRecoveryCoupon: meta.lastRecovery?.couponCode ?? null,
       },
       history,
+      fidelity: {
+        enabled: fidelity.fidelityEnabled,
+        stamps: progress.stamps,
+        goal: progress.goal,
+        progress: progress.progress,
+        remaining: progress.remaining,
+        rewardTitle: fidelity.stampRewardTitle,
+        availableRewards,
+      },
+      cashbackProgram: {
+        enabled: fidelity.cashbackEnabled,
+        percent: fidelity.cashbackPercent,
+        minOrder: fidelity.cashbackMinOrder,
+        maxPerOrder: fidelity.cashbackMaxPerOrder,
+        balance: member.cashbackBalance,
+      },
+      ledger: ledgerPayload(meta),
       // Recovery classifications (computed from order history, not persisted).
       recoveryHints: {
         novo: stats.segments.includes("novo"),
@@ -388,6 +461,26 @@ router.post("/admin/clientes", requireCompanyAuth, async (req, res) => {
     if (existing) {
       if (body.updateIfExists) {
         const current = parseClientNotes(existing.notes);
+        let nextMeta: ClientMeta = { ...current.meta, origin };
+        const prevStamps = existing.points ?? 0;
+        const prevCash = parseFloat(String(existing.cashbackBalance)) || 0;
+        const now = new Date().toISOString();
+        if (stamps !== prevStamps) {
+          nextMeta = appendClientLedger(nextMeta, {
+            at: now,
+            type: "ajuste_selo",
+            stampsDelta: stamps - prevStamps,
+            description: "Ajuste manual de selos (importação)",
+          });
+        }
+        if (Math.abs(cashback - prevCash) > 0.001) {
+          nextMeta = appendClientLedger(nextMeta, {
+            at: now,
+            type: "ajuste_cashback",
+            cashbackDelta: Math.round((cashback - prevCash) * 100) / 100,
+            description: "Ajuste manual de cashback (importação)",
+          });
+        }
         const [updated] = await db
           .update(clubeMembersTable)
           .set({
@@ -395,7 +488,7 @@ router.post("/admin/clientes", requireCompanyAuth, async (req, res) => {
             phone,
             points: stamps,
             cashbackBalance: cashback.toFixed(2),
-            notes: serializeClientNotes(publicNotes || current.publicNotes, { origin }),
+            notes: serializeClientNotes(publicNotes || current.publicNotes, nextMeta),
           })
           .where(
             and(
@@ -478,9 +571,9 @@ router.put("/admin/clientes/:id", requireCompanyAuth, async (req, res) => {
       ? String(body.notes).trim().slice(0, 2000)
       : current.publicNotes;
 
-    const patch: Record<string, unknown> = {
-      notes: serializeClientNotes(publicNotes, { origin }),
-    };
+    let nextMeta: ClientMeta = { ...current.meta, origin };
+    const now = new Date().toISOString();
+    const patch: Record<string, unknown> = {};
     if (body.name !== undefined) patch["name"] = body.name.trim();
     if (body.phone !== undefined) {
       const phone = normalizeClientPhone(body.phone);
@@ -498,13 +591,33 @@ router.put("/admin/clientes/:id", requireCompanyAuth, async (req, res) => {
       patch["phone"] = phone;
     }
     if (body.stamps !== undefined) {
-      patch["points"] = Math.max(0, Math.min(500, Math.round(Number(body.stamps) || 0)));
+      const stamps = Math.max(0, Math.min(500, Math.round(Number(body.stamps) || 0)));
+      const prev = existing.points ?? 0;
+      if (stamps !== prev) {
+        nextMeta = appendClientLedger(nextMeta, {
+          at: now,
+          type: "ajuste_selo",
+          stampsDelta: stamps - prev,
+          description: "Ajuste manual de selos",
+        });
+      }
+      patch["points"] = stamps;
     }
     if (body.cashbackBalance !== undefined) {
       const cash = Math.max(0, Number(body.cashbackBalance) || 0);
+      const prev = parseFloat(String(existing.cashbackBalance)) || 0;
+      if (Math.abs(cash - prev) > 0.001) {
+        nextMeta = appendClientLedger(nextMeta, {
+          at: now,
+          type: "ajuste_cashback",
+          cashbackDelta: Math.round((cash - prev) * 100) / 100,
+          description: "Ajuste manual de cashback",
+        });
+      }
       patch["cashbackBalance"] = cash.toFixed(2);
     }
     if (body.active !== undefined) patch["active"] = Boolean(body.active);
+    patch["notes"] = serializeClientNotes(publicNotes, nextMeta);
 
     const [updated] = await db
       .update(clubeMembersTable)
@@ -555,10 +668,20 @@ router.post("/admin/clientes/:id/stamps", requireCompanyAuth, async (req, res) =
     }
 
     const stamps = Math.max(0, (existing.points || 0) + delta);
+    const { publicNotes, meta } = parseClientNotes(existing.notes);
+    const nextMeta = appendClientLedger(meta, {
+      at: new Date().toISOString(),
+      type: "ajuste_selo",
+      stampsDelta: delta,
+      description: delta > 0 ? "Ajuste manual: +1 selo" : "Ajuste manual: −1 selo",
+    });
 
     const [updated] = await db
       .update(clubeMembersTable)
-      .set({ points: stamps })
+      .set({
+        points: stamps,
+        notes: serializeClientNotes(publicNotes, nextMeta),
+      })
       .where(and(eq(clubeMembersTable.id, id), eq(clubeMembersTable.companyId, req.companyId!)))
       .returning();
 
@@ -590,16 +713,92 @@ router.post("/admin/clientes/:id/cashback", requireCompanyAuth, async (req, res)
 
     const current = parseFloat(String(existing.cashbackBalance)) || 0;
     const next = Math.max(0, Math.round((current + amount) * 100) / 100);
+    const applied = Math.round((next - current) * 100) / 100;
+    const { publicNotes, meta } = parseClientNotes(existing.notes);
+    const ledgerType = applied < 0 ? "cashback_utilizado" : "ajuste_cashback";
+    const nextMeta = appendClientLedger(meta, {
+      at: new Date().toISOString(),
+      type: ledgerType,
+      cashbackDelta: applied,
+      description:
+        applied < 0
+          ? "Cashback utilizado / debitado"
+          : "Ajuste manual de cashback",
+    });
 
     const [updated] = await db
       .update(clubeMembersTable)
-      .set({ cashbackBalance: next.toFixed(2) })
+      .set({
+        cashbackBalance: next.toFixed(2),
+        notes: serializeClientNotes(publicNotes, nextMeta),
+      })
       .where(and(eq(clubeMembersTable.id, id), eq(clubeMembersTable.companyId, req.companyId!)))
       .returning();
 
     res.json({ client: toClientRow(updated!), previous: current, next });
   } catch (err) {
     req.log.error({ err }, "Failed to adjust cashback");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ── Resgatar recompensa de selos ──────────────────────────────────────────────
+router.post("/admin/clientes/:id/rewards/:rewardId/redeem", requireCompanyAuth, async (req, res) => {
+  try {
+    const id = Number(req.params["id"]);
+    const rewardId = String(req.params["rewardId"] || "");
+    if (!rewardId) {
+      res.status(400).json({ error: "Recompensa inválida." });
+      return;
+    }
+
+    const [existing] = await db
+      .select()
+      .from(clubeMembersTable)
+      .where(and(eq(clubeMembersTable.id, id), eq(clubeMembersTable.companyId, req.companyId!)));
+    if (!existing) {
+      res.status(404).json({ error: "Cliente não encontrado" });
+      return;
+    }
+
+    const { publicNotes, meta } = parseClientNotes(existing.notes);
+    const rewards = [...(meta.availableRewards ?? [])];
+    const idx = rewards.findIndex((r) => r.id === rewardId);
+    if (idx < 0) {
+      res.status(404).json({ error: "Recompensa não encontrada." });
+      return;
+    }
+    if (rewards[idx]!.redeemedAt) {
+      res.status(409).json({ error: "Esta recompensa já foi resgatada." });
+      return;
+    }
+
+    const now = new Date().toISOString();
+    rewards[idx] = { ...rewards[idx]!, redeemedAt: now };
+    let nextMeta: ClientMeta = { ...meta, availableRewards: rewards };
+    nextMeta = appendClientLedger(nextMeta, {
+      at: now,
+      type: "recompensa_resgatada",
+      rewardId,
+      rewardTitle: rewards[idx]!.title,
+      orderId: rewards[idx]!.orderId ?? null,
+      orderNumber: rewards[idx]!.orderNumber ?? null,
+      description: `Recompensa resgatada: ${rewards[idx]!.title}`,
+    });
+
+    const [updated] = await db
+      .update(clubeMembersTable)
+      .set({ notes: serializeClientNotes(publicNotes, nextMeta) })
+      .where(and(eq(clubeMembersTable.id, id), eq(clubeMembersTable.companyId, req.companyId!)))
+      .returning();
+
+    res.json({
+      ok: true,
+      client: toClientRow(updated!),
+      reward: rewards[idx],
+    });
+  } catch (err) {
+    req.log.error({ err }, "Failed to redeem reward");
     res.status(500).json({ error: "Internal server error" });
   }
 });

@@ -51,6 +51,16 @@ export const clubeSettingsTable = pgTable(
     cashbackMinOrder: numeric("cashback_min_order", { precision: 10, scale: 2 })
       .notNull()
       .default("0"),
+    /** Programa de selos por pedido concluído. */
+    fidelityEnabled: boolean("fidelity_enabled").notNull().default(true),
+    stampsRequired: integer("stamps_required").notNull().default(10),
+    stampRewardTitle: text("stamp_reward_title")
+      .notNull()
+      .default("1 hambúrguer grátis"),
+    /** Cashback automático em pedidos concluídos. */
+    cashbackEnabled: boolean("cashback_enabled").notNull().default(true),
+    /** Limite máximo de cashback por pedido (null = sem limite). */
+    cashbackMaxPerOrder: numeric("cashback_max_per_order", { precision: 10, scale: 2 }),
     birthdayDiscountType: clubeDiscountTypeEnum("birthday_discount_type")
       .notNull()
       .default("percentage"),
