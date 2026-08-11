@@ -44,6 +44,17 @@ function mapEmbedUrl(lat: number, lng: number) {
   return `https://www.openstreetmap.org/export/embed.html?bbox=${lng - 0.012}%2C${lat - 0.012}%2C${lng + 0.012}%2C${lat + 0.012}&layer=mapnik&marker=${lat}%2C${lng}`;
 }
 
+/** Coerce API/JSON values to finite numbers — strings break `.toFixed()` in render. */
+function toFiniteNumber(value: unknown): number | null {
+  const n = typeof value === 'number' ? value : parseFloat(String(value ?? ''));
+  return Number.isFinite(n) ? n : null;
+}
+
+function fmtCoord(value: number): string {
+  const n = toFiniteNumber(value);
+  return n == null ? '—' : n.toFixed(5);
+}
+
 const ORIGIN_LABEL: Record<DeliveryStreetOrigin, string> = {
   manual: 'Manual',
   pedido: 'Aprovada por Pedido',
@@ -131,37 +142,39 @@ export default function AdminRuasEntrega() {
     candidate: GeocodeStreetCandidate,
     config: KmDeliveryConfig | null = kmConfig,
   ) => {
-    try {
-      setSelectedCandidateId(candidate.id);
-      setCreateCoords({ lat: candidate.lat, lng: candidate.lng });
-      setGeoMessage('');
-      setError('');
-
-      const baseLat = parseFloat(String(config?.baseLat ?? '0'));
-      const baseLng = parseFloat(String(config?.baseLng ?? '0'));
-      if (!Number.isFinite(baseLat) || !Number.isFinite(baseLng) || (baseLat === 0 && baseLng === 0)) {
-        setCreateDistanceKm(null);
-        setSuggestedFee(null);
-        setGeoMessage('Local da loja não configurado para calcular distância. Você ainda pode salvar o cadastro.');
-        return;
-      }
-
-      const haversine = haversineKm(baseLat, baseLng, candidate.lat, candidate.lng);
-      const routeKm = parseFloat((haversine * 1.3).toFixed(2));
-      const eta = estimateEtaMinutes(routeKm);
-      const fee = suggestFee(routeKm, config?.tiers ?? []);
-      setCreateDistanceKm(routeKm);
-      setSuggestedFee(fee);
-      setCreateForm((f) => ({
-        ...f,
-        fee: String(fee),
-        eta: String(eta),
-      }));
-    } catch (err) {
-      console.error('[RuasEntrega] applyCandidate failed', err);
-      setGeoMessage('Não foi possível aplicar este endereço. Tente outro resultado da lista.');
-      setError('Não foi possível aplicar este endereço. Tente outro resultado da lista.');
+    const lat = toFiniteNumber(candidate.lat);
+    const lng = toFiniteNumber(candidate.lng);
+    if (lat == null || lng == null) {
+      setGeoMessage('Este resultado veio sem coordenadas válidas. Escolha outro endereço da lista.');
+      setError('Este resultado veio sem coordenadas válidas. Escolha outro endereço da lista.');
+      return;
     }
+
+    setSelectedCandidateId(candidate.id);
+    setCreateCoords({ lat, lng });
+    setGeoMessage('');
+    setError('');
+
+    const baseLat = parseFloat(String(config?.baseLat ?? '0'));
+    const baseLng = parseFloat(String(config?.baseLng ?? '0'));
+    if (!Number.isFinite(baseLat) || !Number.isFinite(baseLng) || (baseLat === 0 && baseLng === 0)) {
+      setCreateDistanceKm(null);
+      setSuggestedFee(null);
+      setGeoMessage('Local da loja não configurado para calcular distância. Você ainda pode salvar o cadastro.');
+      return;
+    }
+
+    const haversine = haversineKm(baseLat, baseLng, lat, lng);
+    const routeKm = parseFloat((haversine * 1.3).toFixed(2));
+    const eta = estimateEtaMinutes(routeKm);
+    const fee = suggestFee(routeKm, config?.tiers ?? []);
+    setCreateDistanceKm(routeKm);
+    setSuggestedFee(fee);
+    setCreateForm((f) => ({
+      ...f,
+      fee: String(fee),
+      eta: String(eta),
+    }));
   };
 
   const handleLocateAddress = async (e?: React.SyntheticEvent) => {
@@ -569,9 +582,10 @@ export default function AdminRuasEntrega() {
                       {geoCandidates.map((c) => {
                         const active = selectedCandidateId === c.id;
                         const label = [c.streetName, c.neighborhood || c.city].filter(Boolean).join(' - ');
+                        const display = typeof c.displayName === 'string' ? c.displayName : String(c.displayName ?? '');
                         return (
                           <button
-                            key={c.id}
+                            key={String(c.id)}
                             type="button"
                             onClick={() => applyCandidate(c)}
                             className={`w-full text-left rounded-lg border px-3 py-2.5 transition-colors ${
@@ -581,7 +595,7 @@ export default function AdminRuasEntrega() {
                             }`}
                           >
                             <p className="text-white text-sm font-bold">📍 {label}</p>
-                            <p className="text-zinc-500 text-[11px] mt-0.5 truncate">{c.displayName}</p>
+                            <p className="text-zinc-500 text-[11px] mt-0.5 truncate">{display}</p>
                           </button>
                         );
                       })}
@@ -594,13 +608,15 @@ export default function AdminRuasEntrega() {
                     <p className="text-zinc-300">
                       📍 Localização:{' '}
                       <span className="text-white font-bold">
-                        {createCoords.lat.toFixed(5)}, {createCoords.lng.toFixed(5)}
+                        {fmtCoord(createCoords.lat)}, {fmtCoord(createCoords.lng)}
                       </span>
                     </p>
-                    {createDistanceKm != null ? (
+                    {createDistanceKm != null && Number.isFinite(Number(createDistanceKm)) ? (
                       <p className="text-zinc-300">
                         📏 Distância até a hamburgueria:{' '}
-                        <span className="text-white font-bold">{createDistanceKm.toFixed(1)} km</span>
+                        <span className="text-white font-bold">
+                          {Number(createDistanceKm).toFixed(1)} km
+                        </span>
                       </p>
                     ) : null}
                     {createForm.eta ? (
