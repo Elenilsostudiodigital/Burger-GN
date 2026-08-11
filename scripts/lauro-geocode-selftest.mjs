@@ -1,5 +1,5 @@
 /**
- * Selftest: geocoding restrito a Lauro de Freitas (viewbox + bounded + validação).
+ * Selftest: busca inteligente de endereços (Lauro de Freitas).
  * Uso: node scripts/lauro-geocode-selftest.mjs
  */
 const VIEWBOX = "-38.4000,-12.7800,-38.2500,-12.9500";
@@ -50,11 +50,23 @@ function isPrecise(hit) {
   return hit.class === "highway" || Boolean(road);
 }
 
+function roadMatchesSuggestion(road, streetQuery) {
+  const qRaw = normalizePt(streetQuery).replace(/^(rua|r|avenida|av|travessa|tv|alameda|al|estrada|rodovia|rod)\.?\s+/g, "");
+  if (!qRaw) return true;
+  const rCore = normalizePt(road).replace(/^(rua|r|avenida|av|travessa|tv|alameda|al|estrada|rodovia|rod)\.?\s+/g, "");
+  if (!rCore) return false;
+  if (rCore.includes(qRaw) || qRaw.includes(rCore)) return true;
+  const tokens = qRaw.split(/\s+/).filter((t) => t.length >= 3);
+  if (tokens.length === 0) return rCore.includes(qRaw);
+  const matched = tokens.filter((t) => rCore.includes(t)).length;
+  return matched >= Math.max(1, Math.ceil(tokens.length * 0.5));
+}
+
 async function search(q) {
   const url = new URL("https://nominatim.openstreetmap.org/search");
   url.searchParams.set("format", "json");
   url.searchParams.set("addressdetails", "1");
-  url.searchParams.set("limit", "10");
+  url.searchParams.set("limit", "15");
   url.searchParams.set("countrycodes", "br");
   url.searchParams.set("viewbox", VIEWBOX);
   url.searchParams.set("bounded", "1");
@@ -66,21 +78,6 @@ async function search(q) {
   return Array.isArray(data) ? data : [];
 }
 
-function roadMatchesQuery(road, streetQuery) {
-  const r = normalizePt(road);
-  const q = normalizePt(streetQuery).replace(/^(rua|r|avenida|av|travessa|tv|alameda|al|estrada|rodovia|rod)\s+/g, "");
-  const rCore = r.replace(/^(rua|r|avenida|av|travessa|tv|alameda|al|estrada|rodovia|rod)\s+/g, "");
-  if (!rCore || !q) return false;
-  if (r.includes(q) || q.includes(rCore) || rCore.includes(q)) return true;
-  const qTokens = q.split(" ").filter((t) => t.length >= 4);
-  if (qTokens.length === 0) {
-    const short = q.split(" ").filter((t) => t.length >= 3);
-    return short.some((t) => rCore.includes(t));
-  }
-  const matched = qTokens.filter((t) => rCore.includes(t)).length;
-  return matched >= Math.ceil(qTokens.length * 0.6);
-}
-
 function filterHits(hits, streetQuery) {
   const out = [];
   for (const hit of hits) {
@@ -90,7 +87,7 @@ function filterHits(hits, streetQuery) {
     if (!isLauro(hit.address, hit.display_name || "")) continue;
     if (!isPrecise(hit)) continue;
     const road = roadOf(hit.address);
-    if (streetQuery && !roadMatchesQuery(road, streetQuery)) continue;
+    if (streetQuery && !roadMatchesSuggestion(road, streetQuery)) continue;
     out.push({
       road,
       neighborhood: neighborhoodOf(hit.address),
@@ -102,49 +99,57 @@ function filterHits(hits, streetQuery) {
   return out;
 }
 
-async function assertCase(name, query, streetQuery, expectNeighborhoodHint) {
+async function assertCase(name, query, streetQuery, opts = {}) {
   const hits = await search(query);
   const precise = filterHits(hits, streetQuery);
   console.log(`\n[${name}] q="${query}"`);
   console.log(`  raw=${hits.length} precise=${precise.length}`);
-  for (const p of precise.slice(0, 5)) {
+  for (const p of precise.slice(0, 6)) {
     console.log(`  - ${p.road} | ${p.neighborhood || "—"} | ${p.lat.toFixed(5)},${p.lng.toFixed(5)}`);
     if (!inside(p.lat, p.lng)) throw new Error(`${name}: fora do bbox`);
   }
-  if (name.startsWith("reject-")) {
-    if (precise.length !== 0) throw new Error(`${name}: deveria rejeitar`);
-    console.log("  OK rejeitou");
+  if (opts.expectEmpty) {
+    if (precise.length !== 0) throw new Error(`${name}: deveria estar vazio`);
+    console.log("  OK vazio/rejeitado");
     return;
   }
-  if (precise.length === 0) throw new Error(`${name}: esperado ao menos 1 rua precisa em Lauro`);
-  if (expectNeighborhoodHint) {
-    const ok = precise.some((p) => normalizePt(p.neighborhood).includes(normalizePt(expectNeighborhoodHint)));
-    if (!ok) {
-      console.log(`  WARN: nenhum candidato com bairro "${expectNeighborhoodHint}" (OSM pode omitir suburb)`);
-    }
+  if (precise.length === 0) throw new Error(`${name}: esperado sugestões em Lauro`);
+  console.log("  OK sugestões em Lauro de Freitas");
+}
+
+async function assertCep(cep) {
+  console.log(`\n[cep] ${cep}`);
+  const res = await fetch(`https://viacep.com.br/ws/${cep}/json/`);
+  const data = await res.json();
+  if (data.erro) throw new Error("CEP inválido");
+  if (!normalizePt(data.localidade || "").includes("lauro de freitas")) {
+    throw new Error("CEP fora de Lauro");
   }
-  console.log("  OK dentro de Lauro de Freitas");
+  console.log(`  ViaCEP: ${data.logradouro} - ${data.bairro}`);
+  await new Promise((r) => setTimeout(r, 1100));
+  await assertCase(
+    `cep-nominatim-${cep}`,
+    `${data.logradouro}, ${data.bairro}, Lauro de Freitas, Bahia, Brasil`,
+    data.logradouro,
+  );
 }
 
 async function main() {
-  await assertCase("itinga", "Rua Zulmira Fraga, Itinga, Lauro de Freitas, Bahia, Brasil", "Rua Zulmira Fraga", "Itinga");
+  await assertCase("suggest-sao-mateus", "São Mateus, Lauro de Freitas, Bahia, Brasil", "São Mateus");
   await new Promise((r) => setTimeout(r, 1100));
-  await assertCase("jambeiro", "Rua Pomar do Jambeiro, Lauro de Freitas, Bahia, Brasil", "Rua Pomar do Jambeiro", "");
+  await assertCase("itinga", "Rua Zulmira Fraga, Itinga, Lauro de Freitas, Bahia, Brasil", "Rua Zulmira Fraga");
   await new Promise((r) => setTimeout(r, 1100));
-  await assertCase("centro", "Rua São Mateus, Centro, Lauro de Freitas, Bahia, Brasil", "Rua São Mateus", "Centro");
+  await assertCase("jambeiro", "Rua Pomar do Jambeiro, Lauro de Freitas, Bahia, Brasil", "Rua Pomar do Jambeiro");
   await new Promise((r) => setTimeout(r, 1100));
-  await assertCase("vida-nova", "Rua Atalia, Vida Nova, Lauro de Freitas, Bahia, Brasil", "Rua Atalia", "Vida Nova");
+  await assertCase("centro", "Rua São Mateus, Centro, Lauro de Freitas, Bahia, Brasil", "Rua São Mateus");
   await new Promise((r) => setTimeout(r, 1100));
-  await assertCase("multi-santos-dumont", "Avenida Santos Dumont, Lauro de Freitas, Bahia, Brasil", "Avenida Santos Dumont", "");
+  await assertCase("vida-nova", "Rua Atalia, Vida Nova, Lauro de Freitas, Bahia, Brasil", "Rua Atalia");
   await new Promise((r) => setTimeout(r, 1100));
-  await assertCase("reject-suburb-itinga", "Itinga, Lauro de Freitas, Bahia, Brasil", "Itinga", "");
+  await assertCase("multi-santos-dumont", "Avenida Santos Dumont, Lauro de Freitas, Bahia, Brasil", "Avenida Santos Dumont");
   await new Promise((r) => setTimeout(r, 1100));
-  await assertCase(
-    "reject-unknown-street",
-    "Rua São Mateus de Cima, Itinga, Lauro de Freitas, Bahia, Brasil",
-    "Rua São Mateus de Cima",
-    "",
-  );
+  await assertCase("reject-suburb-itinga", "Itinga, Lauro de Freitas, Bahia, Brasil", "Itinga", { expectEmpty: true });
+  await new Promise((r) => setTimeout(r, 1100));
+  await assertCep("42702240");
   console.log("\nlauro-geocode-selftest: OK");
 }
 

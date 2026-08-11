@@ -265,11 +265,15 @@ export type GeocodeStreetCandidate = {
   country: string;
   displayName: string;
   query: string;
+  houseNumber?: string;
+  cep?: string;
 };
 
 export type GeocodeStreetSearchResult = {
   candidates: GeocodeStreetCandidate[];
-  /** Set when no precise street match inside Lauro de Freitas. */
+  /** True when CEP resolved to a single address that can be auto-selected. */
+  autoSelect: boolean;
+  /** Set when no suggestions inside Lauro de Freitas. */
   message: string | null;
 };
 
@@ -278,6 +282,7 @@ type NominatimAddress = {
   pedestrian?: string;
   residential?: string;
   street?: string;
+  house_number?: string;
   suburb?: string;
   neighbourhood?: string;
   city_district?: string;
@@ -371,7 +376,7 @@ function isPreciseStreetHit(hit: NominatimHit): boolean {
   return Boolean(road);
 }
 
-/** Require OSM road name to relate to the street the admin typed. */
+/** Require OSM road name to relate to the street the admin typed (strict). */
 function roadMatchesQuery(road: string, streetQuery: string): boolean {
   const r = normalizePt(road);
   const q = normalizePt(streetQuery).replace(/^(rua|r|avenida|av|travessa|tv|alameda|al|estrada|rodovia|rod)\s+/g, "");
@@ -388,11 +393,27 @@ function roadMatchesQuery(road: string, streetQuery: string): boolean {
   return matched >= Math.ceil(qTokens.length * 0.6);
 }
 
-async function nominatimSearchLauro(params: Record<string, string>): Promise<NominatimHit[]> {
+/**
+ * Autocomplete-friendly match: typed tokens may be a subset of the OSM road
+ * (e.g. "São Mateus" → "Rua São Mateus de Cima" / "Rua São Mateus").
+ */
+function roadMatchesSuggestion(road: string, streetQuery: string): boolean {
+  const qRaw = normalizePt(streetQuery).replace(/^(rua|r|avenida|av|travessa|tv|alameda|al|estrada|rodovia|rod)\.?\s+/g, "");
+  if (!qRaw) return true;
+  const rCore = normalizePt(road).replace(/^(rua|r|avenida|av|travessa|tv|alameda|al|estrada|rodovia|rod)\.?\s+/g, "");
+  if (!rCore) return false;
+  if (rCore.includes(qRaw) || qRaw.includes(rCore)) return true;
+  const tokens = qRaw.split(/\s+/).filter((t) => t.length >= 3);
+  if (tokens.length === 0) return rCore.includes(qRaw);
+  const matched = tokens.filter((t) => rCore.includes(t)).length;
+  return matched >= Math.max(1, Math.ceil(tokens.length * 0.5));
+}
+
+async function nominatimSearchLauro(params: Record<string, string>, limit = 15): Promise<NominatimHit[]> {
   const url = new URL("https://nominatim.openstreetmap.org/search");
   url.searchParams.set("format", "json");
   url.searchParams.set("addressdetails", "1");
-  url.searchParams.set("limit", "10");
+  url.searchParams.set("limit", String(limit));
   url.searchParams.set("countrycodes", "br");
   url.searchParams.set("viewbox", LAURO_DE_FREITAS_VIEWBOX);
   url.searchParams.set("bounded", "1");
@@ -406,7 +427,12 @@ async function nominatimSearchLauro(params: Record<string, string>): Promise<Nom
   return Array.isArray(data) ? data : [];
 }
 
-function hitToCandidate(hit: NominatimHit, query: string, streetQuery: string): GeocodeStreetCandidate | null {
+function hitToCandidate(
+  hit: NominatimHit,
+  query: string,
+  streetQuery: string,
+  mode: "strict" | "suggest" = "suggest",
+): GeocodeStreetCandidate | null {
   const lat = parseFloat(hit.lat);
   const lng = parseFloat(hit.lon);
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
@@ -416,7 +442,8 @@ function hitToCandidate(hit: NominatimHit, query: string, streetQuery: string): 
   if (!isPreciseStreetHit(hit)) return null;
 
   const streetName = extractRoad(hit.address);
-  if (!roadMatchesQuery(streetName, streetQuery)) return null;
+  const matcher = mode === "strict" ? roadMatchesQuery : roadMatchesSuggestion;
+  if (streetQuery.trim() && !matcher(streetName, streetQuery)) return null;
   const neighborhood = extractNeighborhood(hit.address);
   const city =
     hit.address?.city ||
@@ -425,6 +452,8 @@ function hitToCandidate(hit: NominatimHit, query: string, streetQuery: string): 
     "Lauro de Freitas";
   const state = hit.address?.state || "Bahia";
   const country = hit.address?.country || "Brasil";
+  const houseNumber = String(hit.address?.house_number || "").trim();
+  const cep = String(hit.address?.postcode || "").replace(/\D/g, "").slice(0, 8);
   const id = String(hit.place_id ?? `${lat.toFixed(5)},${lng.toFixed(5)},${streetName}`);
 
   return {
@@ -438,6 +467,8 @@ function hitToCandidate(hit: NominatimHit, query: string, streetQuery: string): 
     country,
     displayName,
     query,
+    houseNumber: houseNumber || undefined,
+    cep: cep || undefined,
   };
 }
 
@@ -453,13 +484,47 @@ function dedupeCandidates(list: GeocodeStreetCandidate[]): GeocodeStreetCandidat
   return out;
 }
 
+/** Free Brazilian CEP → address (Correios via ViaCEP). Used only to seed Nominatim. */
+async function lookupCepViaCep(cepDigits: string): Promise<{
+  street: string;
+  neighborhood: string;
+  city: string;
+  state: string;
+  cep: string;
+} | null> {
+  if (cepDigits.length !== 8) return null;
+  try {
+    const res = await fetch(`https://viacep.com.br/ws/${cepDigits}/json/`);
+    const data = (await res.json()) as {
+      erro?: boolean;
+      logradouro?: string;
+      bairro?: string;
+      localidade?: string;
+      uf?: string;
+      cep?: string;
+    };
+    if (!data || data.erro) return null;
+    const city = String(data.localidade || "").trim();
+    if (!normalizePt(city).includes("lauro de freitas")) return null;
+    if (String(data.uf || "").toUpperCase() !== "BA") return null;
+    return {
+      street: String(data.logradouro || "").trim(),
+      neighborhood: String(data.bairro || "").trim(),
+      city: city || "Lauro de Freitas",
+      state: "Bahia",
+      cep: cepDigits,
+    };
+  } catch {
+    return null;
+  }
+}
+
 /**
- * Precise street geocoding for Ruas de Entrega (Nominatim only).
- * - Restricted to Lauro de Freitas via viewbox + bounded
- * - Validates cidade/estado/país
- * - Never falls back to neighborhood/city centroids
- * - Returns multiple street candidates when needed (admin picks)
- * Does not change checkout `geocodeAddress`.
+ * Busca inteligente de endereços para Ruas de Entrega (Nominatim + CEP ViaCEP).
+ * - Sugestões enquanto digita (autocomplete), restritas a Lauro de Freitas
+ * - Valida cidade/estado/país; sem fallback de bairro/outra cidade
+ * - CEP: resolve endereço e prioriza seleção automática
+ * Não altera o checkout (`geocodeAddress`).
  */
 export async function geocodeStreetLocation(parts: {
   street: string;
@@ -467,84 +532,150 @@ export async function geocodeStreetLocation(parts: {
   city?: string;
   cep?: string;
   state?: string;
+  number?: string;
 }): Promise<GeocodeStreetSearchResult> {
   const street = String(parts.street || "").trim();
   const neighborhood = String(parts.neighborhood || "").trim();
   const city = String(parts.city || "Lauro de Freitas").trim() || "Lauro de Freitas";
   const state = String(parts.state || "Bahia").trim() || "Bahia";
+  const number = String(parts.number || "").trim();
   const cepDigits = String(parts.cep || "").replace(/\D/g, "").slice(0, 8);
-  const notFoundMsg = "Rua não encontrada com precisão.";
-
-  if (street.length < 3) {
-    return { candidates: [], message: notFoundMsg };
-  }
-
-  const queries: Array<Record<string, string>> = [];
-  if (cepDigits.length === 8) {
-    const cepFmt = `${cepDigits.slice(0, 5)}-${cepDigits.slice(5)}`;
-    // CEP priority — always with street (+ bairro/cidade), never CEP alone
-    if (neighborhood) {
-      queries.push({
-        q: `${street}, ${neighborhood}, ${city}, ${cepFmt}, ${state}, Brasil`,
-      });
-    }
-    queries.push({ q: `${street}, ${city}, ${cepFmt}, ${state}, Brasil` });
-  }
-  if (neighborhood) {
-    queries.push({ q: `${street}, ${neighborhood}, ${city}, ${state}, Brasil` });
-  }
-  queries.push({ q: `${street}, ${city}, ${state}, Brasil` });
-  // Structured search (same Nominatim service)
-  queries.push({
-    street,
-    city,
-    state,
-    country: "Brasil",
-  });
+  const notFoundMsg = "Nenhum endereço encontrado nesta região.";
 
   const collected: GeocodeStreetCandidate[] = [];
-  const seenQuery = new Set<string>();
+  let autoSelect = false;
 
-  for (let i = 0; i < queries.length; i++) {
-    const params = queries[i]!;
-    const key = JSON.stringify(params);
-    if (seenQuery.has(key)) continue;
-    seenQuery.add(key);
-    if (i > 0) await new Promise((r) => setTimeout(r, 1100));
-    try {
-      const hits = await nominatimSearchLauro(params);
-      const label = params.q || `${params.street}, ${params.city}`;
-      const batch: GeocodeStreetCandidate[] = [];
-      for (const hit of hits) {
-        const candidate = hitToCandidate(hit, label, street);
-        if (candidate) batch.push(candidate);
+  // ── CEP priority ──────────────────────────────────────────────────────────
+  if (cepDigits.length === 8) {
+    const cepInfo = await lookupCepViaCep(cepDigits);
+    if (cepInfo?.street) {
+      await new Promise((r) => setTimeout(r, 1100));
+      const cepQueries = [
+        number
+          ? `${cepInfo.street}, ${number}, ${cepInfo.neighborhood}, ${cepInfo.city}, ${state}, Brasil`
+          : "",
+        `${cepInfo.street}, ${cepInfo.neighborhood}, ${cepInfo.city}, ${state}, Brasil`,
+        `${cepInfo.street}, ${cepInfo.city}, ${state}, Brasil`,
+      ].filter(Boolean);
+      for (let i = 0; i < cepQueries.length; i++) {
+        if (i > 0) await new Promise((r) => setTimeout(r, 1100));
+        const q = cepQueries[i]!;
+        try {
+          const hits = await nominatimSearchLauro({ q }, 10);
+          for (const hit of hits) {
+            const c = hitToCandidate(hit, q, cepInfo.street, "suggest");
+            if (c) {
+              collected.push({
+                ...c,
+                neighborhood: c.neighborhood || cepInfo.neighborhood,
+                cep: cepDigits,
+                houseNumber: c.houseNumber || number || undefined,
+              });
+            }
+          }
+        } catch {
+          /* next */
+        }
+        if (dedupeCandidates(collected).length > 0) break;
       }
-      const precise = dedupeCandidates(batch);
-      if (precise.length > 0) {
-        collected.push(...precise);
-        break; // first precise street hit set inside Lauro — no neighborhood fallback
+      const cepCandidates = dedupeCandidates(collected);
+      if (cepCandidates.length > 0) {
+        return {
+          candidates: cepCandidates.slice(0, 12),
+          autoSelect: true,
+          message: null,
+        };
+      }
+    }
+  }
+
+  // Need at least a partial street name for suggestions
+  if (street.length < 3) {
+    return { candidates: [], autoSelect: false, message: cepDigits.length === 8 ? notFoundMsg : null };
+  }
+
+  const queries: string[] = [];
+  if (number && neighborhood) {
+    queries.push(`${street}, ${number}, ${neighborhood}, ${city}, ${state}, Brasil`);
+  }
+  if (neighborhood) {
+    queries.push(`${street}, ${neighborhood}, ${city}, ${state}, Brasil`);
+  }
+  if (number) {
+    queries.push(`${street}, ${number}, ${city}, ${state}, Brasil`);
+  }
+  queries.push(`${street}, ${city}, ${state}, Brasil`);
+  // Broader autocomplete seed (helps partial names like "São Mateus")
+  const streetCore = street.replace(/^(rua|r\.?|avenida|av\.?|travessa|tv\.?)\s+/i, "").trim();
+  if (streetCore.length >= 3 && normalizePt(streetCore) !== normalizePt(street)) {
+    queries.push(`${streetCore}, ${city}, ${state}, Brasil`);
+  }
+
+  const seenQuery = new Set<string>();
+  for (let i = 0; i < queries.length; i++) {
+    const q = queries[i]!.replace(/\s+/g, " ").trim();
+    const key = normalizePt(q);
+    if (!q || seenQuery.has(key)) continue;
+    seenQuery.add(key);
+    if (i > 0 || cepDigits.length === 8) await new Promise((r) => setTimeout(r, 1100));
+    try {
+      const hits = await nominatimSearchLauro({ q }, 15);
+      for (const hit of hits) {
+        const c = hitToCandidate(hit, q, street, "suggest");
+        if (c) {
+          collected.push({
+            ...c,
+            houseNumber: c.houseNumber || number || undefined,
+            cep: c.cep || (cepDigits.length === 8 ? cepDigits : undefined),
+          });
+        }
       }
     } catch {
-      /* try next query */
+      /* next */
+    }
+    // Keep gathering a bit for richer suggestions, but stop if we have enough
+    if (dedupeCandidates(collected).length >= 8) break;
+  }
+
+  // Structured search as extra pass when still empty/few
+  if (dedupeCandidates(collected).length < 3) {
+    await new Promise((r) => setTimeout(r, 1100));
+    try {
+      const hits = await nominatimSearchLauro(
+        { street: number ? `${street} ${number}` : street, city, state, country: "Brasil" },
+        15,
+      );
+      for (const hit of hits) {
+        const c = hitToCandidate(hit, street, street, "suggest");
+        if (c) collected.push(c);
+      }
+    } catch {
+      /* ignore */
     }
   }
 
   let candidates = dedupeCandidates(collected);
 
-  // Prefer neighborhood match when admin informed one (still list others)
   if (neighborhood && candidates.length > 1) {
     const nKey = normalizePt(neighborhood);
     candidates = [...candidates].sort((a, b) => {
       const aMatch = normalizePt(a.neighborhood).includes(nKey) || nKey.includes(normalizePt(a.neighborhood)) ? 0 : 1;
       const bMatch = normalizePt(b.neighborhood).includes(nKey) || nKey.includes(normalizePt(b.neighborhood)) ? 0 : 1;
-      return aMatch - bMatch;
+      if (aMatch !== bMatch) return aMatch - bMatch;
+      return normalizePt(a.streetName).localeCompare(normalizePt(b.streetName));
     });
   }
 
+  candidates = candidates.slice(0, 12);
+
   if (candidates.length === 0) {
-    return { candidates: [], message: notFoundMsg };
+    return { candidates: [], autoSelect: false, message: notFoundMsg };
   }
-  return { candidates, message: null };
+
+  // Single clear match can be auto-applied (still shown in list)
+  if (candidates.length === 1) autoSelect = true;
+
+  return { candidates, autoSelect, message: null };
 }
 
 export interface ReverseGeocodeResult {

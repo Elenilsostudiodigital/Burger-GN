@@ -52,6 +52,7 @@ const ORIGIN_LABEL: Record<DeliveryStreetOrigin, string> = {
 
 type CreateForm = {
   streetName: string;
+  addressNumber: string;
   neighborhood: string;
   city: string;
   cep: string;
@@ -64,6 +65,7 @@ type CreateForm = {
 
 const EMPTY_CREATE: CreateForm = {
   streetName: '',
+  addressNumber: '',
   neighborhood: '',
   city: 'Lauro de Freitas',
   cep: '',
@@ -108,6 +110,7 @@ export default function AdminRuasEntrega() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const geoDebounce = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const selectingSuggestionRef = useRef(false);
 
   const refresh = async (query = q) => {
     setLoading(true);
@@ -129,6 +132,7 @@ export default function AdminRuasEntrega() {
     candidate: GeocodeStreetCandidate,
     config: KmDeliveryConfig | null = kmConfig,
   ) => {
+    selectingSuggestionRef.current = true;
     setSelectedCandidateId(candidate.id);
     setCreateCoords({ lat: candidate.lat, lng: candidate.lng });
     setGeoMessage('');
@@ -139,6 +143,17 @@ export default function AdminRuasEntrega() {
       setCreateDistanceKm(null);
       setSuggestedFee(null);
       setGeoMessage('Local da loja não configurado para calcular distância. Você ainda pode salvar o cadastro.');
+      setCreateForm((f) => ({
+        ...f,
+        streetName: candidate.streetName || f.streetName,
+        neighborhood: candidate.neighborhood || f.neighborhood,
+        city: candidate.city || f.city || 'Lauro de Freitas',
+        cep: candidate.cep || f.cep,
+        addressNumber: candidate.houseNumber || f.addressNumber,
+      }));
+      window.setTimeout(() => {
+        selectingSuggestionRef.current = false;
+      }, 120);
       return;
     }
 
@@ -150,20 +165,28 @@ export default function AdminRuasEntrega() {
     setSuggestedFee(fee);
     setCreateForm((f) => ({
       ...f,
+      streetName: candidate.streetName || f.streetName,
+      neighborhood: candidate.neighborhood || f.neighborhood,
+      city: candidate.city || f.city || 'Lauro de Freitas',
+      cep: candidate.cep || f.cep,
+      addressNumber: candidate.houseNumber || f.addressNumber,
       fee: String(fee),
       eta: String(eta),
-      // Keep admin neighborhood if typed; otherwise fill from OSM candidate
-      neighborhood: f.neighborhood.trim() || candidate.neighborhood || f.neighborhood,
     }));
+    window.setTimeout(() => {
+      selectingSuggestionRef.current = false;
+    }, 120);
   };
 
-  // Auto-geocode while typing — Nominatim viewbox Lauro de Freitas (sem fallback de bairro)
+  // Busca inteligente enquanto digita (sugestões em Lauro de Freitas)
   useEffect(() => {
     if (!creating) return;
+    if (selectingSuggestionRef.current) return;
     const street = createForm.streetName.trim();
-    const neighborhood = createForm.neighborhood.trim();
-    const city = createForm.city.trim() || 'Lauro de Freitas';
-    if (street.length < 3 || !neighborhood) {
+    const cepDigits = createForm.cep.replace(/\D/g, '');
+    const canSearchStreet = street.length >= 3;
+    const canSearchCep = cepDigits.length === 8;
+    if (!canSearchStreet && !canSearchCep) {
       setCreateCoords(null);
       setCreateDistanceKm(null);
       setSuggestedFee(null);
@@ -175,6 +198,7 @@ export default function AdminRuasEntrega() {
 
     clearTimeout(geoDebounce.current);
     geoDebounce.current = setTimeout(async () => {
+      if (selectingSuggestionRef.current) return;
       setGeoLoading(true);
       setGeoMessage('');
       setGeoCandidates([]);
@@ -185,34 +209,37 @@ export default function AdminRuasEntrega() {
       try {
         const result = await geocodeStreetLocation({
           street,
-          neighborhood,
-          city,
+          neighborhood: createForm.neighborhood.trim(),
+          city: createForm.city.trim() || 'Lauro de Freitas',
           cep: createForm.cep,
+          number: createForm.addressNumber.trim(),
           state: 'Bahia',
         });
+        if (selectingSuggestionRef.current) return;
         if (!result.candidates.length) {
-          setGeoMessage(result.message || 'Rua não encontrada com precisão.');
+          if (result.message) setGeoMessage(result.message);
           return;
         }
         setGeoCandidates(result.candidates);
-        if (result.candidates.length === 1) {
-          applyCandidate(result.candidates[0]!, kmConfig);
+        if (result.autoSelect && result.candidates[0]) {
+          applyCandidate(result.candidates[0], kmConfig);
         } else {
-          setGeoMessage('Encontramos mais de um resultado em Lauro de Freitas. Selecione a rua correta:');
+          setGeoMessage('Selecione um endereço da lista de sugestões:');
         }
       } catch {
         setGeoCandidates([]);
-        setGeoMessage('Rua não encontrada com precisão.');
+        setGeoMessage('Nenhum endereço encontrado nesta região.');
       } finally {
         setGeoLoading(false);
       }
-    }, 900);
+    }, 650);
 
     return () => clearTimeout(geoDebounce.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     creating,
     createForm.streetName,
+    createForm.addressNumber,
     createForm.neighborhood,
     createForm.city,
     createForm.cep,
@@ -404,18 +431,33 @@ export default function AdminRuasEntrega() {
                   <Input
                     value={createForm.streetName}
                     onChange={(e) => setCreateForm((f) => ({ ...f, streetName: e.target.value }))}
-                    placeholder="Ex: Rua das Palmeiras"
+                    placeholder="Ex: Rua São Mateus"
                     className="bg-zinc-950 border-zinc-800 h-11 text-white"
+                    autoComplete="off"
                   />
+                  <p className="text-zinc-600 text-[11px] mt-1">
+                    Digite para ver sugestões em Lauro de Freitas automaticamente.
+                  </p>
                 </div>
-                <div>
-                  <Label className="text-zinc-500 text-xs">Bairro</Label>
-                  <Input
-                    value={createForm.neighborhood}
-                    onChange={(e) => setCreateForm((f) => ({ ...f, neighborhood: e.target.value }))}
-                    placeholder="Ex: Centro"
-                    className="bg-zinc-950 border-zinc-800 h-11 text-white"
-                  />
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <Label className="text-zinc-500 text-xs">Número (opcional)</Label>
+                    <Input
+                      value={createForm.addressNumber}
+                      onChange={(e) => setCreateForm((f) => ({ ...f, addressNumber: e.target.value }))}
+                      placeholder="Ex: 120"
+                      className="bg-zinc-950 border-zinc-800 h-11 text-white"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-zinc-500 text-xs">Bairro</Label>
+                    <Input
+                      value={createForm.neighborhood}
+                      onChange={(e) => setCreateForm((f) => ({ ...f, neighborhood: e.target.value }))}
+                      placeholder="Ex: Itinga"
+                      className="bg-zinc-950 border-zinc-800 h-11 text-white"
+                    />
+                  </div>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
@@ -515,34 +557,33 @@ export default function AdminRuasEntrega() {
                   ) : (
                     <div className="text-center px-4 py-8 text-zinc-600 text-sm">
                       <MapPin className="mx-auto mb-2 opacity-50" size={28} />
-                      Digite rua e bairro para localizar no mapa
+                      Digite a rua para ver sugestões no mapa
                     </div>
                   )}
                 </div>
 
-                {geoCandidates.length > 1 ? (
+                {geoCandidates.length > 0 ? (
                   <div className="rounded-xl border border-amber-500/30 bg-zinc-950/80 p-3 space-y-2">
                     <p className="text-amber-300 text-xs font-bold">
-                      Selecione o resultado correto em Lauro de Freitas:
+                      {geoLoading ? 'Buscando…' : 'Sugestões em Lauro de Freitas'}
                     </p>
-                    <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                    <div className="space-y-1.5 max-h-56 overflow-y-auto">
                       {geoCandidates.map((c) => {
                         const active = selectedCandidateId === c.id;
+                        const label = [c.streetName, c.neighborhood || c.city].filter(Boolean).join(' - ');
                         return (
                           <button
                             key={c.id}
                             type="button"
                             onClick={() => applyCandidate(c)}
-                            className={`w-full text-left rounded-lg border px-3 py-2 transition-colors ${
+                            className={`w-full text-left rounded-lg border px-3 py-2.5 transition-colors ${
                               active
                                 ? 'border-amber-500 bg-amber-500/10'
                                 : 'border-zinc-800 bg-zinc-900/60 hover:border-zinc-600'
                             }`}
                           >
-                            <p className="text-white text-sm font-bold">{c.streetName}</p>
-                            <p className="text-zinc-400 text-xs mt-0.5">
-                              {c.neighborhood || '—'} · {c.city}
-                            </p>
+                            <p className="text-white text-sm font-bold">📍 {label}</p>
+                            <p className="text-zinc-500 text-[11px] mt-0.5 truncate">{c.displayName}</p>
                           </button>
                         );
                       })}
