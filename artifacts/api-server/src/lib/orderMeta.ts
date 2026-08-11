@@ -46,12 +46,24 @@ export interface OrderMeta {
   clientMemberId?: number;
   /** Idempotency: stamp already awarded for this order. */
   stampsAwarded?: boolean;
+  /** Stamp was evaluated but blocked by the 24h fidelity rule. */
+  stampSkipped?: boolean;
+  /** Customer-facing message when stampSkipped. */
+  stampSkipMessage?: string;
   /** Idempotency: cashback already awarded for this order. */
   cashbackAwarded?: boolean;
   /** Cashback amount credited (BRL) when cashbackAwarded. */
   cashbackAmountAwarded?: number;
   /** When automatic rewards were last processed (ISO). */
   rewardsProcessedAt?: string;
+  /** Punch-card completed on this order — free burger available. */
+  fidelityRewardGranted?: boolean;
+  fidelityRewardTitle?: string;
+  /** Customer redeemed a fidelity free-burger on this order. */
+  fidelityRewardId?: string;
+  fidelityFreeProductId?: number;
+  fidelityFreeProductName?: string;
+  fidelityDiscountAmount?: number;
   /** Prep timer: when kitchen accepted / started preparing (ISO). */
   prepStartedAt?: string;
   /** Prep timer: when marked ready (ISO). */
@@ -117,11 +129,23 @@ export function serializeOrderNotes(publicNotes: string, meta: OrderMeta): strin
   if (meta.deliveredAt) cleanMeta.deliveredAt = meta.deliveredAt;
   if (typeof meta.clientMemberId === "number") cleanMeta.clientMemberId = meta.clientMemberId;
   if (meta.stampsAwarded) cleanMeta.stampsAwarded = true;
+  if (meta.stampSkipped) cleanMeta.stampSkipped = true;
+  if (meta.stampSkipMessage) cleanMeta.stampSkipMessage = String(meta.stampSkipMessage).slice(0, 500);
   if (meta.cashbackAwarded) cleanMeta.cashbackAwarded = true;
   if (typeof meta.cashbackAmountAwarded === "number") {
     cleanMeta.cashbackAmountAwarded = meta.cashbackAmountAwarded;
   }
   if (meta.rewardsProcessedAt) cleanMeta.rewardsProcessedAt = meta.rewardsProcessedAt;
+  if (meta.fidelityRewardGranted) cleanMeta.fidelityRewardGranted = true;
+  if (meta.fidelityRewardTitle) cleanMeta.fidelityRewardTitle = String(meta.fidelityRewardTitle).slice(0, 200);
+  if (meta.fidelityRewardId) cleanMeta.fidelityRewardId = String(meta.fidelityRewardId).slice(0, 80);
+  if (typeof meta.fidelityFreeProductId === "number") cleanMeta.fidelityFreeProductId = meta.fidelityFreeProductId;
+  if (meta.fidelityFreeProductName) {
+    cleanMeta.fidelityFreeProductName = String(meta.fidelityFreeProductName).slice(0, 200);
+  }
+  if (typeof meta.fidelityDiscountAmount === "number") {
+    cleanMeta.fidelityDiscountAmount = meta.fidelityDiscountAmount;
+  }
   if (meta.prepStartedAt) cleanMeta.prepStartedAt = meta.prepStartedAt;
   if (meta.prepFinishedAt) cleanMeta.prepFinishedAt = meta.prepFinishedAt;
   if (typeof meta.prepTimeMin === "number") cleanMeta.prepTimeMin = meta.prepTimeMin;

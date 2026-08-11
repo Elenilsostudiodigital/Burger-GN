@@ -6,6 +6,7 @@ import { desc, eq } from "drizzle-orm";
 import {
   isPlaceholderPhone,
   normalizeClientPhone,
+  nextFidelityStampAvailableAt,
   parseClientNotes,
   phonesMatch,
   type ClientMeta,
@@ -96,12 +97,14 @@ export function publicClubRules(settings: Awaited<ReturnType<typeof ensureSettin
       stampsRequired,
       stampRewardTitle,
       howItWorks: [
-        "A cada pedido concluído você ganha 1 selo automaticamente.",
+        "Você ganha no máximo 1 selo a cada 24 horas, na primeira compra após completar esse período.",
+        "Pedidos extras no mesmo período de 24 horas geram Cashback normalmente, mas não geram novo selo.",
         `Ao completar ${stampsRequired} selos, você desbloqueia: ${stampRewardTitle}.`,
+        "O prêmio vale para qualquer hambúrguer do cardápio (não inclui Combos). Na entrega, cobra-se apenas a taxa quando houver.",
         "Os selos reiniciam o ciclo após a recompensa ser conquistada.",
       ],
       whenToUse:
-        "A recompensa fica disponível no Clube após completar a meta de selos. Solicite o resgate no atendimento da loja.",
+        "Na próxima compra após completar a meta, você poderá resgatar o hambúrguer grátis no checkout ou guardar para depois.",
     },
   };
 }
@@ -171,6 +174,7 @@ export type PublicClubeMePayload =
           redeemedAt: string | null;
           available: boolean;
         }>;
+        nextStampAvailableAt: string | null;
         nextRewardMessage: string;
       };
       cashbackProgram: {
@@ -291,19 +295,20 @@ export async function buildPublicClubeMe(
       lastOrderNumber: stats.lastOrderNumber,
       joinedAt: member.joinedAt instanceof Date ? member.joinedAt.toISOString() : String(member.joinedAt),
     },
-    fidelity: {
-      enabled: rules.fidelity.enabled,
-      stamps: progress.stamps,
-      goal: progress.goal,
-      progress: progress.progress,
-      remaining: progress.remaining,
-      rewardTitle: rules.fidelity.stampRewardTitle,
-      availableRewards,
-      nextRewardMessage:
-        progress.remaining <= 0
-          ? `Você completou a meta! Recompensa: ${rules.fidelity.stampRewardTitle}.`
-          : `Faltam apenas ${progress.remaining} selo${progress.remaining === 1 ? "" : "s"} para ganhar ${rules.fidelity.stampRewardTitle}.`,
-    },
+      fidelity: {
+        enabled: rules.fidelity.enabled,
+        stamps: progress.stamps,
+        goal: progress.goal,
+        progress: progress.progress,
+        remaining: progress.remaining,
+        rewardTitle: rules.fidelity.stampRewardTitle,
+        availableRewards,
+        nextStampAvailableAt: nextFidelityStampAvailableAt(meta),
+        nextRewardMessage:
+          progress.remaining <= 0
+            ? `Você completou a meta! Recompensa: ${rules.fidelity.stampRewardTitle}.`
+            : `Faltam apenas ${progress.remaining} selo${progress.remaining === 1 ? "" : "s"} para ganhar ${rules.fidelity.stampRewardTitle}.`,
+      },
     cashbackProgram: {
       enabled: rules.cashback.enabled,
       percent: rules.cashback.percent,

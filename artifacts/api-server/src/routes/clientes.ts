@@ -11,6 +11,7 @@ import {
   normalizeClientPhone,
   phonesMatch,
   parseClientNotes,
+  redeemAvailableReward,
   serializeClientNotes,
   type ClientOrigin,
   type ClientMeta,
@@ -762,40 +763,28 @@ router.post("/admin/clientes/:id/rewards/:rewardId/redeem", requireCompanyAuth, 
     }
 
     const { publicNotes, meta } = parseClientNotes(existing.notes);
-    const rewards = [...(meta.availableRewards ?? [])];
-    const idx = rewards.findIndex((r) => r.id === rewardId);
-    if (idx < 0) {
-      res.status(404).json({ error: "Recompensa não encontrada." });
-      return;
-    }
-    if (rewards[idx]!.redeemedAt) {
+    const redeemed = redeemAvailableReward(meta, rewardId);
+    if (!redeemed) {
+      const rewards = meta.availableRewards ?? [];
+      const found = rewards.find((r) => r.id === rewardId);
+      if (!found) {
+        res.status(404).json({ error: "Recompensa não encontrada." });
+        return;
+      }
       res.status(409).json({ error: "Esta recompensa já foi resgatada." });
       return;
     }
 
-    const now = new Date().toISOString();
-    rewards[idx] = { ...rewards[idx]!, redeemedAt: now };
-    let nextMeta: ClientMeta = { ...meta, availableRewards: rewards };
-    nextMeta = appendClientLedger(nextMeta, {
-      at: now,
-      type: "recompensa_resgatada",
-      rewardId,
-      rewardTitle: rewards[idx]!.title,
-      orderId: rewards[idx]!.orderId ?? null,
-      orderNumber: rewards[idx]!.orderNumber ?? null,
-      description: `Recompensa resgatada: ${rewards[idx]!.title}`,
-    });
-
     const [updated] = await db
       .update(clubeMembersTable)
-      .set({ notes: serializeClientNotes(publicNotes, nextMeta) })
+      .set({ notes: serializeClientNotes(publicNotes, redeemed.meta) })
       .where(and(eq(clubeMembersTable.id, id), eq(clubeMembersTable.companyId, req.companyId!)))
       .returning();
 
     res.json({
       ok: true,
       client: toClientRow(updated!),
-      reward: rewards[idx],
+      reward: redeemed.reward,
     });
   } catch (err) {
     req.log.error({ err }, "Failed to redeem reward");

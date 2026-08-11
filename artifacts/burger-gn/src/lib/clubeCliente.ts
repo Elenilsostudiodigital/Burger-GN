@@ -35,6 +35,7 @@ export interface ClubeMeSnapshot {
     progress: number;
     nextRewardMessage: string;
     rewardTitle: string;
+    availableRewards?: Array<{ id: string; available?: boolean; redeemedAt?: string | null }>;
   };
   summary?: {
     stampsEarned: number;
@@ -47,6 +48,8 @@ export interface ClubeMeSnapshot {
     cashbackDelta?: number | null;
   }>;
 }
+
+export type ClubeCelebrationKind = 'first' | 'returning' | 'stamp_skipped' | 'reward_complete';
 
 export function getSavedClubePhone(): string {
   try {
@@ -183,7 +186,24 @@ export function markOrderCelebrated(orderId: number) {
   } catch { /* ignore */ }
 }
 
-export function detectCelebrationKind(data: ClubeMeSnapshot): 'first' | 'returning' {
+export function detectCelebrationKind(
+  data: ClubeMeSnapshot,
+  opts?: { stampSkipped?: boolean; rewardGranted?: boolean; orderId?: number },
+): ClubeCelebrationKind {
+  if (opts?.rewardGranted) return 'reward_complete';
+  if (opts?.stampSkipped) return 'stamp_skipped';
+
+  const orderId = opts?.orderId;
+  const ledger = data.ledger ?? [];
+  if (orderId != null) {
+    if (ledger.some((e) => e.orderId === orderId && e.type === 'recompensa_disponivel')) {
+      return 'reward_complete';
+    }
+    if (ledger.some((e) => e.orderId === orderId && e.type === 'selo_bloqueado')) {
+      return 'stamp_skipped';
+    }
+  }
+
   const orderCount = data.member?.orderCount ?? 0;
   const stampsEarned = data.summary?.stampsEarned ?? 0;
   if (orderCount <= 1 || stampsEarned <= 1) return 'first';

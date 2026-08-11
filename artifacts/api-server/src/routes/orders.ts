@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { ordersTable, orderItemsTable, couponsTable, deliveryZonesTable, kmDeliveryConfigTable, kmDeliveryTiersTable, paymentSettingsTable, productsTable } from "@workspace/db";
+import { ordersTable, orderItemsTable, couponsTable, deliveryZonesTable, kmDeliveryConfigTable, kmDeliveryTiersTable, paymentSettingsTable, productsTable, categoriesTable, clubeMembersTable } from "@workspace/db";
 import { eq, and, desc, sql, asc, inArray, ne } from "drizzle-orm";
 import { requireCompanyAuth } from "../middlewares/auth";
 import { resolvePublicCompany } from "../middlewares/company";
@@ -14,7 +14,13 @@ import {
 } from "../lib/orderMeta";
 import { buildStaticPixPayload, decodePixSettings, normalizePixKey } from "../lib/staticPix";
 import { syncClubeMemberOnOrder } from "../lib/clubeClientSync";
-import { normalizeClientPhone } from "../lib/clientMeta";
+import {
+  isFidelityFreeBurgerProduct,
+  normalizeClientPhone,
+  parseClientNotes,
+  redeemAvailableReward,
+  serializeClientNotes,
+} from "../lib/clientMeta";
 import { applyOrderCompletionRewards } from "../lib/orderRewards";
 import { buildPublicClubeMe, type PublicClubeMePayload } from "../lib/clubePublicMe";
 import {
@@ -60,6 +66,14 @@ function enrichOrder<T extends { notes: string; status: string }>(order: T) {
     prepTimeMax: meta.prepTimeMax ?? null,
     prepDurationSeconds: durationSec,
     prepEarlyFinish: isPrepEarlyFinish(meta),
+    stampsAwarded: meta.stampsAwarded ?? false,
+    stampSkipped: meta.stampSkipped ?? false,
+    stampSkipMessage: meta.stampSkipMessage ?? null,
+    cashbackAwarded: meta.cashbackAwarded ?? false,
+    cashbackAmountAwarded: meta.cashbackAmountAwarded ?? null,
+    fidelityRewardGranted: meta.fidelityRewardGranted ?? false,
+    fidelityRewardTitle: meta.fidelityRewardTitle ?? null,
+    fidelityRewardId: meta.fidelityRewardId ?? null,
   };
 }
 
@@ -123,6 +137,9 @@ router.post("/orders", resolvePublicCompany, async (req, res) => {
       cardType?: CardType;
       needsChange?: boolean;
       couponCode?: string;
+      /** Optional Clube fidelity free-burger redemption (additive). */
+      fidelityRewardId?: string;
+      fidelityFreeProductId?: number;
       items: Array<{
         productId?: number; productName: string; productPrice: number; quantity: number;
         addons?: Array<{ name: string; price: number }>; notes?: string;
@@ -259,6 +276,77 @@ router.post("/orders", resolvePublicCompany, async (req, res) => {
       }
     }
 
+    // Clube fidelity: 100% off one eligible hamburger (never combos). Delivery fee still charged.
+    let fidelityDiscount = 0;
+    let fidelityRewardId: string | null = null;
+    let fidelityFreeProductId: number | null = null;
+    let fidelityFreeProductName: string | null = null;
+    const wantFidelity =
+      typeof body.fidelityRewardId === "string" &&
+      body.fidelityRewardId.trim() &&
+      typeof body.fidelityFreeProductId === "number";
+
+    if (wantFidelity) {
+      const freeProductId = body.fidelityFreeProductId!;
+      const freeItem = validatedItems.find((i) => i.productId === freeProductId);
+      if (!freeItem) {
+        res.status(400).json({ error: "Inclua o hambúrguer gratuito no pedido para resgatar a recompensa." });
+        return;
+      }
+      const product = productMap.get(freeProductId);
+      if (!product) {
+        res.status(400).json({ error: "Produto da recompensa inválido." });
+        return;
+      }
+      let categorySlug: string | null = null;
+      let categoryName: string | null = null;
+      if (product.categoryId != null) {
+        const [cat] = await db
+          .select()
+          .from(categoriesTable)
+          .where(and(eq(categoriesTable.id, product.categoryId), eq(categoriesTable.companyId, companyId)));
+        categorySlug = cat?.slug ?? null;
+        categoryName = cat?.name ?? null;
+      }
+      if (!isFidelityFreeBurgerProduct({
+        categorySlug,
+        categoryName,
+        productName: product.name,
+      })) {
+        res.status(400).json({
+          error: "O prêmio é válido apenas para hambúrgueres do cardápio (não inclui Combos).",
+        });
+        return;
+      }
+
+      const orderPhonePreview = normalizeClientPhone(body.phone) || body.phone;
+      const memberPreview = await syncClubeMemberOnOrder({
+        companyId,
+        customerName: body.customerName,
+        phone: orderPhonePreview,
+        origin: "pedido",
+      });
+      if (!memberPreview) {
+        res.status(400).json({ error: "Não foi possível localizar seu cadastro no Clube Burger." });
+        return;
+      }
+      const { meta: memberMeta } = parseClientNotes(memberPreview.notes);
+      const reward = (memberMeta.availableRewards ?? []).find(
+        (r) => r.id === body.fidelityRewardId && !r.redeemedAt,
+      );
+      if (!reward) {
+        res.status(400).json({ error: "Recompensa de fidelidade indisponível ou já resgatada." });
+        return;
+      }
+
+      // 100% off the hamburger unit price (addons still charged).
+      fidelityDiscount = Math.min(subtotal, Math.round(freeItem.productPrice * 100) / 100);
+      fidelityRewardId = reward.id;
+      fidelityFreeProductId = freeProductId;
+      fidelityFreeProductName = freeItem.productName;
+      discountAmount = Math.min(subtotal, Math.round((discountAmount + fidelityDiscount) * 100) / 100);
+    }
+
     const total = Math.max(0, subtotal + deliveryFee - discountAmount);
     const trackingId = crypto.randomUUID();
 
@@ -327,6 +415,7 @@ router.post("/orders", resolvePublicCompany, async (req, res) => {
 
     // CRM: find/create client by WhatsApp (origin "Pedido"). Never blocks the order.
     const orderPhone = normalizeClientPhone(body.phone) || body.phone;
+    let syncedMemberId: number | null = null;
     try {
       const member = await syncClubeMemberOnOrder({
         companyId,
@@ -334,7 +423,16 @@ router.post("/orders", resolvePublicCompany, async (req, res) => {
         phone: orderPhone,
         origin: "pedido",
       });
-      if (member?.id) meta.clientMemberId = member.id;
+      if (member?.id) {
+        meta.clientMemberId = member.id;
+        syncedMemberId = member.id;
+      }
+      if (fidelityRewardId) {
+        meta.fidelityRewardId = fidelityRewardId;
+        if (fidelityFreeProductId != null) meta.fidelityFreeProductId = fidelityFreeProductId;
+        if (fidelityFreeProductName) meta.fidelityFreeProductName = fidelityFreeProductName;
+        meta.fidelityDiscountAmount = fidelityDiscount;
+      }
     } catch (syncErr) {
       req.log.warn({ err: syncErr }, "Clube/CRM member sync skipped");
     }
@@ -375,6 +473,33 @@ router.post("/orders", resolvePublicCompany, async (req, res) => {
         await tx.update(couponsTable)
           .set({ usedCount: sql`used_count + 1` })
           .where(and(eq(couponsTable.companyId, companyId), sql`LOWER(code) = LOWER(${validatedCouponCode})`));
+      }
+
+      // Finalize fidelity redeem after the order exists (same cadastro, no duplicate).
+      if (fidelityRewardId && syncedMemberId) {
+        const [memberRow] = await tx
+          .select()
+          .from(clubeMembersTable)
+          .where(and(
+            eq(clubeMembersTable.id, syncedMemberId),
+            eq(clubeMembersTable.companyId, companyId),
+          ));
+        if (memberRow) {
+          const { publicNotes, meta: memberMeta } = parseClientNotes(memberRow.notes);
+          const redeemed = redeemAvailableReward(memberMeta, fidelityRewardId, {
+            orderId: order.id,
+            orderNumber,
+          });
+          if (redeemed) {
+            await tx
+              .update(clubeMembersTable)
+              .set({ notes: serializeClientNotes(publicNotes, redeemed.meta) })
+              .where(and(
+                eq(clubeMembersTable.id, syncedMemberId),
+                eq(clubeMembersTable.companyId, companyId),
+              ));
+          }
+        }
       }
 
       return order;

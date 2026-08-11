@@ -29,6 +29,7 @@ import {
 
 const LEDGER_LABEL: Record<ClientLedgerType, string> = {
   selo_pedido: 'Selo conquistado',
+  selo_bloqueado: 'Selo do período já conquistado',
   cashback_pedido: 'Cashback recebido',
   cashback_utilizado: 'Cashback utilizado',
   ajuste_selo: 'Ajuste de selos',
@@ -563,7 +564,7 @@ export default function ClubeCliente() {
                             {r.orderNumber != null ? ` · Pedido #${r.orderNumber}` : ''}
                           </p>
                           <p className="text-zinc-500 text-[11px] mt-1">
-                            Solicite o resgate no atendimento da loja.
+                            Na próxima compra, você poderá resgatar no checkout (hambúrguer do cardápio — sem Combos).
                           </p>
                         </div>
                       ))}

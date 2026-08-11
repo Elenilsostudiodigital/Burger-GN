@@ -10,6 +10,11 @@ import {
 import { saveMyOrder } from '../lib/myOrder';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import {
+  ClubeFidelityRedeemPrompt,
+  FidelityRedeemSelection,
+} from '../components/ClubeFidelityRedeemPrompt';
+import { getSavedClubePhone } from '../lib/clubeCliente';
+import {
   ArrowLeft, Bike, Store, Utensils, CreditCard, Banknote, QrCode,
   Loader2, Tag, X, CheckCircle2, MapPin, AlertCircle, ChevronDown, LocateFixed, Navigation, Home,
 } from 'lucide-react';
@@ -58,7 +63,7 @@ function mapEmbedUrl(lat: number, lng: number) {
 
 export default function Checkout() {
   const [, setLocation] = useLocation();
-  const { cartItems, subtotal } = useCart();
+  const { cartItems, subtotal, addItem } = useCart();
 
   const [step, setStep] = useState<CheckoutStep>('fulfillment');
   const [orderType, setOrderType] = useState<OrderType | null>(null);
@@ -93,10 +98,15 @@ export default function Checkout() {
   const [appliedCoupon, setAppliedCoupon] = useState<ValidateCouponResult | null>(null);
   const [couponLoading, setCouponLoading] = useState(false);
   const [couponError, setCouponError] = useState('');
+  const [fidelityRedeem, setFidelityRedeem] = useState<FidelityRedeemSelection | null>(null);
 
   const isDelivery = orderType === 'delivery';
   const usingKm = isDelivery && kmEnabled && customerCoords !== null;
-  const discount = appliedCoupon?.discountAmount ?? 0;
+  const couponDiscount = appliedCoupon?.discountAmount ?? 0;
+  const fidelityDiscount = fidelityRedeem
+    ? Math.min(subtotal, Number(fidelityRedeem.product.price) || 0)
+    : 0;
+  const discount = Math.min(subtotal, couponDiscount + fidelityDiscount);
   const DELIVERY_FEE_UNAVAILABLE =
     'Ainda não conseguimos calcular a taxa de entrega para este endereço. Verifique o endereço ou fale conosco.';
   /** Delivery may only checkout when a fee was successfully resolved (R$ 0 is OK if configured). */
@@ -104,6 +114,7 @@ export default function Checkout() {
   const total = Math.max(0, subtotal + (isDelivery && feeFound === true ? deliveryFee : 0) - discount);
   const fmt = (v: number) => `R$ ${v.toFixed(2).replace('.', ',')}`;
   const cashBlockedForDelivery = isDelivery && paySettings !== null && !paySettings.cashOnDeliveryEnabled;
+  const clubePhoneForRedeem = form.telefone || getSavedClubePhone();
 
   const setField = useCallback(<K extends keyof FormState>(key: K, value: FormState[K]) => {
     setForm(prev => ({ ...prev, [key]: value }));
@@ -470,6 +481,11 @@ export default function Checkout() {
       }
     }
 
+    if (fidelityRedeem && !cartItems.some((ci) => ci.item.id === fidelityRedeem.product.id)) {
+      setSubmitError('Inclua o hambúrguer gratuito no pedido para resgatar a recompensa do Clube.');
+      return;
+    }
+
     setSubmitting(true);
     setSubmitError('');
     try {
@@ -493,6 +509,8 @@ export default function Checkout() {
         cardType: paymentMethod === 'card' ? cardType : undefined,
         needsChange: paymentMethod === 'cash' ? needsChange : undefined,
         couponCode: appliedCoupon?.code,
+        fidelityRewardId: fidelityRedeem?.rewardId,
+        fidelityFreeProductId: fidelityRedeem?.product.id,
         items: cartItems.map(ci => ({
           productId: ci.item.id,
           productName: ci.item.name,
@@ -1122,6 +1140,32 @@ export default function Checkout() {
                   onChange={e => setField('observacoes', e.target.value)}
                   placeholder="Ex: Sem cebola, ponto bem passado..."
                   className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 text-white text-sm resize-none focus:border-amber-500 focus:outline-none h-20 placeholder:text-zinc-600"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <ClubeFidelityRedeemPrompt
+                  phone={clubePhoneForRedeem}
+                  applied={fidelityRedeem}
+                  fidelityDiscount={fidelityDiscount}
+                  onClear={() => setFidelityRedeem(null)}
+                  onRedeem={(selection) => {
+                    const already = cartItems.some((ci) => ci.item.id === selection.product.id);
+                    if (!already) {
+                      addItem(
+                        {
+                          id: selection.product.id,
+                          name: selection.product.name,
+                          description: selection.product.description || '',
+                          price: parseFloat(selection.product.price) || 0,
+                          image: selection.product.image || '',
+                          available: selection.product.available,
+                        },
+                        { notes: 'Hambúrguer grátis — Clube Burger GN', quantity: 1 },
+                      );
+                    }
+                    setFidelityRedeem(selection);
+                  }}
                 />
               </div>
 

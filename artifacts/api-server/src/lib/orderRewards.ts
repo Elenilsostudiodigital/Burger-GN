@@ -1,11 +1,16 @@
 /**
  * Automatic fidelity (stamps) + cashback when an order reaches "done".
  * Idempotent per order via order meta flags AND client ledger.
+ *
+ * Fidelity rule: at most 1 stamp per rolling 24 hours (from last selo_pedido).
+ * Cashback: every completed order (no daily limit).
  */
 import { db, clubeMembersTable, clubeSettingsTable } from "@workspace/db";
 import { and, eq } from "drizzle-orm";
 import {
+  STAMP_SKIPPED_MESSAGE,
   appendClientLedger,
+  canAwardFidelityStamp,
   grantAvailableReward,
   hasLedgerForOrder,
   parseClientNotes,
@@ -27,8 +32,10 @@ export type OrderForRewards = {
 export type ApplyRewardsResult = {
   meta: OrderMeta;
   stampsAwarded: boolean;
+  stampSkipped: boolean;
   cashbackAwarded: boolean;
   cashbackAmount: number;
+  rewardGranted: boolean;
   memberId: number | null;
 };
 
@@ -61,8 +68,10 @@ export async function applyOrderCompletionRewards(
   const result: ApplyRewardsResult = {
     meta: nextMeta,
     stampsAwarded: false,
+    stampSkipped: false,
     cashbackAwarded: false,
     cashbackAmount: 0,
+    rewardGranted: false,
     memberId: typeof meta.clientMemberId === "number" ? meta.clientMemberId : null,
   };
 
@@ -94,10 +103,11 @@ export async function applyOrderCompletionRewards(
   const needCashback = cashbackOn && !nextMeta.cashbackAwarded;
 
   if (!needStamps && !needCashback) {
-    // Still mark processed if both already done or both programs off.
     if (!nextMeta.rewardsProcessedAt && (nextMeta.stampsAwarded || nextMeta.cashbackAwarded)) {
       nextMeta.rewardsProcessedAt = new Date().toISOString();
     }
+    result.stampSkipped = !!nextMeta.stampSkipped;
+    result.rewardGranted = !!nextMeta.fidelityRewardGranted;
     result.meta = nextMeta;
     return result;
   }
@@ -108,12 +118,35 @@ export async function applyOrderCompletionRewards(
   let cashbackBalance = parseFloat(String(member.cashbackBalance)) || 0;
   let changed = false;
   const now = new Date().toISOString();
+  const nowMs = Date.now();
 
-  // ── Stamps (+1) ────────────────────────────────────────────────────────────
+  // ── Stamps (+1, max 1 per 24h) ──────────────────────────────────────────────
   if (needStamps) {
     const alreadyInLedger = hasLedgerForOrder(workingMeta, order.id, "selo_pedido");
+    const alreadyBlocked = hasLedgerForOrder(workingMeta, order.id, "selo_bloqueado");
     if (alreadyInLedger) {
       nextMeta.stampsAwarded = true;
+      result.stampsAwarded = false;
+    } else if (alreadyBlocked || nextMeta.stampSkipped) {
+      nextMeta.stampsAwarded = true;
+      nextMeta.stampSkipped = true;
+      nextMeta.stampSkipMessage = nextMeta.stampSkipMessage || STAMP_SKIPPED_MESSAGE;
+      result.stampSkipped = true;
+    } else if (!canAwardFidelityStamp(workingMeta, nowMs)) {
+      // Within 24h of last stamp — cashback still applies below.
+      workingMeta = appendClientLedger(workingMeta, {
+        at: now,
+        type: "selo_bloqueado",
+        orderId: order.id,
+        orderNumber: order.orderNumber,
+        stampsDelta: 0,
+        description: `Selo bloqueado (aguarda 24h) — pedido #${order.orderNumber}`,
+      });
+      nextMeta.stampsAwarded = true;
+      nextMeta.stampSkipped = true;
+      nextMeta.stampSkipMessage = STAMP_SKIPPED_MESSAGE;
+      result.stampSkipped = true;
+      changed = true;
     } else {
       points = Math.min(500, points + 1);
       workingMeta = appendClientLedger(workingMeta, {
@@ -150,11 +183,14 @@ export async function applyOrderCompletionRewards(
           rewardTitle: granted.reward.title,
           description: `Recompensa disponível: ${granted.reward.title}`,
         });
+        nextMeta.fidelityRewardGranted = true;
+        nextMeta.fidelityRewardTitle = granted.reward.title;
+        result.rewardGranted = true;
       }
     }
   }
 
-  // ── Cashback ───────────────────────────────────────────────────────────────
+  // ── Cashback (every order — no daily limit) ────────────────────────────────
   if (needCashback) {
     const alreadyInLedger = hasLedgerForOrder(workingMeta, order.id, "cashback_pedido");
     if (alreadyInLedger) {

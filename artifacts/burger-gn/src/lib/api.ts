@@ -219,6 +219,14 @@ export interface Order {
   prepTimeMax?: number | null;
   prepDurationSeconds?: number | null;
   prepEarlyFinish?: boolean;
+  stampsAwarded?: boolean;
+  stampSkipped?: boolean;
+  stampSkipMessage?: string | null;
+  cashbackAwarded?: boolean;
+  cashbackAmountAwarded?: number | null;
+  fidelityRewardGranted?: boolean;
+  fidelityRewardTitle?: string | null;
+  fidelityRewardId?: string | null;
 }
 
 export interface OrderReview {
@@ -249,6 +257,8 @@ export interface CreateOrderPayload {
   orderType: OrderType; paymentMethod: PaymentMethod; changeFor?: number;
   cardType?: CardType; needsChange?: boolean;
   couponCode?: string;
+  fidelityRewardId?: string;
+  fidelityFreeProductId?: number;
   items: Array<{ productId?: number; productName: string; productPrice: number; quantity: number; addons?: Addon[]; notes?: string }>;
 }
 export interface PixPaymentResult { paymentId: string; qrCode: string; qrCodeBase64: string; pixKey?: string; }
@@ -790,6 +800,7 @@ export interface PublicClubeMeResponse {
     remaining: number;
     rewardTitle: string;
     availableRewards: ClientAvailableReward[];
+    nextStampAvailableAt?: string | null;
     nextRewardMessage: string;
   };
   cashbackProgram?: {
@@ -957,6 +968,7 @@ export interface ClientOrderHistoryItem {
 
 export type ClientLedgerType =
   | "selo_pedido"
+  | "selo_bloqueado"
   | "cashback_pedido"
   | "cashback_utilizado"
   | "ajuste_selo"

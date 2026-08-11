@@ -26,6 +26,7 @@ import {
   markOrderCelebrated,
   saveClubePhone,
   saveClubeSessionFromMe,
+  type ClubeCelebrationKind,
 } from '../lib/clubeCliente';
 
 type TimelineKey = 'received' | 'accepted' | 'preparing' | 'ready' | 'out' | 'done';
@@ -99,7 +100,7 @@ function OrderTimelineView({ trackingId }: { trackingId: string }) {
   const [receiptError, setReceiptError] = useState('');
   const [receiptOk, setReceiptOk] = useState(false);
   const [statusToast, setStatusToast] = useState<{ title: string; body: string } | null>(null);
-  const [celebrationKind, setCelebrationKind] = useState<'first' | 'returning'>('returning');
+  const [celebrationKind, setCelebrationKind] = useState<ClubeCelebrationKind>('returning');
   const [celebrationCashback, setCelebrationCashback] = useState<string | undefined>();
   const galleryRef = useRef<HTMLInputElement>(null);
   const cameraRef = useRef<HTMLInputElement>(null);
@@ -239,7 +240,11 @@ function OrderTimelineView({ trackingId }: { trackingId: string }) {
 
       if (me?.found) {
         saveClubeSessionFromMe(me);
-        const kind = detectCelebrationKind(me);
+        const kind = detectCelebrationKind(me, {
+          orderId: orderData.id,
+          stampSkipped: !!orderData.stampSkipped,
+          rewardGranted: !!orderData.fidelityRewardGranted,
+        });
         setCelebrationKind(kind);
         const cashEntry = (me.ledger ?? []).find(
           (e) => e.orderId === orderData.id && e.type === 'cashback_pedido' && e.cashbackDelta,
@@ -247,7 +252,9 @@ function OrderTimelineView({ trackingId }: { trackingId: string }) {
         setCelebrationCashback(
           cashEntry?.cashbackDelta != null
             ? fmtCashback(cashEntry.cashbackDelta)
-            : fmtCashback(me.member?.cashbackBalance ?? 0),
+            : orderData.cashbackAmountAwarded != null
+              ? fmtCashback(orderData.cashbackAmountAwarded)
+              : fmtCashback(me.member?.cashbackBalance ?? 0),
         );
         markOrderCelebrated(orderData.id);
         setDeliveryPhase('celebrate');
@@ -499,6 +506,7 @@ function OrderTimelineView({ trackingId }: { trackingId: string }) {
               <ClubeCelebration
                 kind={celebrationKind}
                 cashbackLabel={celebrationCashback}
+                stampsRequired={10}
                 continueLabel="Ver meu Clube"
                 onContinue={() => {
                   closeAndArchive('reviewed', '/clube');

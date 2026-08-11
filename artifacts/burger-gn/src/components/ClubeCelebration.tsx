@@ -1,9 +1,16 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 
+export type ClubeCelebrationKind =
+  | 'first'
+  | 'returning'
+  | 'stamp_skipped'
+  | 'reward_complete';
+
 interface Props {
-  kind: 'first' | 'returning';
+  kind: ClubeCelebrationKind;
   cashbackLabel?: string;
+  stampsRequired?: number;
   onContinue?: () => void;
   continueLabel?: string;
 }
@@ -48,6 +55,7 @@ function ConfettiBurst() {
 export function ClubeCelebration({
   kind,
   cashbackLabel,
+  stampsRequired = 10,
   onContinue,
   continueLabel = 'Ver meu Clube',
 }: Props) {
@@ -58,6 +66,87 @@ export function ClubeCelebration({
   }, [kind]);
 
   if (!show) return null;
+
+  if (kind === 'stamp_skipped') {
+    return (
+      <motion.div
+        initial={{ opacity: 0, scale: 0.96 }}
+        animate={{ opacity: 1, scale: 1 }}
+        className="relative overflow-hidden rounded-3xl border border-amber-500/40 bg-gradient-to-b from-amber-500/15 via-zinc-950 to-zinc-950 p-6 text-center space-y-4"
+      >
+        <motion.p
+          initial={{ scale: 0.6 }}
+          animate={{ scale: 1 }}
+          transition={{ type: 'spring', stiffness: 320, damping: 14 }}
+          className="text-4xl relative"
+        >
+          🍔
+        </motion.p>
+        <div className="relative space-y-3 text-left max-w-sm mx-auto">
+          <p className="rounded-xl bg-zinc-900/80 border border-zinc-800 px-3 py-2.5 text-amber-300 text-sm font-bold leading-relaxed">
+            🍔 Você já conquistou o selo referente a este período.
+          </p>
+          <p className="rounded-xl bg-zinc-900/80 border border-zinc-800 px-3 py-2.5 text-emerald-300 text-sm font-bold leading-relaxed">
+            💰 Seu Cashback foi adicionado normalmente
+            {cashbackLabel ? ` (${cashbackLabel})` : ''}.
+          </p>
+          <p className="text-zinc-400 text-sm leading-relaxed px-1">
+            Seu próximo selo estará disponível na primeira compra realizada após completar 24 horas.
+          </p>
+        </div>
+        {onContinue ? (
+          <button
+            type="button"
+            onClick={onContinue}
+            className="relative w-full h-11 rounded-xl bg-amber-500 hover:bg-amber-400 text-zinc-950 font-black text-sm uppercase tracking-wide"
+          >
+            {continueLabel}
+          </button>
+        ) : null}
+      </motion.div>
+    );
+  }
+
+  if (kind === 'reward_complete') {
+    return (
+      <motion.div
+        initial={{ opacity: 0, scale: 0.96 }}
+        animate={{ opacity: 1, scale: 1 }}
+        className="relative overflow-hidden rounded-3xl border border-amber-500/40 bg-gradient-to-b from-amber-500/20 via-zinc-950 to-zinc-950 p-6 text-center space-y-4"
+      >
+        <ConfettiBurst />
+        <motion.p
+          initial={{ scale: 0.6 }}
+          animate={{ scale: 1 }}
+          transition={{ type: 'spring', stiffness: 320, damping: 14 }}
+          className="text-4xl relative"
+        >
+          🎉
+        </motion.p>
+        <div className="relative space-y-2">
+          <h2 className="text-white font-black text-xl leading-snug">Parabéns!</h2>
+          <p className="text-zinc-300 text-sm leading-relaxed">
+            Você completou os {stampsRequired} selos do Clube Burger GN.
+          </p>
+          <p className="text-amber-300 text-sm font-bold leading-relaxed">
+            Na sua próxima compra você poderá escolher gratuitamente qualquer hambúrguer do cardápio.
+          </p>
+          <p className="text-zinc-500 text-xs leading-relaxed">
+            O prêmio não é válido para Combos. Será cobrada apenas a taxa de entrega, quando houver.
+          </p>
+        </div>
+        {onContinue ? (
+          <button
+            type="button"
+            onClick={onContinue}
+            className="relative w-full h-11 rounded-xl bg-amber-500 hover:bg-amber-400 text-zinc-950 font-black text-sm uppercase tracking-wide"
+          >
+            {continueLabel}
+          </button>
+        ) : null}
+      </motion.div>
+    );
+  }
 
   const isFirst = kind === 'first';
 

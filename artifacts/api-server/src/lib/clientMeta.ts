@@ -22,12 +22,19 @@ export interface RecoveryContactRecord {
 /** Ledger of fidelity/cashback events for the client profile. */
 export type ClientLedgerType =
   | "selo_pedido"
+  | "selo_bloqueado"
   | "cashback_pedido"
   | "cashback_utilizado"
   | "ajuste_selo"
   | "ajuste_cashback"
   | "recompensa_disponivel"
   | "recompensa_resgatada";
+
+/** Rolling window between fidelity stamps (ms). */
+export const FIDELITY_STAMP_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+
+export const STAMP_SKIPPED_MESSAGE =
+  "🍔 Você já conquistou o selo referente a este período.\n💰 Seu Cashback foi adicionado normalmente.\nSeu próximo selo estará disponível na primeira compra realizada após completar 24 horas.";
 
 export interface ClientLedgerEntry {
   id: string;
@@ -69,6 +76,7 @@ const MAX_AVAILABLE_REWARDS = 50;
 
 const LEDGER_TYPES = new Set<ClientLedgerType>([
   "selo_pedido",
+  "selo_bloqueado",
   "cashback_pedido",
   "cashback_utilizado",
   "ajuste_selo",
@@ -326,6 +334,95 @@ export function grantAvailableReward(
   };
   const availableRewards = [full, ...(meta.availableRewards ?? [])].slice(0, MAX_AVAILABLE_REWARDS);
   return { meta: { ...meta, availableRewards }, reward: full };
+}
+
+/** Newest `selo_pedido` timestamp in the ledger (ISO), or null. */
+export function lastFidelityStampAt(meta: ClientMeta): string | null {
+  for (const entry of meta.ledger ?? []) {
+    if (entry.type === "selo_pedido" && entry.at) return entry.at;
+  }
+  return null;
+}
+
+/** ISO timestamp when the next stamp becomes available (after 24h), or null if available now. */
+export function nextFidelityStampAvailableAt(
+  meta: ClientMeta,
+  nowMs: number = Date.now(),
+): string | null {
+  const last = lastFidelityStampAt(meta);
+  if (!last) return null;
+  const next = new Date(last).getTime() + FIDELITY_STAMP_COOLDOWN_MS;
+  if (!Number.isFinite(next)) return null;
+  if (nowMs >= next) return null;
+  return new Date(next).toISOString();
+}
+
+export function canAwardFidelityStamp(
+  meta: ClientMeta,
+  nowMs: number = Date.now(),
+): boolean {
+  return nextFidelityStampAvailableAt(meta, nowMs) == null;
+}
+
+/** Mark an available reward as redeemed and append ledger entry. */
+export function redeemAvailableReward(
+  meta: ClientMeta,
+  rewardId: string,
+  opts?: { at?: string; orderId?: number | null; orderNumber?: number | null },
+): { meta: ClientMeta; reward: AvailableReward } | null {
+  const rewards = [...(meta.availableRewards ?? [])];
+  const idx = rewards.findIndex((r) => r.id === rewardId);
+  if (idx < 0) return null;
+  if (rewards[idx]!.redeemedAt) return null;
+
+  const at = opts?.at || new Date().toISOString();
+  const reward: AvailableReward = {
+    ...rewards[idx]!,
+    redeemedAt: at,
+    orderId: opts?.orderId !== undefined ? opts.orderId : rewards[idx]!.orderId,
+    orderNumber: opts?.orderNumber !== undefined ? opts.orderNumber : rewards[idx]!.orderNumber,
+  };
+  rewards[idx] = reward;
+  let nextMeta: ClientMeta = { ...meta, availableRewards: rewards };
+  nextMeta = appendClientLedger(nextMeta, {
+    at,
+    type: "recompensa_resgatada",
+    rewardId: reward.id,
+    rewardTitle: reward.title,
+    orderId: reward.orderId ?? null,
+    orderNumber: reward.orderNumber ?? null,
+    description: `Recompensa resgatada: ${reward.title}`,
+  });
+  return { meta: nextMeta, reward };
+}
+
+/** Free-burger eligibility: hamburger/smash categories, never combos. */
+export function isFidelityFreeBurgerProduct(opts: {
+  categorySlug?: string | null;
+  categoryName?: string | null;
+  productName?: string | null;
+}): boolean {
+  const norm = (v: string | null | undefined) =>
+    String(v || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase();
+  const slug = norm(opts.categorySlug);
+  const catName = norm(opts.categoryName);
+  const productName = norm(opts.productName);
+  if (slug.includes("combo") || catName.includes("combo") || productName.includes("combo")) {
+    return false;
+  }
+  return (
+    slug.includes("hamburguer") ||
+    slug.includes("burger") ||
+    slug.includes("smash") ||
+    catName.includes("hamburguer") ||
+    catName.includes("burger") ||
+    catName.includes("smash") ||
+    productName.includes("hamburguer") ||
+    productName.includes("smash")
+  );
 }
 
 /**
