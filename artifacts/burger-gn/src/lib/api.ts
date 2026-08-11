@@ -519,6 +519,29 @@ async function lookupCepViaCep(cepDigits: string): Promise<{
   }
 }
 
+/** Normalize geocode payload so render never receives string/null lat/lng or object children. */
+function normalizeGeocodeCandidate(raw: unknown): GeocodeStreetCandidate | null {
+  if (!raw || typeof raw !== "object") return null;
+  const c = raw as Record<string, unknown>;
+  const lat = typeof c.lat === "number" ? c.lat : parseFloat(String(c.lat ?? ""));
+  const lng = typeof c.lng === "number" ? c.lng : parseFloat(String(c.lng ?? ""));
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  return {
+    id: String(c.id ?? `${lat.toFixed(5)},${lng.toFixed(5)}`),
+    lat,
+    lng,
+    streetName: String(c.streetName ?? ""),
+    neighborhood: String(c.neighborhood ?? ""),
+    city: String(c.city ?? ""),
+    state: String(c.state ?? ""),
+    country: String(c.country ?? ""),
+    displayName: String(c.displayName ?? ""),
+    query: String(c.query ?? ""),
+    houseNumber: c.houseNumber != null && String(c.houseNumber) ? String(c.houseNumber) : undefined,
+    cep: c.cep != null && String(c.cep) ? String(c.cep).replace(/\D/g, "").slice(0, 8) : undefined,
+  };
+}
+
 /**
  * Busca de endereços para Ruas de Entrega.
  * Usa a API do servidor (Nominatim server-side) — evita CORS no navegador.
@@ -557,10 +580,13 @@ export async function geocodeStreetLocation(parts: {
       number,
       cep,
     })) as GeocodeStreetSearchResult;
+    const candidates = (Array.isArray(result?.candidates) ? result.candidates : [])
+      .map(normalizeGeocodeCandidate)
+      .filter((c): c is GeocodeStreetCandidate => c != null);
     return {
-      candidates: Array.isArray(result?.candidates) ? result.candidates : [],
+      candidates,
       autoSelect: false,
-      message: result?.message ?? null,
+      message: typeof result?.message === "string" ? result.message : null,
     };
   } catch (err) {
     const msg = err instanceof Error && err.message ? err.message : failMsg;

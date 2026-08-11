@@ -60,11 +60,16 @@ export class ErrorBoundary extends React.Component<Props, State> {
       return (
         <div className="min-h-screen bg-[#0a0a0a] flex flex-col items-center justify-center p-6 text-center">
           <p className="text-white font-black text-xl mb-2">Algo deu errado</p>
-          <p className="text-zinc-500 text-sm mb-6 max-w-xs">
+          <p className="text-zinc-500 text-sm mb-3 max-w-xs">
             {admin
               ? 'Ocorreu um erro nesta tela. Toque abaixo para permanecer no painel administrativo.'
               : 'A tela foi recuperada. Toque abaixo para continuar o pedido.'}
           </p>
+          {this.state.message ? (
+            <pre className="text-red-400 text-[11px] text-left max-w-md w-full mb-6 whitespace-pre-wrap break-words bg-zinc-950/80 border border-zinc-800 rounded-xl p-3 font-mono">
+              {this.state.message}
+            </pre>
+          ) : null}
           <button
             type="button"
             onClick={this.handleReload}

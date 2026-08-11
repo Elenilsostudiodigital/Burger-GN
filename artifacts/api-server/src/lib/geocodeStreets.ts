@@ -178,15 +178,16 @@ function hitToCandidate(
 
   return {
     id,
-    lat,
-    lng,
-    streetName,
-    neighborhood,
-    city,
-    state,
-    country,
-    displayName,
-    query,
+    // Explicit Number() so JSON never serializes accidental string coords
+    lat: Number(lat),
+    lng: Number(lng),
+    streetName: String(streetName || ""),
+    neighborhood: String(neighborhood || ""),
+    city: String(city || ""),
+    state: String(state || ""),
+    country: String(country || ""),
+    displayName: String(displayName || ""),
+    query: String(query || ""),
     houseNumber: houseNumber || undefined,
     cep: cep || undefined,
   };
