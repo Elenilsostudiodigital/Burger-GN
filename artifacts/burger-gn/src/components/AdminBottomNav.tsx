@@ -14,6 +14,7 @@ const ITEMS = [
   { href: '/admin/cupons', icon: Tag, label: 'Cupons' },
   { href: '/admin/clube', icon: Crown, label: 'Clube' },
   { href: '/admin/taxas', icon: MapPin, label: 'Bairros' },
+  { href: '/admin/novas-ruas', icon: MapPin, label: 'Novas Ruas' },
   { href: '/admin/entrega-km', icon: Navigation, label: 'Por KM' },
   { href: '/admin/config', icon: Settings, label: 'Config' },
   { href: '/admin/importar', icon: Upload, label: 'Importar' },

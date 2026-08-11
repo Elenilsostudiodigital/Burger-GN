@@ -16,7 +16,8 @@
     "dev:db": "pnpm --filter @workspace/scripts run db:embedded",
     "db:push": "dotenv -e .env -- pnpm --filter @workspace/db run push",
     "db:migrate": "dotenv -e .env -- pnpm --filter @workspace/scripts run migrate-multi-tenant",
-    "db:migrate-clube": "dotenv -e .env -- pnpm --filter @workspace/scripts run migrate-clube"
+    "db:migrate-clube": "dotenv -e .env -- pnpm --filter @workspace/scripts run migrate-clube",
+    "db:migrate-delivery-streets": "dotenv -e .env -- pnpm --filter @workspace/scripts run migrate-delivery-streets"
   },
   "private": true,
   "pnpm": {

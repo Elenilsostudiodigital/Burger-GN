@@ -1,12 +1,13 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { ordersTable, orderItemsTable, couponsTable, deliveryZonesTable, kmDeliveryConfigTable, kmDeliveryTiersTable, paymentSettingsTable, productsTable, categoriesTable, clubeMembersTable } from "@workspace/db";
+import { ordersTable, orderItemsTable, couponsTable, deliveryZonesTable, kmDeliveryConfigTable, kmDeliveryTiersTable, paymentSettingsTable, productsTable, categoriesTable, clubeMembersTable, deliveryStreetsTable, deliveryStreetRequestsTable } from "@workspace/db";
 import { eq, and, desc, sql, asc, inArray, ne } from "drizzle-orm";
 import { requireCompanyAuth } from "../middlewares/auth";
 import { resolvePublicCompany } from "../middlewares/company";
 import { addSSEClient, removeSSEClient, broadcastSSE } from "../lib/sse";
 import { calcDiscount } from "./coupons";
 import { haversineKm, findKmTier } from "./km_delivery";
+import { normalizeStreetKey } from "../lib/deliveryStreets";
 import {
   parseOrderNotes, serializeOrderNotes, appendHistory, resolveWorkflow, WORKFLOW_TO_STATUS,
   buildCustomerNotifyMessage, buildPostDeliverySurveyMessage,
@@ -210,7 +211,33 @@ router.post("/orders", resolvePublicCompany, async (req, res) => {
     let customerDistanceKm: number | null = null;
 
     if (body.orderType === "delivery") {
-      if (body.customerLat && body.customerLng) {
+      // Priority: approved street registry (learned streets) — exact key match.
+      const streetKey = normalizeStreetKey(body.address || "");
+      if (streetKey) {
+        const [knownStreet] = await db
+          .select()
+          .from(deliveryStreetsTable)
+          .where(
+            and(
+              eq(deliveryStreetsTable.companyId, companyId),
+              eq(deliveryStreetsTable.streetKey, streetKey),
+              eq(deliveryStreetsTable.active, true),
+            ),
+          )
+          .limit(1);
+        if (knownStreet) {
+          const fee = parseFloat(String(knownStreet.fee));
+          if (Number.isFinite(fee)) {
+            deliveryFee = fee;
+            deliveryFeeResolved = true;
+          }
+          if (knownStreet.distanceKm != null) {
+            customerDistanceKm = parseFloat(String(knownStreet.distanceKm));
+          }
+        }
+      }
+
+      if (!deliveryFeeResolved && body.customerLat && body.customerLng) {
         const [kmConfig] = await db.select().from(kmDeliveryConfigTable).where(eq(kmDeliveryConfigTable.companyId, companyId));
         if (kmConfig && kmConfig.enabled) {
           const baseLat = parseFloat(kmConfig.baseLat);
@@ -509,6 +536,40 @@ router.post("/orders", resolvePublicCompany, async (req, res) => {
     // Pix only enters the admin "new order" queue after receipt upload.
     if (!isPix) {
       broadcastSSE(companyId, "new_order", fullOrder);
+    }
+
+    // Link pending street analysis request to this order (learning module).
+    if (body.orderType === "delivery" && body.address) {
+      try {
+        const streetKey = normalizeStreetKey(body.address);
+        if (streetKey) {
+          const [pending] = await db
+            .select()
+            .from(deliveryStreetRequestsTable)
+            .where(
+              and(
+                eq(deliveryStreetRequestsTable.companyId, companyId),
+                eq(deliveryStreetRequestsTable.streetKey, streetKey),
+                eq(deliveryStreetRequestsTable.status, "pending"),
+              ),
+            )
+            .limit(1);
+          if (pending) {
+            await db
+              .update(deliveryStreetRequestsTable)
+              .set({
+                orderId: result.id,
+                orderNumber,
+                customerName: body.customerName,
+                phone: orderPhone,
+                updatedAt: new Date(),
+              })
+              .where(eq(deliveryStreetRequestsTable.id, pending.id));
+          }
+        }
+      } catch (linkErr) {
+        req.log.warn({ err: linkErr }, "Street request link skipped");
+      }
     }
 
     // cardCheckoutUrl kept null — Mercado Pago intentionally not wired yet (future-ready)

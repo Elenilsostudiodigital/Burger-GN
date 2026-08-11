@@ -7,6 +7,7 @@
     "hello": "tsx ./src/hello.ts",
     "migrate-multi-tenant": "tsx ./src/migrate-multi-tenant.ts",
     "migrate-clube": "tsx ./src/migrate-clube.ts",
+    "migrate-delivery-streets": "tsx ./src/migrate-delivery-streets.ts",
     "db:embedded": "tsx ./src/start-embedded-pg.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },

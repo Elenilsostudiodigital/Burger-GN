@@ -47,7 +47,7 @@ function AdminNav({ active }: { active: string }) {
   );
 }
 
-type Tab = 'pagamento' | 'preparo' | 'links' | 'whatsapp';
+type Tab = 'pagamento' | 'preparo' | 'links' | 'whatsapp' | 'ruas';
 
 function PrepTimeTab() {
   const [loading, setLoading] = useState(true);
@@ -547,9 +547,28 @@ export default function SettingsHub() {
             className={`shrink-0 flex-1 min-w-[7rem] h-11 rounded-xl font-bold text-sm uppercase tracking-wide transition-all flex items-center justify-center gap-2 ${tab === 'whatsapp' ? 'bg-amber-500 text-zinc-950' : 'bg-zinc-900 text-zinc-400 border border-zinc-800'}`}>
             <MessageCircle size={16} /> WhatsApp
           </button>
+          <button onClick={() => setTab('ruas')}
+            className={`shrink-0 flex-1 min-w-[7rem] h-11 rounded-xl font-bold text-sm uppercase tracking-wide transition-all flex items-center justify-center gap-2 ${tab === 'ruas' ? 'bg-amber-500 text-zinc-950' : 'bg-zinc-900 text-zinc-400 border border-zinc-800'}`}>
+            <MapPin size={16} /> Ruas de Entrega
+          </button>
         </div>
 
-        {tab === 'pagamento' ? <PaymentTab /> : tab === 'preparo' ? <PrepTimeTab /> : tab === 'links' ? <LinksTab /> : <WhatsappTab />}
+        {tab === 'pagamento' ? <PaymentTab /> : tab === 'preparo' ? <PrepTimeTab /> : tab === 'links' ? <LinksTab /> : tab === 'whatsapp' ? <WhatsappTab /> : (
+          <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-5 space-y-3">
+            <h3 className="text-white font-black uppercase text-sm">Ruas de Entrega</h3>
+            <p className="text-zinc-400 text-sm leading-relaxed">
+              Gerencie ruas aprovadas: taxa, tempo, observações, ativar/desativar e excluir.
+            </p>
+            <Link href="/admin/ruas-entrega">
+              <Button className="w-full h-11 rounded-xl font-bold">Abrir Ruas de Entrega</Button>
+            </Link>
+            <Link href="/admin/novas-ruas">
+              <Button variant="outline" className="w-full h-11 rounded-xl font-bold border-zinc-700">
+                📍 Ver Novas Ruas
+              </Button>
+            </Link>
+          </div>
+        )}
       </main>
 
       <AdminNav active="/admin/config" />

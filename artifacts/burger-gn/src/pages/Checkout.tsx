@@ -5,6 +5,7 @@ import { PageTransition } from '../components/PageTransition';
 import {
   createOrder, validateCoupon, getDeliveryZones, getDeliveryFee, getKmDeliveryConfig,
   geocodeAddress, reverseGeocode, haversineKm, findKmTier, getPaymentSettings,
+  checkDeliveryStreet,
   ValidateCouponResult, DeliveryZone, KmDeliveryConfig, PaymentSettingsPublic,
 } from '../lib/api';
 import { saveMyOrder } from '../lib/myOrder';
@@ -82,7 +83,10 @@ export default function Checkout() {
   const [feeLoading, setFeeLoading] = useState(false);
   const [feeMessage, setFeeMessage] = useState('');
   const [feeFound, setFeeFound] = useState<boolean | null>(null);
+  const [streetPendingMessage, setStreetPendingMessage] = useState('');
+  const [streetEtaMinutes, setStreetEtaMinutes] = useState<number | null>(null);
   const feeDebounce = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const streetDebounce = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const [kmConfig, setKmConfig] = useState<KmDeliveryConfig | null>(null);
   const kmEnabled = !!kmConfig?.enabled;
@@ -255,6 +259,59 @@ export default function Checkout() {
     }, 900);
     return () => clearTimeout(feeDebounce.current);
   }, [form.endereco, form.numero, form.bairro, kmEnabled, isDelivery, step, applyCoordinates]);
+
+  // Street registry check (learning module) — reuses lat/lng already calculated.
+  useEffect(() => {
+    if (!isDelivery) return;
+    if (step !== 'manual' && step !== 'payment' && step !== 'gps') return;
+    if (!form.endereco?.trim() || !form.numero?.trim() || !form.bairro?.trim() || form.bairro === '__outro__') {
+      setStreetPendingMessage('');
+      setStreetEtaMinutes(null);
+      return;
+    }
+
+    clearTimeout(streetDebounce.current);
+    streetDebounce.current = setTimeout(async () => {
+      try {
+        const result = await checkDeliveryStreet({
+          streetName: form.endereco.trim(),
+          addressNumber: form.numero.trim(),
+          neighborhood: form.bairro.trim(),
+          city: 'Lauro de Freitas',
+          lat: customerCoords?.lat,
+          lng: customerCoords?.lng,
+          customerName: form.nome.trim() || undefined,
+          phone: form.telefone || undefined,
+          distanceKm: distanceKm ?? undefined,
+        });
+
+        if (result.known && result.fee != null && Number.isFinite(result.fee)) {
+          setDeliveryFee(result.fee);
+          setFeeFound(true);
+          setFeeMessage('');
+          setStreetPendingMessage('');
+          setStreetEtaMinutes(result.etaMinutes ?? null);
+          if (result.distanceKm != null) setDistanceKm(result.distanceKm);
+          return;
+        }
+
+        if (result.pending) {
+          setStreetPendingMessage(
+            result.message ||
+              '📍 Esta rua ainda não faz parte da nossa área de entrega.\nAguarde um instante enquanto verificamos a disponibilidade.\nO pedido ficará aguardando análise do administrador.',
+          );
+          setStreetEtaMinutes(result.etaMinutes ?? null);
+        } else {
+          setStreetPendingMessage('');
+        }
+      } catch {
+        /* never block checkout core on street-check failure */
+      }
+    }, 700);
+
+    return () => clearTimeout(streetDebounce.current);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.endereco, form.numero, form.bairro, form.nome, form.telefone, customerCoords, distanceKm, isDelivery, step]);
 
   const resetDeliveryState = () => {
     setCustomerCoords(null);
@@ -640,22 +697,43 @@ export default function Checkout() {
         </motion.div>
       ) : feeFound === true ? (
         <motion.div key="fee-ok" initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
-          className="flex items-center justify-between bg-green-900/20 border border-green-800/40 rounded-xl px-4 py-3">
-          <div className="flex items-center gap-2 text-green-400">
-            <CheckCircle2 size={16} />
-            <span className="text-sm font-bold">
-              Taxa de entrega{distanceKm !== null ? ` · ${distanceKm.toFixed(1)} km` : ''}
-            </span>
+          className="space-y-2">
+          <div className="flex items-center justify-between bg-green-900/20 border border-green-800/40 rounded-xl px-4 py-3">
+            <div className="flex items-center gap-2 text-green-400">
+              <CheckCircle2 size={16} />
+              <span className="text-sm font-bold">
+                Taxa de entrega{distanceKm !== null ? ` · ${distanceKm.toFixed(1)} km` : ''}
+                {streetEtaMinutes != null ? ` · ~${streetEtaMinutes} min` : ''}
+              </span>
+            </div>
+            <span className="text-green-400 font-black">{fmt(deliveryFee)}</span>
           </div>
-          <span className="text-green-400 font-black">{fmt(deliveryFee)}</span>
+          {streetPendingMessage ? (
+            <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-amber-200 text-sm whitespace-pre-line leading-relaxed">
+              {streetPendingMessage}
+            </div>
+          ) : null}
         </motion.div>
       ) : feeFound === false ? (
         <motion.div key="fee-warn" initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
-          className="flex items-start gap-2 bg-orange-900/20 border border-orange-800/40 rounded-xl px-4 py-3">
-          <AlertCircle size={16} className="text-orange-400 mt-0.5 shrink-0" />
-          <p className="text-orange-400 text-sm">
-            {DELIVERY_FEE_UNAVAILABLE}
-          </p>
+          className="space-y-2">
+          {streetPendingMessage ? (
+            <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-amber-200 text-sm whitespace-pre-line leading-relaxed">
+              {streetPendingMessage}
+            </div>
+          ) : (
+            <div className="flex items-start gap-2 bg-orange-900/20 border border-orange-800/40 rounded-xl px-4 py-3">
+              <AlertCircle size={16} className="text-orange-400 mt-0.5 shrink-0" />
+              <p className="text-orange-400 text-sm">
+                {DELIVERY_FEE_UNAVAILABLE}
+              </p>
+            </div>
+          )}
+        </motion.div>
+      ) : streetPendingMessage ? (
+        <motion.div key="street-pending" initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+          className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-amber-200 text-sm whitespace-pre-line leading-relaxed">
+          {streetPendingMessage}
         </motion.div>
       ) : null}
     </AnimatePresence>

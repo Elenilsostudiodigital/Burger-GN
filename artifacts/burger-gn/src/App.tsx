@@ -32,6 +32,8 @@ import AdminClientsList from "./pages/admin/ClientsList";
 import AdminClientsImport from "./pages/admin/ClientsImport";
 import AdminClientDetail from "./pages/admin/ClientDetail";
 import AdminClientsRecovery from "./pages/admin/ClientsRecovery";
+import AdminNovasRuas from "./pages/admin/NovasRuas";
+import AdminRuasEntrega from "./pages/admin/RuasEntrega";
 
 const queryClient = new QueryClient();
 
@@ -89,6 +91,8 @@ function Router() {
         <Route path="/admin/clientes" component={() => <ProtectedAdminRoute component={AdminClientsList} />} />
         <Route path="/admin/avaliacoes" component={() => <ProtectedAdminRoute component={AdminReviews} />} />
         <Route path="/admin/taxas" component={() => <ProtectedAdminRoute component={AdminDeliveryZones} />} />
+        <Route path="/admin/novas-ruas" component={() => <ProtectedAdminRoute component={AdminNovasRuas} />} />
+        <Route path="/admin/ruas-entrega" component={() => <ProtectedAdminRoute component={AdminRuasEntrega} />} />
         <Route path="/admin/entrega-km" component={() => <ProtectedAdminRoute component={AdminKmDelivery} />} />
         <Route path="/admin/config" component={() => <ProtectedAdminRoute component={AdminSettingsHub} />} />
         <Route path="/admin/importar" component={() => <ProtectedAdminRoute component={AdminImportMenu} />} />

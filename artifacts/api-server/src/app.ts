@@ -7,6 +7,7 @@ import pinoHttp from "pino-http";
 import router from "./routes";
 import { logger } from "./lib/logger";
 import { ensureClubeSchema } from "./lib/ensureClubeSchema";
+import { ensureDeliveryStreetsSchema } from "./lib/ensureDeliveryStreetsSchema";
 
 const app: Express = express();
 
@@ -25,6 +26,25 @@ app.use("/api", async (req, res, next) => {
   } catch (err) {
     logger.error({ err }, "Failed to ensure Clube schema");
     res.status(500).json({ error: "Falha ao preparar o banco de dados do Clube/CRM." });
+  }
+});
+
+/** Ensures delivery streets tables before street/fee handlers. */
+app.use("/api", async (req, res, next) => {
+  const path = req.path || "";
+  const needsStreets =
+    path.startsWith("/delivery/streets") ||
+    path.startsWith("/admin/delivery-street") ||
+    path.startsWith("/admin/delivery-streets") ||
+    path === "/orders" ||
+    path.startsWith("/orders/");
+  if (!needsStreets) return next();
+  try {
+    await ensureDeliveryStreetsSchema();
+    next();
+  } catch (err) {
+    logger.error({ err }, "Failed to ensure delivery streets schema");
+    res.status(500).json({ error: "Falha ao preparar o banco de ruas de entrega." });
   }
 });
 

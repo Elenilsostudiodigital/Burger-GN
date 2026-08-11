@@ -99,6 +99,98 @@ export const createDeliveryZone = (d: { neighborhood: string; fee: string; activ
 export const updateDeliveryZone = (id: number, d: Partial<DeliveryZone>) => api.put(`/admin/delivery-zones/${id}`, d) as Promise<DeliveryZone>;
 export const deleteDeliveryZone = (id: number) => api.delete(`/admin/delivery-zones/${id}`);
 
+// ── Delivery Streets (learned / approved streets) ─────────────────────────────
+export interface DeliveryStreet {
+  id: number;
+  streetName: string;
+  streetKey: string;
+  neighborhood: string;
+  city: string;
+  cep: string;
+  lat: number | null;
+  lng: number | null;
+  distanceKm: number | null;
+  etaMinutes: number | null;
+  fee: number;
+  notes: string;
+  active: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+export interface DeliveryStreetRequest {
+  id: number;
+  orderId: number | null;
+  orderNumber: number | null;
+  customerName: string;
+  phone: string;
+  streetName: string;
+  streetKey: string;
+  addressNumber: string;
+  neighborhood: string;
+  city: string;
+  cep: string;
+  lat: number | null;
+  lng: number | null;
+  distanceKm: number | null;
+  routeDistanceKm: number | null;
+  etaMinutes: number | null;
+  suggestedFee: number | null;
+  status: string;
+  reviewedAt: string | null;
+  streetId: number | null;
+  createdAt: string;
+  updatedAt: string;
+}
+export interface StreetCheckResult {
+  known: boolean;
+  pending: boolean;
+  street?: DeliveryStreet;
+  requestId?: number | null;
+  fee: number | null;
+  etaMinutes?: number | null;
+  distanceKm?: number | null;
+  suggestedFee?: number | null;
+  message: string | null;
+}
+export interface StreetRequestDetail {
+  request: DeliveryStreetRequest;
+  store: { lat: number | null; lng: number | null; address: string | null };
+  mapEmbed: string | null;
+}
+
+export const checkDeliveryStreet = (d: {
+  streetName: string;
+  addressNumber?: string;
+  neighborhood?: string;
+  city?: string;
+  cep?: string;
+  lat?: number;
+  lng?: number;
+  customerName?: string;
+  phone?: string;
+  distanceKm?: number;
+}) => api.post("/delivery/streets/check", d) as Promise<StreetCheckResult>;
+
+export const getAdminStreetRequests = (status = "pending") =>
+  api.get(`/admin/delivery-street-requests?status=${encodeURIComponent(status)}`) as Promise<DeliveryStreetRequest[]>;
+export const getAdminStreetRequest = (id: number) =>
+  api.get(`/admin/delivery-street-requests/${id}`) as Promise<StreetRequestDetail>;
+export const approveStreetRequest = (
+  id: number,
+  d: { fee: number; etaMinutes?: number; notes?: string; routeDistanceKm?: number; distanceKm?: number },
+) => api.post(`/admin/delivery-street-requests/${id}/approve`, d) as Promise<{ ok: boolean; street: DeliveryStreet; request: DeliveryStreetRequest }>;
+export const rejectStreetRequest = (id: number) =>
+  api.post(`/admin/delivery-street-requests/${id}/reject`, {}) as Promise<{ ok: boolean; request: DeliveryStreetRequest }>;
+
+export const getAdminDeliveryStreets = (q = "") =>
+  api.get(`/admin/delivery-streets${q ? `?q=${encodeURIComponent(q)}` : ""}`) as Promise<DeliveryStreet[]>;
+export const createAdminDeliveryStreet = (d: Partial<DeliveryStreet>) =>
+  api.post("/admin/delivery-streets", d) as Promise<DeliveryStreet>;
+export const updateAdminDeliveryStreet = (id: number, d: Partial<DeliveryStreet>) =>
+  api.put(`/admin/delivery-streets/${id}`, d) as Promise<DeliveryStreet>;
+export const deleteAdminDeliveryStreet = (id: number) =>
+  api.delete(`/admin/delivery-streets/${id}`);
+
 // ── KM Delivery ───────────────────────────────────────────────────────────────
 export interface KmDeliveryTier { id: number; fromKm: string; toKm: string | null; fee: string | null; displayOrder: number; createdAt: string; }
 export interface KmDeliveryConfig { id: number; enabled: boolean; baseAddress: string; baseLat: string; baseLng: string; minFee: string; feePerKm: string; maxDistanceKm: string; updatedAt: string; tiers: KmDeliveryTier[]; }
