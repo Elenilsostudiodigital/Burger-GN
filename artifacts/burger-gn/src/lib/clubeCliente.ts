@@ -1,7 +1,52 @@
 /** Persistência local da área do Clube Burger (cliente). */
 
 const PHONE_KEY = 'bgn_clube_phone';
+const PROFILE_KEY = 'bgn_clube_profile';
 const SEEN_LEDGER_KEY = 'bgn_clube_seen_ledger';
+const CELEBRATED_ORDERS_KEY = 'bgn_clube_celebrated_orders';
+
+export interface ClubeSessionProfile {
+  phone: string;
+  name: string;
+  cashbackBalance: string;
+  stamps: number;
+  goal: number;
+  remaining: number;
+  progress: number;
+  nextRewardMessage: string;
+  rewardTitle: string;
+  orderCount: number;
+  updatedAt: string;
+}
+
+/** Minimal shape from GET /clube/me — avoids circular imports with api.ts */
+export interface ClubeMeSnapshot {
+  found: boolean;
+  member: {
+    phone: string;
+    name: string;
+    cashbackBalance: string;
+    orderCount: number;
+  } | null;
+  fidelity?: {
+    stamps: number;
+    goal: number;
+    remaining: number;
+    progress: number;
+    nextRewardMessage: string;
+    rewardTitle: string;
+  };
+  summary?: {
+    stampsEarned: number;
+    cashbackReceived: number;
+    cashbackUsed: number;
+  };
+  ledger?: Array<{
+    orderId?: number | null;
+    type: string;
+    cashbackDelta?: number | null;
+  }>;
+}
 
 export function getSavedClubePhone(): string {
   try {
@@ -13,18 +58,21 @@ export function getSavedClubePhone(): string {
 
 export function saveClubePhone(phone: string) {
   try {
-    const digits = String(phone || '').replace(/\D/g, '');
+    const digits = toNationalWhatsappDigits(phone);
     if (!digits) {
       localStorage.removeItem(PHONE_KEY);
       return;
     }
     localStorage.setItem(PHONE_KEY, digits);
+    window.dispatchEvent(new CustomEvent('bgn:clube-session-changed'));
   } catch { /* ignore */ }
 }
 
 export function clearClubePhone() {
   try {
     localStorage.removeItem(PHONE_KEY);
+    localStorage.removeItem(PROFILE_KEY);
+    window.dispatchEvent(new CustomEvent('bgn:clube-session-changed'));
   } catch { /* ignore */ }
 }
 
@@ -57,6 +105,41 @@ export function formatWhatsappDisplay(phone: string): string {
   return phone;
 }
 
+export function getClubeSessionProfile(): ClubeSessionProfile | null {
+  try {
+    const raw = localStorage.getItem(PROFILE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as ClubeSessionProfile;
+    if (!parsed?.phone || !parsed?.name) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+export function saveClubeSessionFromMe(data: ClubeMeSnapshot) {
+  if (!data.found || !data.member || !data.fidelity) return;
+  const phone = toNationalWhatsappDigits(data.member.phone);
+  saveClubePhone(phone);
+  const profile: ClubeSessionProfile = {
+    phone,
+    name: data.member.name,
+    cashbackBalance: data.member.cashbackBalance,
+    stamps: data.fidelity.stamps,
+    goal: data.fidelity.goal,
+    remaining: data.fidelity.remaining,
+    progress: data.fidelity.progress,
+    nextRewardMessage: data.fidelity.nextRewardMessage,
+    rewardTitle: data.fidelity.rewardTitle,
+    orderCount: data.member.orderCount,
+    updatedAt: new Date().toISOString(),
+  };
+  try {
+    localStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
+    window.dispatchEvent(new CustomEvent('bgn:clube-session-changed', { detail: profile }));
+  } catch { /* ignore */ }
+}
+
 export function getSeenLedgerIds(phone: string): Set<string> {
   try {
     const key = phoneIdentityStorageKey(phone);
@@ -79,8 +162,45 @@ export function markLedgerIdsSeen(phone: string, ids: string[]) {
   } catch { /* ignore */ }
 }
 
+export function hasCelebratedOrder(orderId: number): boolean {
+  try {
+    const raw = localStorage.getItem(CELEBRATED_ORDERS_KEY);
+    const ids = raw ? (JSON.parse(raw) as number[]) : [];
+    return Array.isArray(ids) && ids.includes(orderId);
+  } catch {
+    return false;
+  }
+}
+
+export function markOrderCelebrated(orderId: number) {
+  try {
+    const raw = localStorage.getItem(CELEBRATED_ORDERS_KEY);
+    const prev = raw ? (JSON.parse(raw) as number[]) : [];
+    const next = [orderId, ...(Array.isArray(prev) ? prev : [])].filter(
+      (v, i, arr) => arr.indexOf(v) === i,
+    ).slice(0, 100);
+    localStorage.setItem(CELEBRATED_ORDERS_KEY, JSON.stringify(next));
+  } catch { /* ignore */ }
+}
+
+export function detectCelebrationKind(data: ClubeMeSnapshot): 'first' | 'returning' {
+  const orderCount = data.member?.orderCount ?? 0;
+  const stampsEarned = data.summary?.stampsEarned ?? 0;
+  if (orderCount <= 1 || stampsEarned <= 1) return 'first';
+  return 'returning';
+}
+
 function phoneIdentityStorageKey(phone: string): string {
   let digits = String(phone || '').replace(/\D/g, '');
   if (digits.startsWith('55') && digits.length >= 12) digits = digits.slice(2);
   return digits.slice(-11) || 'unknown';
+}
+
+export function fmtCashback(v: string | number): string {
+  const n = typeof v === 'number' ? v : parseFloat(String(v));
+  return `R$ ${(Number.isFinite(n) ? n : 0).toFixed(2).replace('.', ',')}`;
+}
+
+export function firstName(fullName: string): string {
+  return (fullName || 'Cliente').trim().split(/\s+/)[0] || 'Cliente';
 }

@@ -13,6 +13,7 @@ import {
   CardType, WorkflowStage, isAllowedReceiptFile, RECEIPT_ACCEPT,
 } from '../lib/api';
 import { saveMyOrder } from '../lib/myOrder';
+import { saveClubePhone } from '../lib/clubeCliente';
 import { Button } from '@/components/ui/button';
 
 interface StoredOrder {
@@ -96,6 +97,7 @@ export default function Confirmation() {
           createdAt: stored.createdAt || new Date().toISOString(),
         });
       }
+      if (stored.phone) saveClubePhone(stored.phone);
       sessionStorage.removeItem('lastOrder');
     } catch (err) {
       console.error('[BurgerGN] Failed to restore last order:', err);
