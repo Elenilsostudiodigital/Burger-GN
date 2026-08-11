@@ -271,7 +271,7 @@ export type GeocodeStreetCandidate = {
 
 export type GeocodeStreetSearchResult = {
   candidates: GeocodeStreetCandidate[];
-  /** True when CEP resolved to a single address that can be auto-selected. */
+  /** Kept for compatibility; always false — seleção é manual no formulário. */
   autoSelect: boolean;
   /** Set when no suggestions inside Lauro de Freitas. */
   message: string | null;
@@ -520,10 +520,10 @@ async function lookupCepViaCep(cepDigits: string): Promise<{
 }
 
 /**
- * Busca inteligente de endereços para Ruas de Entrega (Nominatim + CEP ViaCEP).
- * - Sugestões enquanto digita (autocomplete), restritas a Lauro de Freitas
- * - Valida cidade/estado/país; sem fallback de bairro/outra cidade
- * - CEP: resolve endereço e prioriza seleção automática
+ * Busca de endereços para Ruas de Entrega (Nominatim + CEP ViaCEP).
+ * - Pesquisa sob demanda (botão "Localizar Endereço"), restrita a Lauro de Freitas
+ * - Consulta montada com Rua + Bairro + Cidade (e número/CEP quando informados)
+ * - Sem seleção automática: o administrador escolhe o resultado na lista
  * Não altera o checkout (`geocodeAddress`).
  */
 export async function geocodeStreetLocation(parts: {
@@ -543,9 +543,8 @@ export async function geocodeStreetLocation(parts: {
   const notFoundMsg = "Nenhum endereço encontrado nesta região.";
 
   const collected: GeocodeStreetCandidate[] = [];
-  let autoSelect = false;
 
-  // ── CEP priority ──────────────────────────────────────────────────────────
+  // ── CEP opcional (não preenche formulário; só amplia candidatos) ───────────
   if (cepDigits.length === 8) {
     const cepInfo = await lookupCepViaCep(cepDigits);
     if (cepInfo?.street) {
@@ -582,7 +581,7 @@ export async function geocodeStreetLocation(parts: {
       if (cepCandidates.length > 0) {
         return {
           candidates: cepCandidates.slice(0, 12),
-          autoSelect: true,
+          autoSelect: false,
           message: null,
         };
       }
@@ -594,20 +593,23 @@ export async function geocodeStreetLocation(parts: {
     return { candidates: [], autoSelect: false, message: cepDigits.length === 8 ? notFoundMsg : null };
   }
 
+  // Prioridade: Rua + Bairro + Cidade
   const queries: string[] = [];
-  if (number && neighborhood) {
-    queries.push(`${street}, ${number}, ${neighborhood}, ${city}, ${state}, Brasil`);
-  }
   if (neighborhood) {
+    if (number) {
+      queries.push(`${street}, ${number}, ${neighborhood}, ${city}, ${state}, Brasil`);
+    }
     queries.push(`${street}, ${neighborhood}, ${city}, ${state}, Brasil`);
   }
   if (number) {
     queries.push(`${street}, ${number}, ${city}, ${state}, Brasil`);
   }
   queries.push(`${street}, ${city}, ${state}, Brasil`);
-  // Broader autocomplete seed (helps partial names like "São Mateus")
   const streetCore = street.replace(/^(rua|r\.?|avenida|av\.?|travessa|tv\.?)\s+/i, "").trim();
   if (streetCore.length >= 3 && normalizePt(streetCore) !== normalizePt(street)) {
+    if (neighborhood) {
+      queries.push(`${streetCore}, ${neighborhood}, ${city}, ${state}, Brasil`);
+    }
     queries.push(`${streetCore}, ${city}, ${state}, Brasil`);
   }
 
@@ -633,7 +635,6 @@ export async function geocodeStreetLocation(parts: {
     } catch {
       /* next */
     }
-    // Keep gathering a bit for richer suggestions, but stop if we have enough
     if (dedupeCandidates(collected).length >= 8) break;
   }
 
@@ -672,10 +673,7 @@ export async function geocodeStreetLocation(parts: {
     return { candidates: [], autoSelect: false, message: notFoundMsg };
   }
 
-  // Single clear match can be auto-applied (still shown in list)
-  if (candidates.length === 1) autoSelect = true;
-
-  return { candidates, autoSelect, message: null };
+  return { candidates, autoSelect: false, message: null };
 }
 
 export interface ReverseGeocodeResult {
