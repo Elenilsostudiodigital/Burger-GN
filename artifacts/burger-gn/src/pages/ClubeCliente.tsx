@@ -23,6 +23,7 @@ import {
   getSeenLedgerIds,
   markLedgerIdsSeen,
   saveClubePhone,
+  saveClubeSessionFromMe,
   toNationalWhatsappDigits,
 } from '../lib/clubeCliente';
 
@@ -175,6 +176,7 @@ export default function ClubeCliente() {
       setData(result);
       setRules(result.rules);
       saveClubePhone(digits);
+      if (result.found) saveClubeSessionFromMe(result);
       emitRewardToasts(result);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Não foi possível consultar o Clube.');

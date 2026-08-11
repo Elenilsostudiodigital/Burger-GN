@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useParams, Link, useLocation } from 'wouter';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  trackOrder, getPaymentSettings, submitOrderReview, uploadOrderReceipt, Order,
+  trackOrder, getPaymentSettings, submitOrderReview, uploadOrderReceipt, getPublicClubeMe, Order,
   ORDER_TYPE_LABELS, PAYMENT_METHOD_LABELS, PAYMENT_STATUS_LABELS, WORKFLOW_LABELS,
   isAllowedReceiptFile, RECEIPT_ACCEPT, customerInAppStatusMessage,
 } from '../lib/api';
@@ -16,10 +16,19 @@ import { ArrowLeft, Clock, Home, AlertCircle, Timer, Star, Loader2, Camera, Imag
 import { Button } from '@/components/ui/button';
 import { PageTransition } from '../components/PageTransition';
 import { BottomNav } from '../components/BottomNav';
+import { ClubeCelebration } from '../components/ClubeCelebration';
 import { formatCountdown, computePrepRemainingSeconds } from '../lib/prepTimer';
+import {
+  detectCelebrationKind,
+  fmtCashback,
+  hasCelebratedOrder,
+  markOrderCelebrated,
+  saveClubePhone,
+  saveClubeSessionFromMe,
+} from '../lib/clubeCliente';
 
 type TimelineKey = 'received' | 'accepted' | 'preparing' | 'ready' | 'out' | 'done';
-type DeliveryPhase = 'confirm' | 'rate' | 'thanks' | null;
+type DeliveryPhase = 'confirm' | 'rate' | 'celebrate' | 'thanks' | null;
 
 const TIMELINE: Array<{ key: TimelineKey; label: string; emoji: string }> = [
   { key: 'received', label: 'Pedido Recebido', emoji: '🟡' },
@@ -89,6 +98,8 @@ function OrderTimelineView({ trackingId }: { trackingId: string }) {
   const [receiptError, setReceiptError] = useState('');
   const [receiptOk, setReceiptOk] = useState(false);
   const [statusToast, setStatusToast] = useState<{ title: string; body: string } | null>(null);
+  const [celebrationKind, setCelebrationKind] = useState<'first' | 'returning'>('returning');
+  const [celebrationCashback, setCelebrationCashback] = useState<string | undefined>();
   const galleryRef = useRef<HTMLInputElement>(null);
   const cameraRef = useRef<HTMLInputElement>(null);
   const lastPaymentKey = useRef<string | null>(null);
@@ -108,12 +119,12 @@ function OrderTimelineView({ trackingId }: { trackingId: string }) {
     return () => window.clearInterval(id);
   }, [order?.prepStartedAt, order?.prepFinishedAt, order?.workflow, order?.status]);
 
-  const closeAndArchive = (reason: 'reviewed' | 'declined' | 'timeout') => {
+  const closeAndArchive = (reason: 'reviewed' | 'declined' | 'timeout', dest = '/cardapio') => {
     if (closedRef.current) return;
     closedRef.current = true;
     archiveMyOrder(reason);
     setDeliveryPhase(null);
-    setLocation('/cardapio');
+    setLocation(dest);
   };
 
   useEffect(() => {
@@ -124,6 +135,7 @@ function OrderTimelineView({ trackingId }: { trackingId: string }) {
         if (!alive || closedRef.current) return;
         setOrder(data);
         setError(false);
+        if (data.phone) saveClubePhone(data.phone);
         saveMyOrder({
           trackingId: data.trackingId,
           orderNumber: data.orderNumber,
@@ -190,7 +202,7 @@ function OrderTimelineView({ trackingId }: { trackingId: string }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [trackingId]);
 
-  // 60s auto-close while confirmation/rating is open
+  // 60s auto-close while confirmation/rating is open (not during celebration)
   useEffect(() => {
     if (deliveryPhase !== 'confirm' && deliveryPhase !== 'rate') return;
     const ref = getMyOrder();
@@ -206,6 +218,36 @@ function OrderTimelineView({ trackingId }: { trackingId: string }) {
     return () => clearInterval(id);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deliveryPhase]);
+
+  const finishWithCelebration = async (orderData: Order) => {
+    if (hasCelebratedOrder(orderData.id)) {
+      setDeliveryPhase('thanks');
+      setTimeout(() => closeAndArchive('reviewed'), 1800);
+      return;
+    }
+    try {
+      if (orderData.phone) saveClubePhone(orderData.phone);
+      const me = await getPublicClubeMe(orderData.phone);
+      if (me.found) {
+        saveClubeSessionFromMe(me);
+        const kind = detectCelebrationKind(me);
+        setCelebrationKind(kind);
+        const cashEntry = (me.ledger ?? []).find(
+          (e) => e.orderId === orderData.id && e.type === 'cashback_pedido' && e.cashbackDelta,
+        );
+        setCelebrationCashback(
+          cashEntry?.cashbackDelta != null
+            ? fmtCashback(cashEntry.cashbackDelta)
+            : fmtCashback(me.member?.cashbackBalance ?? 0),
+        );
+        markOrderCelebrated(orderData.id);
+        setDeliveryPhase('celebrate');
+        return;
+      }
+    } catch { /* fall through */ }
+    setDeliveryPhase('thanks');
+    setTimeout(() => closeAndArchive('reviewed'), 1800);
+  };
 
   const handleDeliveredOk = (ok: boolean) => {
     if (!ok) {
@@ -231,8 +273,11 @@ function OrderTimelineView({ trackingId }: { trackingId: string }) {
         stars,
         comment,
       });
-      setDeliveryPhase('thanks');
-      setTimeout(() => closeAndArchive('reviewed'), 1600);
+      if (order) await finishWithCelebration(order);
+      else {
+        setDeliveryPhase('thanks');
+        setTimeout(() => closeAndArchive('reviewed'), 1800);
+      }
     } catch (err) {
       setReviewError(err instanceof Error ? err.message : 'Erro ao enviar avaliação');
     } finally {
@@ -375,11 +420,11 @@ function OrderTimelineView({ trackingId }: { trackingId: string }) {
               <div className="grid grid-cols-2 gap-3">
                 <button type="button" disabled={submittingReview} onClick={() => handleDeliveredOk(true)}
                   className="h-12 rounded-xl bg-emerald-500 text-zinc-950 font-black uppercase text-sm hover:bg-emerald-400">
-                  Sim
+                  ✅ SIM
                 </button>
                 <button type="button" disabled={submittingReview} onClick={() => handleDeliveredOk(false)}
                   className="h-12 rounded-xl bg-zinc-800 text-zinc-200 font-black uppercase text-sm hover:bg-zinc-700 border border-zinc-700">
-                  Não
+                  ❌ NÃO
                 </button>
               </div>
               {secondsLeft !== null && (
@@ -413,6 +458,9 @@ function OrderTimelineView({ trackingId }: { trackingId: string }) {
                   placeholder="Conte como foi..."
                   className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-white text-sm resize-none h-24 focus:border-amber-500 focus:outline-none"
                 />
+                <p className="text-zinc-500 text-[11px] leading-relaxed">
+                  Seu comentário não será público. Ele será enviado apenas para os proprietários da loja.
+                </p>
               </div>
               {reviewError && <p className="text-red-400 text-sm text-center">{reviewError}</p>}
               <Button type="button" disabled={submittingReview} onClick={handleSubmitReview}
@@ -422,6 +470,28 @@ function OrderTimelineView({ trackingId }: { trackingId: string }) {
               {secondsLeft !== null && (
                 <p className="text-zinc-600 text-xs text-center">Fecha automaticamente em {secondsLeft}s</p>
               )}
+            </motion.div>
+          )}
+
+          {delivered && deliveryPhase === 'celebrate' && (
+            <motion.div key="celebrate" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}>
+              <ClubeCelebration
+                kind={celebrationKind}
+                cashbackLabel={celebrationCashback}
+                continueLabel="Ver meu Clube"
+                onContinue={() => {
+                  closeAndArchive('reviewed', '/clube');
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  closeAndArchive('reviewed', '/');
+                }}
+                className="w-full mt-3 h-10 rounded-xl text-zinc-400 text-xs font-bold uppercase tracking-wider hover:text-white"
+              >
+                Voltar para o início
+              </button>
             </motion.div>
           )}
 
