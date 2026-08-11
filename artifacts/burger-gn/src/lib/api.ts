@@ -724,6 +724,78 @@ export interface ClubeCashbackData {
   membersWithBalance: ClubeMember[];
 }
 
+// ── Clube Burger — área do cliente (pública) ─────────────────────────────────
+export interface PublicClubeRules {
+  enabled: boolean;
+  clubName: string;
+  welcomeMessage: string;
+  cashback: {
+    enabled: boolean;
+    percent: string;
+    minOrder: string;
+    maxPerOrder: string | null;
+    howItWorks: string[];
+    whenToUse: string;
+  };
+  fidelity: {
+    enabled: boolean;
+    stampsRequired: number;
+    stampRewardTitle: string;
+    howItWorks: string[];
+    whenToUse: string;
+  };
+}
+
+export interface PublicClubeMember {
+  id: number;
+  name: string;
+  phone: string;
+  cashbackBalance: string;
+  stamps: number;
+  orderCount: number;
+  lastOrderAt: string | null;
+  lastOrderNumber: number | null;
+  joinedAt: string;
+}
+
+export interface PublicClubeMeResponse {
+  found: boolean;
+  rules: PublicClubeRules;
+  member: PublicClubeMember | null;
+  fidelity?: {
+    enabled: boolean;
+    stamps: number;
+    goal: number;
+    progress: number;
+    remaining: number;
+    rewardTitle: string;
+    availableRewards: ClientAvailableReward[];
+    nextRewardMessage: string;
+  };
+  cashbackProgram?: {
+    enabled: boolean;
+    percent: string;
+    minOrder: string;
+    maxPerOrder: string | null;
+    balance: string;
+    receivedTotal: number;
+    usedTotal: number;
+  };
+  summary?: {
+    stampsEarned: number;
+    cashbackReceived: number;
+    cashbackUsed: number;
+  };
+  history?: ClientOrderHistoryItem[];
+  ledger?: ClientLedgerEntry[];
+}
+
+export const getPublicClubeInfo = () =>
+  api.get("/clube/info") as Promise<PublicClubeRules>;
+
+export const getPublicClubeMe = (phone: string) =>
+  api.get(`/clube/me?phone=${encodeURIComponent(phone)}`) as Promise<PublicClubeMeResponse>;
+
 export const getClubeDashboard = () => api.get("/admin/clube/dashboard") as Promise<ClubeDashboard>;
 export const getClubeSettings = () => api.get("/admin/clube/settings") as Promise<ClubeSettings>;
 export const updateClubeSettings = (d: Partial<ClubeSettings>) =>

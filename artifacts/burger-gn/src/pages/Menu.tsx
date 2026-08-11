@@ -97,6 +97,21 @@ export default function Menu() {
         </div>
       </header>
 
+      <div className="max-w-md mx-auto px-4 pt-3">
+        <Link
+          href="/clube"
+          className="group flex items-center justify-between gap-3 w-full rounded-2xl border border-amber-500/35 bg-gradient-to-r from-amber-500/15 via-zinc-900 to-zinc-950 px-4 py-3 shadow-[0_0_24px_rgba(245,158,11,0.12)] hover:border-amber-400/55 transition-all"
+        >
+          <span className="flex items-center gap-2.5 min-w-0">
+            <span className="text-lg leading-none">🍔</span>
+            <span className="text-amber-400 font-black text-sm tracking-tight truncate group-hover:text-amber-300 transition-colors">
+              Clube Burger GN
+            </span>
+          </span>
+          <span className="text-amber-500/80 text-xs font-bold uppercase tracking-wider shrink-0">Entrar</span>
+        </Link>
+      </div>
+
       <div className="sticky top-[73px] z-30 bg-zinc-950 border-b border-zinc-800">
         <div className="max-w-md mx-auto px-4 pt-3">
           <div className="relative mb-2.5">

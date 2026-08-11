@@ -14,6 +14,7 @@ import Cart from "./pages/Cart";
 import Checkout from "./pages/Checkout";
 import Confirmation from "./pages/Confirmation";
 import OrderTracking, { MyOrderPage } from "./pages/OrderTracking";
+import ClubeCliente from "./pages/ClubeCliente";
 import { MyOrderFab } from "./components/MyOrderFab";
 import AdminLogin from "./pages/admin/Login";
 import AdminSalesDashboard from "./pages/admin/SalesDashboard";
@@ -68,6 +69,7 @@ function Router() {
         {/* Customer routes */}
         <Route path="/" component={Home} />
         <Route path="/cardapio" component={Menu} />
+        <Route path="/clube" component={ClubeCliente} />
         <Route path="/carrinho" component={Cart} />
         <Route path="/checkout" component={Checkout} />
         <Route path="/confirmacao" component={Confirmation} />
