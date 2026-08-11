@@ -84,6 +84,7 @@ export default function Checkout() {
   const [feeMessage, setFeeMessage] = useState('');
   const [feeFound, setFeeFound] = useState<boolean | null>(null);
   const [streetPendingMessage, setStreetPendingMessage] = useState('');
+  const [streetNotes, setStreetNotes] = useState('');
   const [streetEtaMinutes, setStreetEtaMinutes] = useState<number | null>(null);
   const feeDebounce = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const streetDebounce = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -266,6 +267,7 @@ export default function Checkout() {
     if (step !== 'manual' && step !== 'payment' && step !== 'gps') return;
     if (!form.endereco?.trim() || !form.numero?.trim() || !form.bairro?.trim() || form.bairro === '__outro__') {
       setStreetPendingMessage('');
+      setStreetNotes('');
       setStreetEtaMinutes(null);
       return;
     }
@@ -284,6 +286,22 @@ export default function Checkout() {
           phone: form.telefone || undefined,
           distanceKm: distanceKm ?? undefined,
         });
+
+        const notesText = String(result.notes || result.street?.notes || '').trim();
+        setStreetNotes(notesText);
+
+        // Inactive registered street: do not accept delivery there.
+        if (result.known && result.active === false) {
+          setFeeFound(false);
+          setDeliveryFee(0);
+          setFeeMessage('');
+          setStreetPendingMessage(
+            result.message ||
+              '🔴 Esta rua está temporariamente fora da área de entrega. Escolha outro endereço ou retire na loja.',
+          );
+          setStreetEtaMinutes(result.etaMinutes ?? null);
+          return;
+        }
 
         if (result.known && result.fee != null && Number.isFinite(result.fee)) {
           setDeliveryFee(result.fee);
@@ -319,6 +337,9 @@ export default function Checkout() {
     setDeliveryFee(0);
     setFeeFound(null);
     setFeeMessage('');
+    setStreetPendingMessage('');
+    setStreetNotes('');
+    setStreetEtaMinutes(null);
     setGpsError('');
     setLocationLabel('');
     setAddressMode(null);
@@ -327,6 +348,14 @@ export default function Checkout() {
       endereco: '', numero: '', complemento: '', bairro: '', referencia: '',
     }));
   };
+
+  const streetNotesBanner =
+    streetNotes.trim().length > 0 ? (
+      <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-amber-100 text-sm leading-relaxed">
+        <p className="font-bold text-amber-300 mb-1.5">⚠️ Informações importantes para esta região:</p>
+        <div className="whitespace-pre-line text-amber-100/95">{streetNotes}</div>
+      </div>
+    ) : null;
 
   const goBack = () => {
     setFieldError('');
@@ -708,6 +737,7 @@ export default function Checkout() {
             </div>
             <span className="text-green-400 font-black">{fmt(deliveryFee)}</span>
           </div>
+          {streetNotesBanner}
           {streetPendingMessage ? (
             <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-amber-200 text-sm whitespace-pre-line leading-relaxed">
               {streetPendingMessage}
@@ -725,15 +755,21 @@ export default function Checkout() {
             <div className="flex items-start gap-2 bg-orange-900/20 border border-orange-800/40 rounded-xl px-4 py-3">
               <AlertCircle size={16} className="text-orange-400 mt-0.5 shrink-0" />
               <p className="text-orange-400 text-sm">
-                {DELIVERY_FEE_UNAVAILABLE}
+                {feeMessage || DELIVERY_FEE_UNAVAILABLE}
               </p>
             </div>
           )}
+          {streetNotesBanner}
         </motion.div>
-      ) : streetPendingMessage ? (
+      ) : streetPendingMessage || streetNotesBanner ? (
         <motion.div key="street-pending" initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
-          className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-amber-200 text-sm whitespace-pre-line leading-relaxed">
-          {streetPendingMessage}
+          className="space-y-2">
+          {streetPendingMessage ? (
+            <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-amber-200 text-sm whitespace-pre-line leading-relaxed">
+              {streetPendingMessage}
+            </div>
+          ) : null}
+          {streetNotesBanner}
         </motion.div>
       ) : null}
     </AnimatePresence>

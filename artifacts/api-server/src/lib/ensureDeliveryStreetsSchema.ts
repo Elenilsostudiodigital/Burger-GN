@@ -29,6 +29,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS delivery_streets_company_key_idx
 CREATE INDEX IF NOT EXISTS delivery_streets_company_active_idx
   ON delivery_streets(company_id, active);
 
+ALTER TABLE delivery_streets
+  ADD COLUMN IF NOT EXISTS origin TEXT NOT NULL DEFAULT 'manual';
+
 CREATE TABLE IF NOT EXISTS delivery_street_requests (
   id SERIAL PRIMARY KEY,
   company_id INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
