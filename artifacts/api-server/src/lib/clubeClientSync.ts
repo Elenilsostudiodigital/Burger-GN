@@ -33,7 +33,7 @@ export async function syncClubeMemberOnOrder(opts: {
   const existing = members.find((m) => phonesMatch(m.phone, phone));
   if (existing) {
     const name = (opts.customerName || "").trim();
-    const patch: Record<string, string> = {};
+    const patch: Record<string, unknown> = {};
     const normalizedExisting = normalizeClientPhone(existing.phone);
 
     // Keep history — never wipe stamps/cashback. Normalize phone if needed.
@@ -42,6 +42,10 @@ export async function syncClubeMemberOnOrder(opts: {
     }
     if (name && (!existing.name || existing.name === "Cliente" || existing.name === "Cliente na loja")) {
       patch["name"] = name;
+    }
+    // Orders from an inactive member re-activate the same cadastro (no duplicate).
+    if (existing.active === false) {
+      patch["active"] = true;
     }
 
     if (Object.keys(patch).length > 0) {

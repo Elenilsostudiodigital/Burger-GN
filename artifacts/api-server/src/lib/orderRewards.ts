@@ -70,27 +70,9 @@ export async function applyOrderCompletionRewards(
     return result;
   }
 
-  const settings = await ensureClubeSettings(order.companyId);
-  const fidelityOn = settings.fidelityEnabled !== false;
-  const cashbackOn = settings.cashbackEnabled !== false;
-  const needStamps = fidelityOn && !nextMeta.stampsAwarded;
-  const needCashback = cashbackOn && !nextMeta.cashbackAwarded;
-
-  if (!needStamps && !needCashback) {
-    // Still mark processed if both already done or both programs off.
-    if (!nextMeta.rewardsProcessedAt && (nextMeta.stampsAwarded || nextMeta.cashbackAwarded)) {
-      nextMeta.rewardsProcessedAt = new Date().toISOString();
-    }
-    // If programs are off, mark flags so re-saving done does not retry forever
-    // when admin later enables them for *new* orders only — we only skip when
-    // already awarded. When disabled, leave flags unset so enabling later can
-    // credit historical done orders once. That matches "on completion" semantics
-    // at the time of becoming done; for already-done without flags while disabled,
-    // we intentionally do nothing.
-    result.meta = nextMeta;
-    return result;
-  }
-
+  // Always locate/create the CRM member by the order WhatsApp — even when
+  // rewards were already applied — so the public Clube area never shows
+  // "não participa" after a valid completed order.
   const member = await syncClubeMemberOnOrder({
     companyId: order.companyId,
     customerName: order.customerName,
@@ -104,6 +86,21 @@ export async function applyOrderCompletionRewards(
 
   result.memberId = member.id;
   nextMeta.clientMemberId = member.id;
+
+  const settings = await ensureClubeSettings(order.companyId);
+  const fidelityOn = settings.fidelityEnabled !== false;
+  const cashbackOn = settings.cashbackEnabled !== false;
+  const needStamps = fidelityOn && !nextMeta.stampsAwarded;
+  const needCashback = cashbackOn && !nextMeta.cashbackAwarded;
+
+  if (!needStamps && !needCashback) {
+    // Still mark processed if both already done or both programs off.
+    if (!nextMeta.rewardsProcessedAt && (nextMeta.stampsAwarded || nextMeta.cashbackAwarded)) {
+      nextMeta.rewardsProcessedAt = new Date().toISOString();
+    }
+    result.meta = nextMeta;
+    return result;
+  }
 
   const { publicNotes, meta: clientMeta } = parseClientNotes(member.notes);
   let workingMeta = { ...clientMeta };

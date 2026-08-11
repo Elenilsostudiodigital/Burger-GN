@@ -3,6 +3,7 @@ import { useParams, Link, useLocation } from 'wouter';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   trackOrder, getPaymentSettings, submitOrderReview, uploadOrderReceipt, getPublicClubeMe, Order,
+  PublicClubeMeResponse,
   ORDER_TYPE_LABELS, PAYMENT_METHOD_LABELS, PAYMENT_STATUS_LABELS, WORKFLOW_LABELS,
   isAllowedReceiptFile, RECEIPT_ACCEPT, customerInAppStatusMessage,
 } from '../lib/api';
@@ -219,7 +220,10 @@ function OrderTimelineView({ trackingId }: { trackingId: string }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deliveryPhase]);
 
-  const finishWithCelebration = async (orderData: Order) => {
+  const finishWithCelebration = async (
+    orderData: Order,
+    clubeSnapshot?: PublicClubeMeResponse | null,
+  ) => {
     if (hasCelebratedOrder(orderData.id)) {
       setDeliveryPhase('thanks');
       setTimeout(() => closeAndArchive('reviewed'), 1800);
@@ -227,8 +231,13 @@ function OrderTimelineView({ trackingId }: { trackingId: string }) {
     }
     try {
       if (orderData.phone) saveClubePhone(orderData.phone);
-      const me = await getPublicClubeMe(orderData.phone);
-      if (me.found) {
+
+      let me = clubeSnapshot ?? null;
+      if (!me?.found) {
+        me = await getPublicClubeMe(orderData.phone);
+      }
+
+      if (me?.found) {
         saveClubeSessionFromMe(me);
         const kind = detectCelebrationKind(me);
         setCelebrationKind(kind);
@@ -245,6 +254,8 @@ function OrderTimelineView({ trackingId }: { trackingId: string }) {
         return;
       }
     } catch { /* fall through */ }
+    // Still keep WhatsApp session from the order so Home/Clube don't ask again.
+    if (orderData.phone) saveClubePhone(orderData.phone);
     setDeliveryPhase('thanks');
     setTimeout(() => closeAndArchive('reviewed'), 1800);
   };
@@ -253,6 +264,16 @@ function OrderTimelineView({ trackingId }: { trackingId: string }) {
     if (!ok) {
       setSubmittingReview(true);
       submitOrderReview(trackingId, { deliveredOk: false, stars: 0, comment: '' })
+        .then(async (res) => {
+          if (order?.phone) saveClubePhone(order.phone);
+          if (res.clube?.found) saveClubeSessionFromMe(res.clube);
+          else if (order?.phone) {
+            try {
+              const me = await getPublicClubeMe(order.phone);
+              if (me.found) saveClubeSessionFromMe(me);
+            } catch { /* ignore */ }
+          }
+        })
         .catch(() => {})
         .finally(() => {
           setSubmittingReview(false);
@@ -268,12 +289,12 @@ function OrderTimelineView({ trackingId }: { trackingId: string }) {
     setSubmittingReview(true);
     setReviewError('');
     try {
-      await submitOrderReview(trackingId, {
+      const res = await submitOrderReview(trackingId, {
         deliveredOk: true,
         stars,
         comment,
       });
-      if (order) await finishWithCelebration(order);
+      if (order) await finishWithCelebration(order, res.clube);
       else {
         setDeliveryPhase('thanks');
         setTimeout(() => closeAndArchive('reviewed'), 1800);

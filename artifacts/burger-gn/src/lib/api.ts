@@ -282,7 +282,10 @@ export const uploadOrderReceipt = (trackingId: string, receiptDataUrl: string) =
 export const submitOrderReview = (
   trackingId: string,
   d: { deliveredOk: boolean; stars?: number; comment?: string },
-) => api.post(`/orders/track/${trackingId}/review`, d) as Promise<Order & { alreadyReviewed?: boolean }>;
+) =>
+  api.post(`/orders/track/${trackingId}/review`, d) as Promise<
+    Order & { alreadyReviewed?: boolean; clube?: PublicClubeMeResponse | null }
+  >;
 export const getAdminReviews = () => api.get("/admin/reviews") as Promise<AdminReviewRow[]>;
 export const updateOrderPaymentStatus = (
   id: number,

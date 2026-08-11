@@ -16,6 +16,7 @@ import { buildStaticPixPayload, decodePixSettings, normalizePixKey } from "../li
 import { syncClubeMemberOnOrder } from "../lib/clubeClientSync";
 import { normalizeClientPhone } from "../lib/clientMeta";
 import { applyOrderCompletionRewards } from "../lib/orderRewards";
+import { buildPublicClubeMe, type PublicClubeMePayload } from "../lib/clubePublicMe";
 import {
   computePrepDayStats,
   finishPrepTimer,
@@ -630,44 +631,101 @@ router.post("/orders/track/:trackingId/review", async (req, res) => {
     }
 
     const { publicNotes, meta } = parseOrderNotes(existing.notes);
+
+    // Ensure CRM member + stamp/cashback for this delivered order (idempotent).
+    // Runs even when the review was already saved, so the Clube area always syncs.
+    let nextMeta: OrderMeta = { ...meta };
+    try {
+      const rewardResult = await applyOrderCompletionRewards(
+        {
+          id: existing.id,
+          orderNumber: existing.orderNumber,
+          companyId: existing.companyId,
+          customerName: existing.customerName,
+          phone: existing.phone,
+          total: existing.total,
+          status: "done",
+        },
+        nextMeta,
+      );
+      nextMeta = rewardResult.meta;
+    } catch (rewardErr) {
+      req.log.error({ err: rewardErr }, "Failed to sync Clube rewards on review");
+    }
+
+    let alreadyReviewed = false;
+    let order = existing;
+
     if (meta.review) {
-      res.json({ ...enrichOrder(existing), alreadyReviewed: true });
-      return;
-    }
-
-    const deliveredOk = body.deliveredOk !== false;
-    let stars = Number(body.stars);
-    if (deliveredOk) {
-      if (!Number.isFinite(stars) || stars < 1 || stars > 5) {
-        res.status(400).json({ error: "Informe uma nota de 1 a 5 estrelas." }); return;
+      alreadyReviewed = true;
+      // Persist reward meta / clientMemberId if they were missing before.
+      if (
+        nextMeta.clientMemberId !== meta.clientMemberId ||
+        nextMeta.stampsAwarded !== meta.stampsAwarded ||
+        nextMeta.cashbackAwarded !== meta.cashbackAwarded ||
+        nextMeta.rewardsProcessedAt !== meta.rewardsProcessedAt
+      ) {
+        const [updated] = await db.update(ordersTable)
+          .set({
+            notes: serializeOrderNotes(publicNotes, { ...nextMeta, review: meta.review }),
+            updatedAt: new Date(),
+          })
+          .where(eq(ordersTable.id, existing.id))
+          .returning();
+        if (updated) order = updated;
+        else nextMeta = { ...nextMeta, review: meta.review };
+      } else {
+        nextMeta = { ...nextMeta, review: meta.review };
       }
-      stars = Math.round(stars);
     } else {
-      stars = 0;
+      const deliveredOk = body.deliveredOk !== false;
+      let stars = Number(body.stars);
+      if (deliveredOk) {
+        if (!Number.isFinite(stars) || stars < 1 || stars > 5) {
+          res.status(400).json({ error: "Informe uma nota de 1 a 5 estrelas." }); return;
+        }
+        stars = Math.round(stars);
+      } else {
+        stars = 0;
+      }
+
+      const review: OrderReview = {
+        stars,
+        comment: typeof body.comment === "string" ? body.comment.trim().slice(0, 1000) : "",
+        deliveredOk,
+        createdAt: new Date().toISOString(),
+        orderNumber: existing.orderNumber,
+      };
+
+      nextMeta = { ...nextMeta, review };
+      const [updated] = await db.update(ordersTable)
+        .set({ notes: serializeOrderNotes(publicNotes, nextMeta), updatedAt: new Date() })
+        .where(eq(ordersTable.id, existing.id))
+        .returning();
+      order = updated;
+
+      broadcastSSE(existing.companyId, "order_review", {
+        id: order.id,
+        trackingId: order.trackingId,
+        orderNumber: order.orderNumber,
+        review,
+      });
     }
 
-    const review: OrderReview = {
-      stars,
-      comment: typeof body.comment === "string" ? body.comment.trim().slice(0, 1000) : "",
-      deliveredOk,
-      createdAt: new Date().toISOString(),
-      orderNumber: existing.orderNumber,
-    };
+    let clube: PublicClubeMePayload | null = null;
+    try {
+      clube = await buildPublicClubeMe(existing.companyId, existing.phone, {
+        memberId: typeof nextMeta.clientMemberId === "number" ? nextMeta.clientMemberId : null,
+      });
+    } catch (clubeErr) {
+      req.log.warn({ err: clubeErr }, "Clube payload after review unavailable");
+    }
 
-    const nextMeta: OrderMeta = { ...meta, review };
-    const [order] = await db.update(ordersTable)
-      .set({ notes: serializeOrderNotes(publicNotes, nextMeta), updatedAt: new Date() })
-      .where(eq(ordersTable.id, existing.id))
-      .returning();
-
-    broadcastSSE(existing.companyId, "order_review", {
-      id: order.id,
-      trackingId: order.trackingId,
-      orderNumber: order.orderNumber,
-      review,
+    res.json({
+      ...enrichOrder(order),
+      alreadyReviewed,
+      clube,
     });
-
-    res.json(enrichOrder(order));
   } catch (err) {
     req.log.error({ err }, "Failed to save review");
     res.status(500).json({ error: "Internal server error" });

@@ -1,4 +1,4 @@
-import { phoneIdentityKey, phonesMatch } from "./clientMeta";
+import { phoneIdentityKeys, phonesMatch } from "./clientMeta";
 
 /** Recovery-ready segments — computed from order history, not stored. */
 export type ClientRecoverySegment =
@@ -199,25 +199,32 @@ export function filterOrdersForClient(
 export function indexOrdersByPhone(orders: OrderForStats[]): Map<string, OrderForStats[]> {
   const map = new Map<string, OrderForStats[]>();
   for (const order of orders) {
-    const key = phoneIdentityKey(order.phone);
-    if (!key || isAllZeros(key)) continue;
-    const list = map.get(key) ?? [];
-    list.push(order);
-    map.set(key, list);
+    const keys = phoneIdentityKeys(order.phone).filter((k) => k && !/^0+$/.test(k));
+    if (!keys.length) continue;
+    for (const key of keys) {
+      const list = map.get(key) ?? [];
+      // Avoid duplicating the same order under one key.
+      if (!list.some((o) => o.id === order.id)) list.push(order);
+      map.set(key, list);
+    }
   }
   return map;
-}
-
-function isAllZeros(phone: string): boolean {
-  const key = phoneIdentityKey(phone);
-  return !key || /^0+$/.test(key);
 }
 
 export function ordersForPhone(
   index: Map<string, OrderForStats[]>,
   phone: string,
 ): OrderForStats[] {
-  const key = phoneIdentityKey(phone);
-  if (!key) return [];
-  return index.get(key) ?? [];
+  const keys = phoneIdentityKeys(phone);
+  if (!keys.length) return [];
+  const seen = new Set<number>();
+  const out: OrderForStats[] = [];
+  for (const key of keys) {
+    for (const order of index.get(key) ?? []) {
+      if (seen.has(order.id)) continue;
+      seen.add(order.id);
+      out.push(order);
+    }
+  }
+  return out;
 }

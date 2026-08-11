@@ -373,6 +373,22 @@ export function phoneIdentityKey(phone: string): string {
   return national;
 }
 
+/**
+ * Equivalent identity keys for BR mobiles with/without the 9th digit.
+ * Ex.: 7199999999 ↔ 71999999999 (DDD + 8 vs DDD + 9 + 8).
+ */
+export function phoneIdentityKeys(phone: string): string[] {
+  const key = phoneIdentityKey(phone);
+  if (!key) return [];
+  const keys = new Set<string>([key]);
+  if (key.length === 11 && key[2] === "9") {
+    keys.add(key.slice(0, 2) + key.slice(3));
+  } else if (key.length === 10) {
+    keys.add(key.slice(0, 2) + "9" + key.slice(2));
+  }
+  return [...keys];
+}
+
 /** Placeholder / local-store phones that must not create CRM clients. */
 export function isPlaceholderPhone(phone: string): boolean {
   const key = phoneIdentityKey(phone);
@@ -381,10 +397,10 @@ export function isPlaceholderPhone(phone: string): boolean {
   return false;
 }
 
-/** Compare two phones ignoring formatting / optional +55. */
+/** Compare two phones ignoring formatting / optional +55 / 9º dígito. */
 export function phonesMatch(a: string, b: string): boolean {
-  const ka = phoneIdentityKey(a);
-  const kb = phoneIdentityKey(b);
-  if (!ka || !kb) return false;
-  return ka === kb;
+  const ka = phoneIdentityKeys(a);
+  const kb = phoneIdentityKeys(b);
+  if (!ka.length || !kb.length) return false;
+  return ka.some((k) => kb.includes(k));
 }

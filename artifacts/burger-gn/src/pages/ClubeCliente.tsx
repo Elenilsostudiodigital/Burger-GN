@@ -172,7 +172,12 @@ export default function ClubeCliente() {
     if (!opts?.silent) setLookingUp(true);
     setError('');
     try {
-      const result = await getPublicClubeMe(digits);
+      let result = await getPublicClubeMe(digits);
+      // After a just-completed order, CRM sync may land a moment later.
+      if (!result.found) {
+        await new Promise((r) => setTimeout(r, 450));
+        result = await getPublicClubeMe(digits);
+      }
       setData(result);
       setRules(result.rules);
       saveClubePhone(digits);

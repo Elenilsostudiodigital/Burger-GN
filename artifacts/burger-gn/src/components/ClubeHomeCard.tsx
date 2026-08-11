@@ -44,7 +44,9 @@ export function ClubeHomeCard() {
           orderCount: data.member.orderCount,
           updatedAt: new Date().toISOString(),
         });
-      } else {
+      } else if (!cached) {
+        // Keep cached personalized card if cloud briefly returns not-found
+        // (race right after delivery). Never wipe an active session.
         setProfile(null);
       }
     } catch {

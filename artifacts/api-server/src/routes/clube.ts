@@ -7,7 +7,6 @@ import {
   clubeExclusiveCouponsTable,
   clubeBirthdayBenefitsTable,
   clubeEarlyPromotionsTable,
-  ordersTable,
 } from "@workspace/db";
 import { eq, and, sql, desc } from "drizzle-orm";
 import { requireCompanyAuth } from "../middlewares/auth";
@@ -16,16 +15,9 @@ import {
   isPlaceholderPhone,
   normalizeClientPhone,
   parseClientNotes,
-  phonesMatch,
   serializeClientNotes,
-  type ClientMeta,
 } from "../lib/clientMeta";
-import {
-  computeClientOrderStats,
-  filterOrdersForClient,
-  type OrderForStats,
-} from "../lib/clientStats";
-import { parseOrderNotes } from "../lib/orderMeta";
+import { buildPublicClubeMe } from "../lib/clubePublicMe";
 
 const router = Router();
 
@@ -43,32 +35,6 @@ async function ensureSettings(companyId: number) {
     .values({ companyId })
     .returning();
   return created;
-}
-
-function fidelityProgress(stamps: number, stampsRequired: number) {
-  const goal = Math.max(1, stampsRequired);
-  const current = Math.max(0, stamps);
-  return {
-    stamps: current,
-    goal,
-    progress: Math.min(100, Math.round((current / goal) * 100)),
-    remaining: Math.max(0, goal - current),
-  };
-}
-
-function publicLedgerPayload(meta: ClientMeta) {
-  return (meta.ledger ?? []).map((e) => ({
-    id: e.id,
-    at: e.at,
-    type: e.type,
-    orderId: e.orderId ?? null,
-    orderNumber: e.orderNumber ?? null,
-    stampsDelta: e.stampsDelta ?? null,
-    cashbackDelta: e.cashbackDelta ?? null,
-    description: e.description ?? null,
-    rewardId: e.rewardId ?? null,
-    rewardTitle: e.rewardTitle ?? null,
-  }));
 }
 
 function publicClubRules(settings: Awaited<ReturnType<typeof ensureSettings>>) {
@@ -121,35 +87,6 @@ function publicClubRules(settings: Awaited<ReturnType<typeof ensureSettings>>) {
   };
 }
 
-async function loadPublicOrderStats(companyId: number): Promise<OrderForStats[]> {
-  const orders = await db
-    .select({
-      id: ordersTable.id,
-      orderNumber: ordersTable.orderNumber,
-      phone: ordersTable.phone,
-      total: ordersTable.total,
-      status: ordersTable.status,
-      createdAt: ordersTable.createdAt,
-      notes: ordersTable.notes,
-    })
-    .from(ordersTable)
-    .where(eq(ordersTable.companyId, companyId))
-    .orderBy(desc(ordersTable.createdAt));
-
-  return orders.map((o) => {
-    const { meta } = parseOrderNotes(o.notes);
-    return {
-      id: o.id,
-      orderNumber: o.orderNumber,
-      phone: o.phone,
-      total: o.total,
-      status: o.status,
-      createdAt: o.createdAt,
-      clientMemberId: typeof meta.clientMemberId === "number" ? meta.clientMemberId : null,
-    };
-  });
-}
-
 // ── Área do cliente (pública) ────────────────────────────────────────────────
 router.get("/clube/info", resolvePublicCompany, async (req, res) => {
   try {
@@ -176,108 +113,8 @@ router.get("/clube/me", resolvePublicCompany, async (req, res) => {
       return;
     }
 
-    const settings = await ensureSettings(companyId);
-    const rules = publicClubRules(settings);
-
-    const members = await db
-      .select()
-      .from(clubeMembersTable)
-      .where(eq(clubeMembersTable.companyId, companyId));
-    const member = members.find((m) => phonesMatch(m.phone, phone));
-
-    if (!member || member.active === false) {
-      res.json({
-        found: false,
-        member: null,
-        rules,
-      });
-      return;
-    }
-
-    const orderPool = await loadPublicOrderStats(companyId);
-    const linked = filterOrdersForClient(orderPool, {
-      clientId: member.id,
-      phone: member.phone,
-    });
-    const stats = computeClientOrderStats(linked);
-    const history = linked
-      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-      .slice(0, 20)
-      .map((o) => ({
-        id: o.id,
-        orderNumber: o.orderNumber,
-        total: parseFloat(String(o.total)) || 0,
-        status: o.status,
-        createdAt:
-          o.createdAt instanceof Date ? o.createdAt.toISOString() : String(o.createdAt),
-      }));
-
-    const { meta } = parseClientNotes(member.notes);
-    const progress = fidelityProgress(member.points ?? 0, rules.fidelity.stampsRequired);
-    const availableRewards = (meta.availableRewards ?? []).map((r) => ({
-      id: r.id,
-      title: r.title,
-      earnedAt: r.earnedAt,
-      orderId: r.orderId ?? null,
-      orderNumber: r.orderNumber ?? null,
-      redeemedAt: r.redeemedAt ?? null,
-      available: !r.redeemedAt,
-    }));
-
-    const cashbackReceived = (meta.ledger ?? [])
-      .filter((e) => e.type === "cashback_pedido" || (e.type === "ajuste_cashback" && (e.cashbackDelta ?? 0) > 0))
-      .reduce((sum, e) => sum + (e.cashbackDelta ?? 0), 0);
-    const cashbackUsed = (meta.ledger ?? [])
-      .filter((e) => e.type === "cashback_utilizado" || (e.type === "ajuste_cashback" && (e.cashbackDelta ?? 0) < 0))
-      .reduce((sum, e) => sum + Math.abs(e.cashbackDelta ?? 0), 0);
-    const stampsEarned = (meta.ledger ?? [])
-      .filter((e) => e.type === "selo_pedido" || (e.type === "ajuste_selo" && (e.stampsDelta ?? 0) > 0))
-      .reduce((sum, e) => sum + Math.max(0, e.stampsDelta ?? 0), 0);
-
-    res.json({
-      found: true,
-      rules,
-      member: {
-        id: member.id,
-        name: member.name,
-        phone: member.phone,
-        cashbackBalance: member.cashbackBalance,
-        stamps: progress.stamps,
-        orderCount: stats.orderCount,
-        lastOrderAt: stats.lastOrderAt,
-        lastOrderNumber: stats.lastOrderNumber,
-        joinedAt: member.joinedAt instanceof Date ? member.joinedAt.toISOString() : String(member.joinedAt),
-      },
-      fidelity: {
-        enabled: rules.fidelity.enabled,
-        stamps: progress.stamps,
-        goal: progress.goal,
-        progress: progress.progress,
-        remaining: progress.remaining,
-        rewardTitle: rules.fidelity.stampRewardTitle,
-        availableRewards,
-        nextRewardMessage:
-          progress.remaining <= 0
-            ? `Você completou a meta! Recompensa: ${rules.fidelity.stampRewardTitle}.`
-            : `Faltam apenas ${progress.remaining} selo${progress.remaining === 1 ? "" : "s"} para ganhar ${rules.fidelity.stampRewardTitle}.`,
-      },
-      cashbackProgram: {
-        enabled: rules.cashback.enabled,
-        percent: rules.cashback.percent,
-        minOrder: rules.cashback.minOrder,
-        maxPerOrder: rules.cashback.maxPerOrder,
-        balance: member.cashbackBalance,
-        receivedTotal: Math.round(cashbackReceived * 100) / 100,
-        usedTotal: Math.round(cashbackUsed * 100) / 100,
-      },
-      summary: {
-        stampsEarned,
-        cashbackReceived: Math.round(cashbackReceived * 100) / 100,
-        cashbackUsed: Math.round(cashbackUsed * 100) / 100,
-      },
-      history,
-      ledger: publicLedgerPayload(meta),
-    });
+    const payload = await buildPublicClubeMe(companyId, phone);
+    res.json(payload);
   } catch (err) {
     req.log.error({ err }, "Failed to fetch public clube member");
     res.status(500).json({ error: "Internal server error" });
