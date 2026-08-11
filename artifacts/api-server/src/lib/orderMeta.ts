@@ -52,6 +52,14 @@ export interface OrderMeta {
   cashbackAmountAwarded?: number;
   /** When automatic rewards were last processed (ISO). */
   rewardsProcessedAt?: string;
+  /** Prep timer: when kitchen accepted / started preparing (ISO). */
+  prepStartedAt?: string;
+  /** Prep timer: when marked ready (ISO). */
+  prepFinishedAt?: string;
+  /** Snapshot of configured min minutes at accept. */
+  prepTimeMin?: number;
+  /** Snapshot of configured max minutes at accept (countdown target). */
+  prepTimeMax?: number;
 }
 
 export const WORKFLOW_LABELS: Record<WorkflowStage | "cancelled", string> = {
@@ -114,6 +122,10 @@ export function serializeOrderNotes(publicNotes: string, meta: OrderMeta): strin
     cleanMeta.cashbackAmountAwarded = meta.cashbackAmountAwarded;
   }
   if (meta.rewardsProcessedAt) cleanMeta.rewardsProcessedAt = meta.rewardsProcessedAt;
+  if (meta.prepStartedAt) cleanMeta.prepStartedAt = meta.prepStartedAt;
+  if (meta.prepFinishedAt) cleanMeta.prepFinishedAt = meta.prepFinishedAt;
+  if (typeof meta.prepTimeMin === "number") cleanMeta.prepTimeMin = meta.prepTimeMin;
+  if (typeof meta.prepTimeMax === "number") cleanMeta.prepTimeMax = meta.prepTimeMax;
 
   const hasMeta = Object.keys(cleanMeta).length > 0;
   const body = (publicNotes || "").trim();

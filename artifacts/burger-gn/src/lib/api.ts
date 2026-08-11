@@ -212,6 +212,13 @@ export interface Order {
   deliveredAt?: string | null;
   history?: StatusHistoryEntry[];
   customerNotifyMessage?: string | null;
+  /** Prep timer (kitchen countdown) — set on accept, cleared on ready. */
+  prepStartedAt?: string | null;
+  prepFinishedAt?: string | null;
+  prepTimeMin?: number | null;
+  prepTimeMax?: number | null;
+  prepDurationSeconds?: number | null;
+  prepEarlyFinish?: boolean;
 }
 
 export interface OrderReview {
@@ -253,6 +260,16 @@ export const createOrder = (d: CreateOrderPayload) => api.post("/orders", d) as 
 }>;
 export const getOrders = () => api.get("/orders") as Promise<Order[]>;
 export const trackOrder = (trackingId: string) => api.get(`/orders/track/${trackingId}`) as Promise<Order>;
+
+export interface PrepDayStats {
+  date: string;
+  averagePrepMinutes: number | null;
+  onTimeCount: number;
+  lateCount: number;
+  finishedCount: number;
+  inProgressCount: number;
+}
+export const getPrepStats = () => api.get("/admin/prep-stats") as Promise<PrepDayStats>;
 export const updateOrderStatus = (id: number, status: OrderStatus) => api.patch(`/orders/${id}/status`, { status }) as Promise<Order>;
 export const updateOrderWorkflow = (
   id: number,

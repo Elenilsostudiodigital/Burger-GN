@@ -16,6 +16,7 @@ import { ArrowLeft, Clock, Home, AlertCircle, Timer, Star, Loader2, Camera, Imag
 import { Button } from '@/components/ui/button';
 import { PageTransition } from '../components/PageTransition';
 import { BottomNav } from '../components/BottomNav';
+import { formatCountdown, computePrepRemainingSeconds } from '../lib/prepTimer';
 
 type TimelineKey = 'received' | 'accepted' | 'preparing' | 'ready' | 'out' | 'done';
 type DeliveryPhase = 'confirm' | 'rate' | 'thanks' | null;
@@ -73,6 +74,7 @@ function OrderTimelineView({ trackingId }: { trackingId: string }) {
   const [error, setError] = useState(false);
   const [prepMin, setPrepMin] = useState(35);
   const [prepMax, setPrepMax] = useState(45);
+  const [prepTick, setPrepTick] = useState(() => Date.now());
   const lastWorkflow = useRef<string | null>(null);
 
   const [deliveryPhase, setDeliveryPhase] = useState<DeliveryPhase>(null);
@@ -99,6 +101,12 @@ function OrderTimelineView({ trackingId }: { trackingId: string }) {
       })
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (!order?.prepStartedAt || order.prepFinishedAt || resolveTimelineIndex(order) !== 2) return;
+    const id = window.setInterval(() => setPrepTick(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [order?.prepStartedAt, order?.prepFinishedAt, order?.workflow, order?.status]);
 
   const closeAndArchive = (reason: 'reviewed' | 'declined' | 'timeout') => {
     if (closedRef.current) return;
@@ -256,6 +264,15 @@ function OrderTimelineView({ trackingId }: { trackingId: string }) {
   const current = resolveTimelineIndex(order);
   const acceptedOrFurther = current >= 2 && current < 5;
   const delivered = order.status === 'done';
+  const inKitchen = current === 2; // Em preparo
+  const displayPrepMin = order.prepTimeMin ?? prepMin;
+  const displayPrepMax = order.prepTimeMax ?? prepMax;
+  const customerRemaining = computePrepRemainingSeconds({
+    prepStartedAt: order.prepStartedAt,
+    prepFinishedAt: order.prepFinishedAt,
+    prepTimeMax: displayPrepMax,
+    now: prepTick,
+  });
   const pixNeedsReceipt = order.paymentMethod === 'pix'
     && order.paymentStatus !== 'paid'
     && order.status !== 'cancelled';
@@ -507,17 +524,32 @@ function OrderTimelineView({ trackingId }: { trackingId: string }) {
 
         {!cancelled && acceptedOrFurther && !delivered && (
           <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
-            className="rounded-3xl border border-amber-500/30 bg-amber-500/10 p-5 space-y-2">
+            className="rounded-3xl border border-amber-500/30 bg-amber-500/10 p-5 space-y-3">
             <p className="text-amber-300 font-bold text-sm">
-              Seu pedido foi aceito e já está sendo preparado.
+              {inKitchen ? '🍔 Em preparo' : 'Seu pedido foi aceito e já está sendo preparado.'}
             </p>
             <div className="flex items-center gap-2 text-white font-black text-lg">
               <Timer size={20} className="text-amber-400" />
-              Tempo estimado: {prepMin} a {prepMax} minutos
+              Tempo estimado: {displayPrepMin} a {displayPrepMax} minutos.
             </div>
-            <p className="text-zinc-400 text-xs leading-relaxed">
-              Seu pedido poderá ficar pronto antes desse prazo. O tempo pode variar conforme o movimento da loja.
-            </p>
+            {inKitchen && order.prepStartedAt && !order.prepFinishedAt && customerRemaining != null && (
+              <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 px-4 py-3">
+                <p className="text-zinc-500 text-[10px] font-bold uppercase tracking-wider">
+                  ⏳ Tempo restante aproximado
+                </p>
+                <p className="text-white font-black text-2xl tabular-nums mt-1">
+                  {formatCountdown(Math.max(0, customerRemaining))}
+                </p>
+                <p className="text-zinc-500 text-xs mt-1.5 leading-relaxed">
+                  Seu pedido poderá ficar pronto antes desse prazo.
+                </p>
+              </div>
+            )}
+            {!order.prepStartedAt && (
+              <p className="text-zinc-400 text-xs leading-relaxed">
+                Seu pedido poderá ficar pronto antes desse prazo. O tempo pode variar conforme o movimento da loja.
+              </p>
+            )}
           </motion.div>
         )}
 
