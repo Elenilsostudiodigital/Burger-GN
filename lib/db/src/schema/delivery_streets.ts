@@ -22,6 +22,8 @@ export const deliveryStreetsTable = pgTable("delivery_streets", {
   etaMinutes: integer("eta_minutes"),
   fee: numeric("fee", { precision: 10, scale: 2 }).notNull().default("0"),
   notes: text("notes").notNull().default(""),
+  /** Max delivery clock time for this street, e.g. "21:00" (HH:MM). */
+  maxDeliveryTime: text("max_delivery_time"),
   /** manual | pedido | importada */
   origin: text("origin").notNull().default("manual"),
   active: boolean("active").notNull().default(true),

@@ -31,6 +31,8 @@ CREATE INDEX IF NOT EXISTS delivery_streets_company_active_idx
 
 ALTER TABLE delivery_streets
   ADD COLUMN IF NOT EXISTS origin TEXT NOT NULL DEFAULT 'manual';
+ALTER TABLE delivery_streets
+  ADD COLUMN IF NOT EXISTS max_delivery_time TEXT;
 
 CREATE TABLE IF NOT EXISTS delivery_street_requests (
   id SERIAL PRIMARY KEY,

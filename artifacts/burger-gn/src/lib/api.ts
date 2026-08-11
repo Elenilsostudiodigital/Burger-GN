@@ -115,6 +115,8 @@ export interface DeliveryStreet {
   etaMinutes: number | null;
   fee: number;
   notes: string;
+  /** Max delivery time HH:MM, e.g. "21:00" */
+  maxDeliveryTime: string | null;
   /** manual | pedido | importada */
   origin: DeliveryStreetOrigin;
   active: boolean;
@@ -156,6 +158,7 @@ export interface StreetCheckResult {
   distanceKm?: number | null;
   suggestedFee?: number | null;
   notes?: string;
+  maxDeliveryTime?: string | null;
   message: string | null;
 }
 export interface StreetRequestDetail {
@@ -228,7 +231,7 @@ export const parseImportText = (text: string) => api.post("/admin/import/parse",
 export const fetchImportLink = (url: string) => api.post("/admin/import/fetch-link", { url }) as Promise<ImportDraft>;
 export const commitImport = (draft: ImportDraft) => api.post("/admin/import/commit", draft) as Promise<ImportCommitResult>;
 
-// Nominatim geocoding (free, no API key needed)
+// Nominatim geocoding (free, no API key needed) — same system used by checkout
 export async function geocodeAddress(address: string): Promise<{ lat: number; lng: number } | null> {
   try {
     const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}&limit=1&countrycodes=br`;
@@ -240,6 +243,62 @@ export async function geocodeAddress(address: string): Promise<{ lat: number; ln
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
     return { lat, lng };
   } catch { return null; }
+}
+
+/**
+ * Geolocate a delivery street using the same Nominatim endpoint as checkout.
+ * Builds multi-field queries (CEP first when present → rua+bairro+cidade → fallbacks).
+ * Does not introduce any commercial map API.
+ */
+export async function geocodeStreetLocation(parts: {
+  street: string;
+  neighborhood?: string;
+  city?: string;
+  cep?: string;
+  state?: string;
+}): Promise<{ lat: number; lng: number; query: string } | null> {
+  const street = String(parts.street || "").trim();
+  const neighborhood = String(parts.neighborhood || "").trim();
+  const city = String(parts.city || "Lauro de Freitas").trim() || "Lauro de Freitas";
+  const state = String(parts.state || "Bahia").trim() || "Bahia";
+  const cepDigits = String(parts.cep || "").replace(/\D/g, "").slice(0, 8);
+
+  const queries: string[] = [];
+  if (cepDigits.length === 8) {
+    const cepFmt = `${cepDigits.slice(0, 5)}-${cepDigits.slice(5)}`;
+    // CEP has priority when informed
+    queries.push(`${cepFmt}, ${city}, ${state}, Brasil`);
+    queries.push(`${cepFmt}, Brasil`);
+    queries.push(cepDigits);
+    if (street && neighborhood) {
+      queries.push(`${street}, ${neighborhood}, ${city}, ${cepFmt}, ${state}, Brasil`);
+    }
+  }
+  // Same composition style as checkout (rua + bairro + cidade + Bahia + Brasil)
+  if (street && neighborhood) {
+    queries.push(`${street}, ${neighborhood}, ${city}, ${state}, Brasil`);
+  }
+  if (street) {
+    queries.push(`${street}, ${city}, ${state}, Brasil`);
+  }
+  if (neighborhood) {
+    queries.push(`${neighborhood}, ${city}, ${state}, Brasil`);
+  }
+
+  const seen = new Set<string>();
+  for (let i = 0; i < queries.length; i++) {
+    const q = queries[i]!.replace(/\s+/g, " ").trim();
+    const key = q.toLowerCase();
+    if (!q || seen.has(key)) continue;
+    seen.add(key);
+    if (i > 0) {
+      // Nominatim fair-use: ~1 req/s
+      await new Promise((r) => setTimeout(r, 1100));
+    }
+    const coords = await geocodeAddress(q);
+    if (coords) return { lat: coords.lat, lng: coords.lng, query: q };
+  }
+  return null;
 }
 
 export interface ReverseGeocodeResult {

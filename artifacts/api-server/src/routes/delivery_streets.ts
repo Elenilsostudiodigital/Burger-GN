@@ -43,6 +43,11 @@ function serializeStreet(row: typeof deliveryStreetsTable.$inferSelect) {
     originRaw === "pedido" || originRaw === "importada" || originRaw === "manual"
       ? originRaw
       : "manual";
+  const maxDeliveryTimeRaw = (row as { maxDeliveryTime?: string | null }).maxDeliveryTime;
+  const maxDeliveryTime =
+    maxDeliveryTimeRaw != null && String(maxDeliveryTimeRaw).trim()
+      ? String(maxDeliveryTimeRaw).trim()
+      : null;
   return {
     id: row.id,
     streetName: row.streetName,
@@ -56,11 +61,40 @@ function serializeStreet(row: typeof deliveryStreetsTable.$inferSelect) {
     etaMinutes: row.etaMinutes,
     fee: parseFloat(String(row.fee)) || 0,
     notes: row.notes || "",
+    maxDeliveryTime,
     origin,
     active: row.active,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
+}
+
+/** Customer-facing notes: delivery cutoff + free-text observations. */
+function buildCustomerStreetNotes(street: {
+  notes?: string | null;
+  maxDeliveryTime?: string | null;
+}): string {
+  const parts: string[] = [];
+  const cutoff = street.maxDeliveryTime ? String(street.maxDeliveryTime).trim() : "";
+  if (cutoff) {
+    parts.push(
+      `Para esta rua realizamos entregas somente até às ${cutoff}.\nApós esse horário, pedidos poderão ser retirados na loja até às 22:30.`,
+    );
+  }
+  const notes = street.notes ? String(street.notes).trim() : "";
+  if (notes) parts.push(notes);
+  return parts.join("\n\n");
+}
+
+function normalizeMaxDeliveryTime(value: unknown): string | null {
+  if (value == null) return null;
+  const raw = String(value).trim();
+  if (!raw) return null;
+  const m = raw.match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return raw.slice(0, 5);
+  const h = Math.min(23, Math.max(0, Number(m[1])));
+  const min = Math.min(59, Math.max(0, Number(m[2])));
+  return `${String(h).padStart(2, "0")}:${String(min).padStart(2, "0")}`;
 }
 
 function serializeRequest(row: typeof deliveryStreetRequestsTable.$inferSelect) {
@@ -134,6 +168,7 @@ router.post("/delivery/streets/check", resolvePublicCompany, async (req, res) =>
 
     if (knownAny) {
       const street = serializeStreet(knownAny);
+      const customerNotes = buildCustomerStreetNotes(street);
       if (!knownAny.active) {
         res.json({
           known: true,
@@ -143,7 +178,8 @@ router.post("/delivery/streets/check", resolvePublicCompany, async (req, res) =>
           fee: null,
           etaMinutes: street.etaMinutes,
           distanceKm: street.distanceKm,
-          notes: street.notes || "",
+          notes: customerNotes,
+          maxDeliveryTime: street.maxDeliveryTime,
           message:
             "🔴 Esta rua está temporariamente fora da área de entrega. Escolha outro endereço ou retire na loja.",
         });
@@ -157,7 +193,8 @@ router.post("/delivery/streets/check", resolvePublicCompany, async (req, res) =>
         fee: street.fee,
         etaMinutes: street.etaMinutes,
         distanceKm: street.distanceKm,
-        notes: street.notes || "",
+        notes: customerNotes,
+        maxDeliveryTime: street.maxDeliveryTime,
         message: null,
       });
       return;
@@ -636,6 +673,7 @@ router.post("/admin/delivery-streets", requireCompanyAuth, async (req, res) => {
       etaMinutes: number;
       fee: number;
       notes: string;
+      maxDeliveryTime: string | null;
       active: boolean;
       origin: string;
     }>;
@@ -665,6 +703,7 @@ router.post("/admin/delivery-streets", requireCompanyAuth, async (req, res) => {
         etaMinutes: typeof body.etaMinutes === "number" ? body.etaMinutes : null,
         fee: String((Number(body.fee) || 0).toFixed(2)),
         notes: String(body.notes || ""),
+        maxDeliveryTime: normalizeMaxDeliveryTime(body.maxDeliveryTime),
         origin,
         active: body.active !== false,
       })
@@ -695,6 +734,7 @@ router.put("/admin/delivery-streets/:id", requireCompanyAuth, async (req, res) =
       etaMinutes: number | null;
       fee: number;
       notes: string;
+      maxDeliveryTime: string | null;
       active: boolean;
       origin: string;
     }>;
@@ -715,6 +755,9 @@ router.put("/admin/delivery-streets/:id", requireCompanyAuth, async (req, res) =
     if (body.etaMinutes !== undefined) patch.etaMinutes = body.etaMinutes;
     if (body.fee != null) patch.fee = String(Number(body.fee).toFixed(2));
     if (body.notes != null) patch.notes = String(body.notes);
+    if (body.maxDeliveryTime !== undefined) {
+      patch.maxDeliveryTime = normalizeMaxDeliveryTime(body.maxDeliveryTime);
+    }
     if (typeof body.active === "boolean") patch.active = body.active;
     if (body.origin != null) {
       const originRaw = String(body.origin);
