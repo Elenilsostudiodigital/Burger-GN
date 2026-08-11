@@ -623,7 +623,7 @@ export default function AdminRuasEntrega() {
                   <p className="text-orange-400 text-xs whitespace-pre-line leading-relaxed">{geoMessage}</p>
                 ) : null}
                 {!geoLoading && !createCoords && !geoMessage && createForm.streetName.trim().length >= 3 ? (
-                  <p className="text-zinc-600 text-xs">Aguardando localização precisa em Lauro de Freitas…</p>
+                  <p className="text-zinc-600 text-xs">Buscando sugestões em Lauro de Freitas…</p>
                 ) : null}
               </div>
             </div>
