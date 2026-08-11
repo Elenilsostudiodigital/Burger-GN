@@ -11,7 +11,7 @@ import {
   LayoutDashboard, UtensilsCrossed, Tag, MapPin, Navigation, Settings,
   LogOut, Plus, Pencil, Trash2, Check, X, ToggleLeft, ToggleRight,
   Loader2, CreditCard, Link as LinkIcon, ShieldAlert, ShieldCheck, Upload,
-  MessageCircle, TrendingUp, Crown, Star,
+  MessageCircle, TrendingUp, Crown, Star, Clock,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -47,7 +47,93 @@ function AdminNav({ active }: { active: string }) {
   );
 }
 
-type Tab = 'pagamento' | 'links' | 'whatsapp';
+type Tab = 'pagamento' | 'preparo' | 'links' | 'whatsapp';
+
+function PrepTimeTab() {
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [prepTimeMin, setPrepTimeMin] = useState('35');
+  const [prepTimeMax, setPrepTimeMax] = useState('45');
+  const [success, setSuccess] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    (async () => {
+      setLoading(true);
+      try {
+        const s = await getAdminPaymentSettings();
+        setPrepTimeMin(String(s.prepTimeMin ?? 35));
+        setPrepTimeMax(String(s.prepTimeMax ?? 45));
+      } catch {
+        setError('Não foi possível carregar o tempo de preparo');
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  const handleSave = async () => {
+    setSaving(true); setSuccess(false); setError('');
+    try {
+      const updated = await updatePaymentSettings({
+        prepTimeMin: Number(prepTimeMin) || 35,
+        prepTimeMax: Number(prepTimeMax) || 45,
+      });
+      setPrepTimeMin(String(updated.prepTimeMin ?? 35));
+      setPrepTimeMax(String(updated.prepTimeMax ?? 45));
+      setSuccess(true);
+      setTimeout(() => setSuccess(false), 3000);
+    } catch {
+      setError('Erro ao salvar tempo de preparo');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex justify-center py-16">
+        <Loader2 className="animate-spin text-amber-500" size={28} />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-3">
+        <div>
+          <h3 className="text-white font-black uppercase tracking-wide text-sm">⏱ Tempo de Preparo</h3>
+          <p className="text-zinc-500 text-xs mt-1">
+            Define o prazo estimado da cozinha. O cronômetro inicia ao aceitar o pedido e usa o tempo máximo.
+          </p>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1.5">
+            <Label className="text-zinc-500 text-xs">Tempo mínimo (minutos)</Label>
+            <Input type="number" min={5} max={180} value={prepTimeMin}
+              onChange={e => setPrepTimeMin(e.target.value)}
+              className="bg-zinc-950 border-zinc-800 text-white h-11 text-sm focus:border-amber-500" />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-zinc-500 text-xs">Tempo máximo (minutos)</Label>
+            <Input type="number" min={5} max={240} value={prepTimeMax}
+              onChange={e => setPrepTimeMax(e.target.value)}
+              className="bg-zinc-950 border-zinc-800 text-white h-11 text-sm focus:border-amber-500" />
+          </div>
+        </div>
+        <p className="text-zinc-600 text-xs">Padrão: 35 a 45 minutos. Aviso amarelo nos últimos 10 minutos.</p>
+      </div>
+
+      {success && <p className="text-green-400 text-sm px-1 flex items-center gap-2"><Check size={16} /> Tempo de preparo salvo!</p>}
+      {error && <p className="text-red-400 text-sm px-1 flex items-center gap-2"><X size={16} /> {error}</p>}
+
+      <Button onClick={handleSave} disabled={saving}
+        className="w-full h-12 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold rounded-xl flex items-center justify-center gap-2">
+        {saving ? <Loader2 size={18} className="animate-spin" /> : <Check size={18} />} Salvar Tempo de Preparo
+      </Button>
+    </div>
+  );
+}
 
 function PaymentTab() {
   const [settings, setSettings] = useState<PaymentSettingsAdmin | null>(null);
@@ -60,8 +146,6 @@ function PaymentTab() {
   const [pixKey, setPixKey] = useState('');
   const [pixName, setPixName] = useState('THE BURGER GN');
   const [pixCity, setPixCity] = useState('LAURO DE FREITAS');
-  const [prepTimeMin, setPrepTimeMin] = useState('35');
-  const [prepTimeMax, setPrepTimeMax] = useState('45');
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState('');
 
@@ -75,8 +159,6 @@ function PaymentTab() {
     setPixKey(s.pixKey ?? '');
     setPixName(s.pixMerchantName ?? 'THE BURGER GN');
     setPixCity(s.pixMerchantCity ?? 'LAURO DE FREITAS');
-    setPrepTimeMin(String(s.prepTimeMin ?? 35));
-    setPrepTimeMax(String(s.prepTimeMax ?? 45));
     setLoading(false);
   };
 
@@ -93,14 +175,10 @@ function PaymentTab() {
         pixKey,
         pixMerchantName: pixName,
         pixMerchantCity: pixCity,
-        prepTimeMin: Number(prepTimeMin) || 35,
-        prepTimeMax: Number(prepTimeMax) || 45,
       });
       setSettings(updated);
       setAccessToken('');
       setPixKey(updated.pixKey ?? pixKey);
-      setPrepTimeMin(String(updated.prepTimeMin ?? 35));
-      setPrepTimeMax(String(updated.prepTimeMax ?? 45));
       setSaving(false); setSuccess(true);
       setTimeout(() => setSuccess(false), 3000);
     } catch {
@@ -232,28 +310,7 @@ function PaymentTab() {
         </div>
       </div>
 
-      {/* Estimated prep time — shown on Meu Pedido after accept */}
-      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-3">
-        <div>
-          <h3 className="text-white font-black uppercase tracking-wide text-sm">⏱️ Tempo estimado de preparo</h3>
-          <p className="text-zinc-500 text-xs mt-1">Exibido ao cliente em Meu Pedido após o pedido ser aceito.</p>
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-1.5">
-            <Label className="text-zinc-500 text-xs">Mínimo (minutos)</Label>
-            <Input type="number" min={5} max={180} value={prepTimeMin}
-              onChange={e => setPrepTimeMin(e.target.value)}
-              className="bg-zinc-950 border-zinc-800 text-white h-11 text-sm focus:border-amber-500" />
-          </div>
-          <div className="space-y-1.5">
-            <Label className="text-zinc-500 text-xs">Máximo (minutos)</Label>
-            <Input type="number" min={5} max={240} value={prepTimeMax}
-              onChange={e => setPrepTimeMax(e.target.value)}
-              className="bg-zinc-950 border-zinc-800 text-white h-11 text-sm focus:border-amber-500" />
-          </div>
-        </div>
-        <p className="text-zinc-600 text-xs">Padrão sugerido: 35 a 45 minutos.</p>
-      </div>
+      {/* Estimated prep time lives in Configurações > Tempo de Preparo */}
 
       {success && <p className="text-green-400 text-sm px-1 flex items-center gap-2"><Check size={16} /> Configurações salvas!</p>}
       {error && <p className="text-red-400 text-sm px-1 flex items-center gap-2"><X size={16} /> {error}</p>}
@@ -463,7 +520,7 @@ export default function SettingsHub() {
             <Settings size={20} className="text-amber-500" />
             <div>
               <h1 className="text-white font-black uppercase text-base leading-none">Configurações</h1>
-              <p className="text-zinc-600 text-xs">Pagamento e Links Externos</p>
+              <p className="text-zinc-600 text-xs">Pagamento, preparo e links</p>
             </div>
           </div>
           <button onClick={handleLogout} className="p-2 text-zinc-400 hover:text-red-400 transition-colors">
@@ -473,22 +530,26 @@ export default function SettingsHub() {
       </header>
 
       <main className="max-w-2xl mx-auto px-4 py-5 space-y-5">
-        <div className="flex gap-2">
+        <div className="flex gap-2 overflow-x-auto no-scrollbar">
           <button onClick={() => setTab('pagamento')}
-            className={`flex-1 h-11 rounded-xl font-bold text-sm uppercase tracking-wide transition-all flex items-center justify-center gap-2 ${tab === 'pagamento' ? 'bg-amber-500 text-zinc-950' : 'bg-zinc-900 text-zinc-400 border border-zinc-800'}`}>
+            className={`shrink-0 flex-1 min-w-[7rem] h-11 rounded-xl font-bold text-sm uppercase tracking-wide transition-all flex items-center justify-center gap-2 ${tab === 'pagamento' ? 'bg-amber-500 text-zinc-950' : 'bg-zinc-900 text-zinc-400 border border-zinc-800'}`}>
             <CreditCard size={16} /> Pagamento
           </button>
+          <button onClick={() => setTab('preparo')}
+            className={`shrink-0 flex-1 min-w-[7rem] h-11 rounded-xl font-bold text-sm uppercase tracking-wide transition-all flex items-center justify-center gap-2 ${tab === 'preparo' ? 'bg-amber-500 text-zinc-950' : 'bg-zinc-900 text-zinc-400 border border-zinc-800'}`}>
+            <Clock size={16} /> Tempo de Preparo
+          </button>
           <button onClick={() => setTab('links')}
-            className={`flex-1 h-11 rounded-xl font-bold text-sm uppercase tracking-wide transition-all flex items-center justify-center gap-2 ${tab === 'links' ? 'bg-amber-500 text-zinc-950' : 'bg-zinc-900 text-zinc-400 border border-zinc-800'}`}>
+            className={`shrink-0 flex-1 min-w-[7rem] h-11 rounded-xl font-bold text-sm uppercase tracking-wide transition-all flex items-center justify-center gap-2 ${tab === 'links' ? 'bg-amber-500 text-zinc-950' : 'bg-zinc-900 text-zinc-400 border border-zinc-800'}`}>
             <LinkIcon size={16} /> Links Externos
           </button>
           <button onClick={() => setTab('whatsapp')}
-            className={`flex-1 h-11 rounded-xl font-bold text-sm uppercase tracking-wide transition-all flex items-center justify-center gap-2 ${tab === 'whatsapp' ? 'bg-amber-500 text-zinc-950' : 'bg-zinc-900 text-zinc-400 border border-zinc-800'}`}>
+            className={`shrink-0 flex-1 min-w-[7rem] h-11 rounded-xl font-bold text-sm uppercase tracking-wide transition-all flex items-center justify-center gap-2 ${tab === 'whatsapp' ? 'bg-amber-500 text-zinc-950' : 'bg-zinc-900 text-zinc-400 border border-zinc-800'}`}>
             <MessageCircle size={16} /> WhatsApp
           </button>
         </div>
 
-        {tab === 'pagamento' ? <PaymentTab /> : tab === 'links' ? <LinksTab /> : <WhatsappTab />}
+        {tab === 'pagamento' ? <PaymentTab /> : tab === 'preparo' ? <PrepTimeTab /> : tab === 'links' ? <LinksTab /> : <WhatsappTab />}
       </main>
 
       <AdminNav active="/admin/config" />

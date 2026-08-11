@@ -16,6 +16,14 @@ import { buildStaticPixPayload, decodePixSettings, normalizePixKey } from "../li
 import { syncClubeMemberOnOrder } from "../lib/clubeClientSync";
 import { normalizeClientPhone } from "../lib/clientMeta";
 import { applyOrderCompletionRewards } from "../lib/orderRewards";
+import {
+  computePrepDayStats,
+  finishPrepTimer,
+  isPrepEarlyFinish,
+  loadCompanyPrepTimes,
+  prepDurationSeconds,
+  startPrepTimer,
+} from "../lib/prepTimer";
 import crypto from "node:crypto";
 
 const router = Router();
@@ -29,6 +37,7 @@ const RECEIPT_MIME_RE = /^data:image\/(png|jpe?g|webp);base64,/i;
 function enrichOrder<T extends { notes: string; status: string }>(order: T) {
   const { publicNotes, meta } = parseOrderNotes(order.notes);
   const workflow = resolveWorkflow(order.status, meta);
+  const durationSec = prepDurationSeconds(meta);
   return {
     ...order,
     notes: publicNotes,
@@ -44,6 +53,12 @@ function enrichOrder<T extends { notes: string; status: string }>(order: T) {
     review: meta.review ?? null,
     deliveredAt: meta.deliveredAt ?? null,
     history: meta.history ?? [],
+    prepStartedAt: meta.prepStartedAt ?? null,
+    prepFinishedAt: meta.prepFinishedAt ?? null,
+    prepTimeMin: meta.prepTimeMin ?? null,
+    prepTimeMax: meta.prepTimeMax ?? null,
+    prepDurationSeconds: durationSec,
+    prepEarlyFinish: isPrepEarlyFinish(meta),
   };
 }
 
@@ -404,6 +419,21 @@ router.get("/orders", requireCompanyAuth, async (req, res) => {
   }
 });
 
+/** Daily prep-timer stats for the kitchen dashboard (additive). */
+router.get("/admin/prep-stats", requireCompanyAuth, async (req, res) => {
+  try {
+    const orders = await db
+      .select({ notes: ordersTable.notes })
+      .from(ordersTable)
+      .where(eq(ordersTable.companyId, req.companyId!));
+    const metas = orders.map((o) => parseOrderNotes(o.notes).meta);
+    res.json(computePrepDayStats(metas));
+  } catch (err) {
+    req.log.error({ err }, "Failed to fetch prep stats");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 // Track order (public)
 router.get("/orders/track/:trackingId", async (req, res) => {
   try {
@@ -486,6 +516,13 @@ router.patch("/orders/:id/status", requireCompanyAuth, async (req, res) => {
       if (wf === "done" && !nextMeta.deliveredAt) {
         nextMeta.deliveredAt = new Date().toISOString();
       }
+      if (wf === "preparing") {
+        const times = await loadCompanyPrepTimes(req.companyId!);
+        nextMeta = startPrepTimer(nextMeta, times);
+      }
+      if (wf === "ready" || wf === "out" || wf === "done") {
+        nextMeta = finishPrepTimer(nextMeta);
+      }
     } else if (body.status && ["new", "preparing", "delivery", "done"].includes(body.status)) {
       nextStatus = body.status;
       const mapped: WorkflowStage =
@@ -496,6 +533,13 @@ router.patch("/orders/:id/status", requireCompanyAuth, async (req, res) => {
       notifyStage = mapped;
       if (mapped === "done" && !nextMeta.deliveredAt) {
         nextMeta.deliveredAt = new Date().toISOString();
+      }
+      if (mapped === "preparing") {
+        const times = await loadCompanyPrepTimes(req.companyId!);
+        nextMeta = startPrepTimer(nextMeta, times);
+      }
+      if (mapped === "out" || mapped === "done") {
+        nextMeta = finishPrepTimer(nextMeta);
       }
     } else {
       res.status(400).json({ error: "Invalid status" }); return;

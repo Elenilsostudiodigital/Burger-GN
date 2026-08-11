@@ -7,10 +7,10 @@ import {
 } from '@dnd-kit/core';
 import { useAdmin } from '../../context/AdminContext';
 import {
-  getOrders, updateOrderWorkflow, updateOrderPaymentStatus,
+  getOrders, updateOrderWorkflow, updateOrderPaymentStatus, getPrepStats,
   openCustomerWhatsapp, buildCustomerNotifyMessage, WHATSAPP_EXTERNAL_ENABLED,
   REJECT_REASON_SUGGESTIONS, RECEIPT_REJECT_SUGGESTIONS,
-  Order, WorkflowStage,
+  Order, WorkflowStage, PrepDayStats,
   ORDER_TYPE_LABELS, PAYMENT_METHOD_LABELS, PAYMENT_STATUS_LABELS, CARD_TYPE_LABELS, WORKFLOW_LABELS,
 } from '../../lib/api';
 import {
@@ -19,6 +19,12 @@ import {
   XCircle, Tag, MapPin, Navigation, Settings, Route, Upload, TrendingUp,
   ChevronLeft, ChevronRight, GripVertical, X, Crown, Filter, ImageIcon, CheckCircle2, Check, Ban, Star, Users,
 } from 'lucide-react';
+import { PrepCountdown, prepCardBorderClass } from '../../components/PrepCountdown';
+import {
+  computePrepRemainingSeconds,
+  formatPrepDuration,
+  getPrepVisualState,
+} from '../../lib/prepTimer';
 
 /** Board columns — pending orders never auto-advance. */
 type ColumnKey = 'new' | 'preparing' | 'ready' | 'out' | 'done';
@@ -169,6 +175,7 @@ function OrderCard({ order, highlight, dragging, onAccept, onRefuse, onAdvance, 
   const [updating, setUpdating] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [showReceipt, setShowReceipt] = useState(false);
+  const [tick, setTick] = useState(() => Date.now());
   const column = getBoardColumn(order);
   const colIndex = column === 'cancelled' ? -1 : COLUMN_ORDER.indexOf(column);
   const prevStatus = colIndex > 0 ? COLUMN_ORDER[colIndex - 1] : null;
@@ -177,6 +184,21 @@ function OrderCard({ order, highlight, dragging, onAccept, onRefuse, onAdvance, 
   const awaitingPay = needsPaymentConference(order);
   const isPending = column === 'new' && !awaitingPay && canAcceptOrder(order);
   const dragDisabled = column === 'cancelled' || awaitingPay || (column === 'new' && !canAcceptOrder(order));
+  const showPrepTimer = !!order.prepStartedAt && (column === 'preparing' || column === 'ready' || !!order.prepFinishedAt);
+
+  useEffect(() => {
+    if (!order.prepStartedAt || order.prepFinishedAt || column !== 'preparing') return;
+    const id = window.setInterval(() => setTick(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [order.prepStartedAt, order.prepFinishedAt, column]);
+
+  const remaining = computePrepRemainingSeconds({
+    prepStartedAt: order.prepStartedAt,
+    prepFinishedAt: order.prepFinishedAt,
+    prepTimeMax: order.prepTimeMax,
+    now: tick,
+  });
+  const prepVisual = column === 'preparing' ? getPrepVisualState(remaining) : 'idle';
 
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: `order-${order.id}`,
@@ -199,7 +221,7 @@ function OrderCard({ order, highlight, dragging, onAccept, onRefuse, onAdvance, 
       initial={{ opacity: 0, y: -10 }}
       animate={{ opacity: isDragging ? 0.3 : 1, y: 0 }}
       className={`rounded-2xl border overflow-hidden transition-colors touch-none ${
-        highlight ? 'border-amber-500 bg-amber-500/5 shadow-[0_0_20px_rgba(245,158,11,0.25)]' : 'border-zinc-800 bg-zinc-900'
+        prepCardBorderClass(prepVisual, highlight)
       } ${dragging ? 'shadow-2xl ring-2 ring-amber-500/60' : ''}`}
     >
       <div className="p-3 pb-2 flex items-start gap-2">
@@ -301,6 +323,19 @@ function OrderCard({ order, highlight, dragging, onAccept, onRefuse, onAdvance, 
 
       {order.changeFor && (
         <p className="px-3 mt-2 text-[11px] text-amber-400 font-bold">Troco para {fmt(order.changeFor)}</p>
+      )}
+
+      {showPrepTimer && (
+        <div className="px-3 mt-2">
+          <PrepCountdown
+            prepStartedAt={order.prepStartedAt}
+            prepFinishedAt={order.prepFinishedAt}
+            prepTimeMax={order.prepTimeMax}
+            prepDurationSeconds={order.prepDurationSeconds}
+            showKitchenAlerts={column === 'preparing'}
+            compact
+          />
+        </div>
       )}
 
       <div className="px-3 mt-2 flex items-center justify-between">
@@ -522,6 +557,11 @@ export default function AdminDashboard() {
     const stored = localStorage.getItem(SOUND_STORAGE_KEY);
     return stored === null ? true : stored === 'true';
   });
+  const [prepStats, setPrepStats] = useState<PrepDayStats | null>(null);
+  const [prepCelebration, setPrepCelebration] = useState<{
+    orderNumber: number;
+    durationSeconds: number;
+  } | null>(null);
   const soundEnabledRef = useRef(soundEnabled);
 
   useEffect(() => { soundEnabledRef.current = soundEnabled; }, [soundEnabled]);
@@ -530,6 +570,20 @@ export default function AdminDashboard() {
     try { setOrders(await getOrders()); } catch { /* ignore */ }
     finally { setLoading(false); }
   }, []);
+
+  const fetchPrepStats = useCallback(async () => {
+    try { setPrepStats(await getPrepStats()); } catch { /* ignore */ }
+  }, []);
+
+  useEffect(() => {
+    fetchOrders();
+    fetchPrepStats();
+    const interval = setInterval(() => {
+      fetchOrders();
+      fetchPrepStats();
+    }, 30000);
+    return () => clearInterval(interval);
+  }, [fetchOrders, fetchPrepStats]);
 
   useEffect(() => {
     fetchOrders();
@@ -595,6 +649,7 @@ export default function AdminDashboard() {
       const updated = await updateOrderWorkflow(order.id, 'preparing');
       applyUpdated(order.id, updated);
       notifyCustomer(order, 'preparing', null, updated.customerNotifyMessage);
+      void fetchPrepStats();
     } catch (err) {
       setNotification(err instanceof Error ? err.message : 'Não foi possível aceitar o pedido.');
       setTimeout(() => setNotification(null), 4000);
@@ -652,6 +707,16 @@ export default function AdminDashboard() {
       const updated = await updateOrderWorkflow(order.id, workflow);
       applyUpdated(order.id, updated);
       notifyCustomer(order, workflow, null, updated.customerNotifyMessage);
+      if (workflow === 'ready') {
+        void fetchPrepStats();
+        if (updated.prepEarlyFinish && typeof updated.prepDurationSeconds === 'number') {
+          setPrepCelebration({
+            orderNumber: updated.orderNumber,
+            durationSeconds: updated.prepDurationSeconds,
+          });
+          setTimeout(() => setPrepCelebration(null), 6500);
+        }
+      }
     } catch {
       fetchOrders();
     }
@@ -749,6 +814,25 @@ export default function AdminDashboard() {
         )}
       </AnimatePresence>
 
+      <AnimatePresence>
+        {prepCelebration && (
+          <motion.div
+            initial={{ opacity: 0, y: -20, scale: 0.96 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -12 }}
+            className="fixed top-14 left-1/2 -translate-x-1/2 z-50 w-[min(92vw,380px)] rounded-2xl border border-emerald-500/40 bg-zinc-950/95 px-4 py-3 shadow-xl shadow-emerald-500/10 backdrop-blur"
+          >
+            <p className="text-emerald-300 font-black text-sm">🎉 Excelente!</p>
+            <p className="text-zinc-300 text-xs mt-1 leading-relaxed">
+              Pedido #{prepCelebration.orderNumber} finalizado antes do prazo estimado.
+            </p>
+            <p className="text-white text-xs font-bold mt-1.5">
+              Tempo total de preparo: {formatPrepDuration(prepCelebration.durationSeconds)}
+            </p>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <header className="sticky top-0 z-40 bg-zinc-950/95 backdrop-blur border-b border-zinc-800 px-4 py-3">
         <div className="max-w-[1800px] mx-auto flex items-center justify-between gap-3">
           <div className="flex items-center gap-3 min-w-0">
@@ -817,6 +901,27 @@ export default function AdminDashboard() {
             </button>
           ))}
         </div>
+
+        {prepStats && (
+          <div className="max-w-[1800px] mx-auto mt-3 grid grid-cols-3 gap-2">
+            <div className="rounded-xl border border-zinc-800 bg-zinc-900/80 px-3 py-2">
+              <p className="text-zinc-500 text-[9px] font-bold uppercase tracking-wider">Tempo médio (hoje)</p>
+              <p className="text-white font-black text-sm mt-0.5">
+                {prepStats.averagePrepMinutes != null
+                  ? `${String(prepStats.averagePrepMinutes).replace('.', ',')} min`
+                  : '—'}
+              </p>
+            </div>
+            <div className="rounded-xl border border-emerald-500/25 bg-emerald-500/5 px-3 py-2">
+              <p className="text-emerald-500/80 text-[9px] font-bold uppercase tracking-wider">Dentro do prazo</p>
+              <p className="text-emerald-400 font-black text-sm mt-0.5">{prepStats.onTimeCount}</p>
+            </div>
+            <div className="rounded-xl border border-red-500/25 bg-red-500/5 px-3 py-2">
+              <p className="text-red-400/80 text-[9px] font-bold uppercase tracking-wider">Atrasados</p>
+              <p className="text-red-400 font-black text-sm mt-0.5">{prepStats.lateCount}</p>
+            </div>
+          </div>
+        )}
       </header>
 
       <main className="flex-1 px-4 py-5 overflow-hidden">
