@@ -214,25 +214,31 @@ router.post("/orders", resolvePublicCompany, async (req, res) => {
       // Priority: approved street registry (learned streets) — exact key match.
       const streetKey = normalizeStreetKey(body.address || "");
       if (streetKey) {
-        const [knownStreet] = await db
+        const [knownStreetAny] = await db
           .select()
           .from(deliveryStreetsTable)
           .where(
             and(
               eq(deliveryStreetsTable.companyId, companyId),
               eq(deliveryStreetsTable.streetKey, streetKey),
-              eq(deliveryStreetsTable.active, true),
             ),
           )
           .limit(1);
-        if (knownStreet) {
-          const fee = parseFloat(String(knownStreet.fee));
+        if (knownStreetAny && !knownStreetAny.active) {
+          res.status(400).json({
+            error:
+              "Esta rua está temporariamente fora da área de entrega. Escolha outro endereço ou retire na loja.",
+          });
+          return;
+        }
+        if (knownStreetAny && knownStreetAny.active) {
+          const fee = parseFloat(String(knownStreetAny.fee));
           if (Number.isFinite(fee)) {
             deliveryFee = fee;
             deliveryFeeResolved = true;
           }
-          if (knownStreet.distanceKm != null) {
-            customerDistanceKm = parseFloat(String(knownStreet.distanceKm));
+          if (knownStreetAny.distanceKm != null) {
+            customerDistanceKm = parseFloat(String(knownStreetAny.distanceKm));
           }
         }
       }

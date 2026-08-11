@@ -100,6 +100,8 @@ export const updateDeliveryZone = (id: number, d: Partial<DeliveryZone>) => api.
 export const deleteDeliveryZone = (id: number) => api.delete(`/admin/delivery-zones/${id}`);
 
 // ── Delivery Streets (learned / approved streets) ─────────────────────────────
+export type DeliveryStreetOrigin = "manual" | "pedido" | "importada";
+
 export interface DeliveryStreet {
   id: number;
   streetName: string;
@@ -113,6 +115,8 @@ export interface DeliveryStreet {
   etaMinutes: number | null;
   fee: number;
   notes: string;
+  /** manual | pedido | importada */
+  origin: DeliveryStreetOrigin;
   active: boolean;
   createdAt: string;
   updatedAt: string;
@@ -144,12 +148,14 @@ export interface DeliveryStreetRequest {
 export interface StreetCheckResult {
   known: boolean;
   pending: boolean;
+  active?: boolean;
   street?: DeliveryStreet;
   requestId?: number | null;
   fee: number | null;
   etaMinutes?: number | null;
   distanceKm?: number | null;
   suggestedFee?: number | null;
+  notes?: string;
   message: string | null;
 }
 export interface StreetRequestDetail {

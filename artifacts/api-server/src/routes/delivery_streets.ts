@@ -38,6 +38,11 @@ async function loadKmContext(companyId: number) {
 }
 
 function serializeStreet(row: typeof deliveryStreetsTable.$inferSelect) {
+  const originRaw = String((row as { origin?: string }).origin || "manual");
+  const origin =
+    originRaw === "pedido" || originRaw === "importada" || originRaw === "manual"
+      ? originRaw
+      : "manual";
   return {
     id: row.id,
     streetName: row.streetName,
@@ -50,7 +55,8 @@ function serializeStreet(row: typeof deliveryStreetsTable.$inferSelect) {
     distanceKm: row.distanceKm != null ? parseFloat(String(row.distanceKm)) : null,
     etaMinutes: row.etaMinutes,
     fee: parseFloat(String(row.fee)) || 0,
-    notes: row.notes,
+    notes: row.notes || "",
+    origin,
     active: row.active,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -115,26 +121,43 @@ router.post("/delivery/streets/check", resolvePublicCompany, async (req, res) =>
     const lat = typeof body.lat === "number" && Number.isFinite(body.lat) ? body.lat : null;
     const lng = typeof body.lng === "number" && Number.isFinite(body.lng) ? body.lng : null;
 
-    const [known] = await db
+    const [knownAny] = await db
       .select()
       .from(deliveryStreetsTable)
       .where(
         and(
           eq(deliveryStreetsTable.companyId, companyId),
           eq(deliveryStreetsTable.streetKey, streetKey),
-          eq(deliveryStreetsTable.active, true),
         ),
       )
       .limit(1);
 
-    if (known) {
+    if (knownAny) {
+      const street = serializeStreet(knownAny);
+      if (!knownAny.active) {
+        res.json({
+          known: true,
+          pending: false,
+          active: false,
+          street,
+          fee: null,
+          etaMinutes: street.etaMinutes,
+          distanceKm: street.distanceKm,
+          notes: street.notes || "",
+          message:
+            "🔴 Esta rua está temporariamente fora da área de entrega. Escolha outro endereço ou retire na loja.",
+        });
+        return;
+      }
       res.json({
         known: true,
         pending: false,
-        street: serializeStreet(known),
-        fee: parseFloat(String(known.fee)) || 0,
-        etaMinutes: known.etaMinutes,
-        distanceKm: known.distanceKm != null ? parseFloat(String(known.distanceKm)) : null,
+        active: true,
+        street,
+        fee: street.fee,
+        etaMinutes: street.etaMinutes,
+        distanceKm: street.distanceKm,
+        notes: street.notes || "",
         message: null,
       });
       return;
@@ -478,6 +501,7 @@ router.post("/admin/delivery-street-requests/:id/approve", requireCompanyAuth, a
           etaMinutes: etaMinutes ?? existingStreet.etaMinutes,
           fee: String(fee.toFixed(2)),
           notes: String(body.notes ?? existingStreet.notes ?? ""),
+          origin: (existingStreet as { origin?: string }).origin || "pedido",
           active: true,
           updatedAt: new Date(),
         })
@@ -500,6 +524,7 @@ router.post("/admin/delivery-street-requests/:id/approve", requireCompanyAuth, a
           etaMinutes: etaMinutes ?? null,
           fee: String(fee.toFixed(2)),
           notes: String(body.notes || ""),
+          origin: "pedido",
           active: true,
         })
         .returning();
@@ -612,6 +637,7 @@ router.post("/admin/delivery-streets", requireCompanyAuth, async (req, res) => {
       fee: number;
       notes: string;
       active: boolean;
+      origin: string;
     }>;
     const streetName = displayStreetName(body.streetName || "");
     const streetKey = normalizeStreetKey(streetName);
@@ -619,6 +645,11 @@ router.post("/admin/delivery-streets", requireCompanyAuth, async (req, res) => {
       res.status(400).json({ error: "Informe o nome da rua." });
       return;
     }
+    const originRaw = String(body.origin || "manual");
+    const origin =
+      originRaw === "pedido" || originRaw === "importada" || originRaw === "manual"
+        ? originRaw
+        : "manual";
     const [created] = await db
       .insert(deliveryStreetsTable)
       .values({
@@ -634,6 +665,7 @@ router.post("/admin/delivery-streets", requireCompanyAuth, async (req, res) => {
         etaMinutes: typeof body.etaMinutes === "number" ? body.etaMinutes : null,
         fee: String((Number(body.fee) || 0).toFixed(2)),
         notes: String(body.notes || ""),
+        origin,
         active: body.active !== false,
       })
       .returning();
@@ -664,6 +696,7 @@ router.put("/admin/delivery-streets/:id", requireCompanyAuth, async (req, res) =
       fee: number;
       notes: string;
       active: boolean;
+      origin: string;
     }>;
 
     const patch: Record<string, unknown> = { updatedAt: new Date() };
@@ -683,6 +716,13 @@ router.put("/admin/delivery-streets/:id", requireCompanyAuth, async (req, res) =
     if (body.fee != null) patch.fee = String(Number(body.fee).toFixed(2));
     if (body.notes != null) patch.notes = String(body.notes);
     if (typeof body.active === "boolean") patch.active = body.active;
+    if (body.origin != null) {
+      const originRaw = String(body.origin);
+      patch.origin =
+        originRaw === "pedido" || originRaw === "importada" || originRaw === "manual"
+          ? originRaw
+          : "manual";
+    }
 
     const [updated] = await db
       .update(deliveryStreetsTable)
