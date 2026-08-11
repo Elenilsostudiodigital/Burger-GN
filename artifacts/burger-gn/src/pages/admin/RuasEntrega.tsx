@@ -6,7 +6,7 @@ import {
   updateAdminDeliveryStreet,
   deleteAdminDeliveryStreet,
   getKmDeliveryConfig,
-  geocodeAddress,
+  geocodeStreetLocation,
   haversineKm,
   findKmTier,
   DeliveryStreet,
@@ -55,6 +55,7 @@ type CreateForm = {
   city: string;
   cep: string;
   notes: string;
+  maxDeliveryTime: string;
   fee: string;
   eta: string;
   active: boolean;
@@ -66,10 +67,17 @@ const EMPTY_CREATE: CreateForm = {
   city: 'Lauro de Freitas',
   cep: '',
   notes: '',
+  maxDeliveryTime: '',
   fee: '',
   eta: '',
   active: true,
 };
+
+function normalizeTimeInput(raw: string): string {
+  const digits = raw.replace(/\D/g, '').slice(0, 4);
+  if (digits.length <= 2) return digits;
+  return `${digits.slice(0, 2)}:${digits.slice(2)}`;
+}
 
 export default function AdminRuasEntrega() {
   const [list, setList] = useState<DeliveryStreet[]>([]);
@@ -91,6 +99,7 @@ export default function AdminRuasEntrega() {
   const [editFee, setEditFee] = useState('');
   const [editEta, setEditEta] = useState('');
   const [editNotes, setEditNotes] = useState('');
+  const [editMaxDeliveryTime, setEditMaxDeliveryTime] = useState('');
   const [editActive, setEditActive] = useState(true);
 
   const [saving, setSaving] = useState(false);
@@ -113,7 +122,7 @@ export default function AdminRuasEntrega() {
     getKmDeliveryConfig().then(setKmConfig).catch(() => setKmConfig(null));
   }, []);
 
-  // Auto-geocode while typing create form (same Nominatim system as checkout)
+  // Auto-geocode while typing — same Nominatim system as checkout (multi-field + CEP priority)
   useEffect(() => {
     if (!creating) return;
     const street = createForm.streetName.trim();
@@ -132,54 +141,55 @@ export default function AdminRuasEntrega() {
       setGeoLoading(true);
       setGeoMessage('');
       try {
-        const cepPart = createForm.cep.replace(/\D/g, '');
-        const fullAddr = [
+        const located = await geocodeStreetLocation({
           street,
           neighborhood,
           city,
-          cepPart ? `CEP ${cepPart}` : '',
-          'Bahia',
-          'Brasil',
-        ]
-          .filter(Boolean)
-          .join(', ');
-        const coords = await geocodeAddress(fullAddr);
-        if (!coords) {
+          cep: createForm.cep,
+          state: 'Bahia',
+        });
+        if (!located) {
           setCreateCoords(null);
           setCreateDistanceKm(null);
           setSuggestedFee(null);
-          setGeoMessage('Não foi possível localizar este endereço automaticamente.');
+          setGeoMessage(
+            'Não foi possível localizar exatamente este endereço.\n\nVerifique o nome da rua, bairro ou CEP.\nVocê ainda pode salvar o cadastro manualmente.',
+          );
           return;
         }
-        setCreateCoords(coords);
+        setCreateCoords({ lat: located.lat, lng: located.lng });
 
         const baseLat = parseFloat(String(kmConfig?.baseLat ?? '0'));
         const baseLng = parseFloat(String(kmConfig?.baseLng ?? '0'));
         if (!Number.isFinite(baseLat) || !Number.isFinite(baseLng) || (baseLat === 0 && baseLng === 0)) {
           setCreateDistanceKm(null);
           setSuggestedFee(null);
-          setGeoMessage('Local da loja não configurado para calcular distância.');
+          setGeoMessage('Local da loja não configurado para calcular distância. Você ainda pode salvar o cadastro.');
           return;
         }
 
-        const haversine = haversineKm(baseLat, baseLng, coords.lat, coords.lng);
+        const haversine = haversineKm(baseLat, baseLng, located.lat, located.lng);
         const routeKm = parseFloat((haversine * 1.3).toFixed(2));
         const eta = estimateEtaMinutes(routeKm);
         const fee = suggestFee(routeKm, kmConfig?.tiers ?? []);
         setCreateDistanceKm(routeKm);
         setSuggestedFee(fee);
-        // Refresh suggested taxa/tempo when location updates; admin can edit before save.
         setCreateForm((f) => ({
           ...f,
           fee: String(fee),
           eta: String(eta),
         }));
       } catch {
-        setGeoMessage('Falha ao localizar endereço.');
+        setCreateCoords(null);
+        setCreateDistanceKm(null);
+        setSuggestedFee(null);
+        setGeoMessage(
+          'Não foi possível localizar exatamente este endereço.\n\nVerifique o nome da rua, bairro ou CEP.\nVocê ainda pode salvar o cadastro manualmente.',
+        );
       } finally {
         setGeoLoading(false);
       }
-    }, 800);
+    }, 900);
 
     return () => clearTimeout(geoDebounce.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -211,6 +221,7 @@ export default function AdminRuasEntrega() {
     setEditFee(String(s.fee));
     setEditEta(s.etaMinutes != null ? String(s.etaMinutes) : '');
     setEditNotes(s.notes || '');
+    setEditMaxDeliveryTime(s.maxDeliveryTime || '');
     setEditActive(s.active);
     setError('');
   };
@@ -225,7 +236,8 @@ export default function AdminRuasEntrega() {
       setError('Informe o bairro.');
       return;
     }
-    const feeNum = parseFloat(createForm.fee.replace(',', '.'));
+    const feeRaw = createForm.fee.trim();
+    const feeNum = feeRaw === '' ? 0 : parseFloat(feeRaw.replace(',', '.'));
     if (!Number.isFinite(feeNum) || feeNum < 0) {
       setError('Informe uma taxa válida (pode editar a taxa sugerida).');
       return;
@@ -244,6 +256,7 @@ export default function AdminRuasEntrega() {
         etaMinutes: createForm.eta ? Number(createForm.eta) : null,
         fee: feeNum,
         notes: createForm.notes.trim(),
+        maxDeliveryTime: createForm.maxDeliveryTime.trim() || null,
         active: createForm.active,
         origin: 'manual',
       });
@@ -274,6 +287,7 @@ export default function AdminRuasEntrega() {
         fee: feeNum,
         etaMinutes: editEta ? Number(editEta) : null,
         notes: editNotes,
+        maxDeliveryTime: editMaxDeliveryTime.trim() || null,
         active: editActive,
       });
       setEditing(null);
@@ -409,13 +423,28 @@ export default function AdminRuasEntrega() {
                   </div>
                 </div>
                 <div>
+                  <Label className="text-zinc-500 text-xs">🕒 Horário máximo de entrega nesta rua</Label>
+                  <Input
+                    value={createForm.maxDeliveryTime}
+                    onChange={(e) =>
+                      setCreateForm((f) => ({ ...f, maxDeliveryTime: normalizeTimeInput(e.target.value) }))
+                    }
+                    placeholder="Ex: 21:00"
+                    inputMode="numeric"
+                    className="bg-zinc-950 border-zinc-800 h-11 text-white"
+                  />
+                  <p className="text-zinc-600 text-[11px] mt-1">
+                    O cliente verá automaticamente o aviso de horário no checkout.
+                  </p>
+                </div>
+                <div>
                   <Label className="text-zinc-500 text-xs">Observações da Entrega</Label>
                   <textarea
                     value={createForm.notes}
                     onChange={(e) => setCreateForm((f) => ({ ...f, notes: e.target.value }))}
                     rows={4}
                     placeholder={
-                      'Ex.: Motoboy entrega somente até 21:00.\nEntregar apenas na portaria.\nCliente retirar na guarita.'
+                      'Ex.: Entregar apenas na portaria.\nCondomínio: autorizar a portaria.\nCliente retirar na guarita.'
                     }
                     className="w-full mt-1 rounded-xl bg-zinc-950 border border-zinc-800 px-3 py-2 text-sm text-white placeholder:text-zinc-600 resize-y min-h-[96px]"
                   />
@@ -472,29 +501,36 @@ export default function AdminRuasEntrega() {
                   )}
                 </div>
                 {createCoords ? (
-                  <div className="rounded-xl border border-zinc-800 bg-zinc-950/80 px-3 py-3 space-y-1 text-sm">
-                    <p className="text-zinc-400 flex items-center gap-1.5">
-                      <MapPin size={14} className="text-amber-500" />
-                      Pino: {createCoords.lat.toFixed(5)}, {createCoords.lng.toFixed(5)}
+                  <div className="rounded-xl border border-zinc-800 bg-zinc-950/80 px-3 py-3 space-y-1.5 text-sm">
+                    <p className="text-zinc-300">
+                      📍 Localização:{' '}
+                      <span className="text-white font-bold">
+                        {createCoords.lat.toFixed(5)}, {createCoords.lng.toFixed(5)}
+                      </span>
                     </p>
                     {createDistanceKm != null ? (
                       <p className="text-zinc-300">
-                        Distância da hamburgueria: <span className="text-white font-bold">{createDistanceKm.toFixed(1)} km</span>
+                        📏 Distância até a hamburgueria:{' '}
+                        <span className="text-white font-bold">{createDistanceKm.toFixed(1)} km</span>
                       </p>
                     ) : null}
                     {createForm.eta ? (
                       <p className="text-zinc-300">
-                        Tempo estimado: <span className="text-white font-bold">~{createForm.eta} min</span>
+                        🚗 Tempo estimado:{' '}
+                        <span className="text-white font-bold">~{createForm.eta} min</span>
                       </p>
                     ) : null}
                     {suggestedFee != null ? (
                       <p className="text-zinc-300">
-                        Taxa sugerida: <span className="text-amber-400 font-bold">{fmtMoney(suggestedFee)}</span>
+                        💰 Taxa sugerida:{' '}
+                        <span className="text-amber-400 font-bold">{fmtMoney(suggestedFee)}</span>
                       </p>
                     ) : null}
                   </div>
                 ) : null}
-                {geoMessage ? <p className="text-orange-400 text-xs">{geoMessage}</p> : null}
+                {geoMessage ? (
+                  <p className="text-orange-400 text-xs whitespace-pre-line leading-relaxed">{geoMessage}</p>
+                ) : null}
               </div>
             </div>
 
@@ -561,6 +597,16 @@ export default function AdminRuasEntrega() {
                   className="bg-zinc-950 border-zinc-800 h-11 text-white"
                 />
               </div>
+            </div>
+            <div>
+              <Label className="text-zinc-500 text-xs">🕒 Horário máximo de entrega nesta rua</Label>
+              <Input
+                value={editMaxDeliveryTime}
+                onChange={(e) => setEditMaxDeliveryTime(normalizeTimeInput(e.target.value))}
+                placeholder="Ex: 21:00"
+                inputMode="numeric"
+                className="bg-zinc-950 border-zinc-800 h-11 text-white"
+              />
             </div>
             <div>
               <Label className="text-zinc-500 text-xs">Observações da Entrega</Label>
@@ -631,6 +677,7 @@ export default function AdminRuasEntrega() {
                     </p>
                     <p className="text-zinc-600 text-[10px] uppercase tracking-wide mt-1 font-bold">
                       Origem: {ORIGIN_LABEL[s.origin] || s.origin || 'Manual'}
+                      {s.maxDeliveryTime ? ` · Entrega até ${s.maxDeliveryTime}` : ''}
                     </p>
                     {s.notes ? (
                       <p className="text-zinc-400 text-xs mt-1.5 line-clamp-2 whitespace-pre-line">{s.notes}</p>
