@@ -21,6 +21,7 @@ import {
   normalizeStreetKey,
   suggestFeeFromDistance,
 } from "../lib/deliveryStreets";
+import { geocodeStreetLocation } from "../lib/geocodeStreets";
 
 const router = Router();
 
@@ -632,6 +633,47 @@ router.post("/admin/delivery-street-requests/:id/reject", requireCompanyAuth, as
 });
 
 // ── Admin: street registry CRUD (Config → Ruas de Entrega) ───────────────────
+
+/** Server-side Nominatim search — avoids browser CORS failures on Localizar Endereço. */
+router.post("/admin/delivery-streets/geocode", requireCompanyAuth, async (req, res) => {
+  try {
+    const body = req.body as {
+      street?: string;
+      neighborhood?: string;
+      city?: string;
+      cep?: string;
+      state?: string;
+      number?: string;
+    };
+    const street = String(body.street || "").trim();
+    const neighborhood = String(body.neighborhood || "").trim();
+    if (street.length < 3) {
+      res.status(400).json({ error: "Informe o nome da rua (mín. 3 caracteres) para localizar." });
+      return;
+    }
+    if (!neighborhood) {
+      res.status(400).json({ error: "Informe o bairro para localizar o endereço." });
+      return;
+    }
+    const result = await geocodeStreetLocation({
+      street,
+      neighborhood,
+      city: String(body.city || "Lauro de Freitas").trim() || "Lauro de Freitas",
+      cep: String(body.cep || "").trim(),
+      state: String(body.state || "Bahia").trim() || "Bahia",
+      number: String(body.number || "").trim(),
+    });
+    res.json(result);
+  } catch (err) {
+    req.log.error({ err }, "Failed to geocode delivery street");
+    res.status(502).json({
+      error: "Não foi possível localizar o endereço agora. Tente novamente em instantes.",
+      candidates: [],
+      autoSelect: false,
+      message: "Não foi possível localizar o endereço agora. Tente novamente em instantes.",
+    });
+  }
+});
 
 router.get("/admin/delivery-streets", requireCompanyAuth, async (req, res) => {
   try {

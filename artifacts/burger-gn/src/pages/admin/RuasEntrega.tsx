@@ -131,42 +131,54 @@ export default function AdminRuasEntrega() {
     candidate: GeocodeStreetCandidate,
     config: KmDeliveryConfig | null = kmConfig,
   ) => {
-    setSelectedCandidateId(candidate.id);
-    setCreateCoords({ lat: candidate.lat, lng: candidate.lng });
-    setGeoMessage('');
+    try {
+      setSelectedCandidateId(candidate.id);
+      setCreateCoords({ lat: candidate.lat, lng: candidate.lng });
+      setGeoMessage('');
+      setError('');
 
-    const baseLat = parseFloat(String(config?.baseLat ?? '0'));
-    const baseLng = parseFloat(String(config?.baseLng ?? '0'));
-    if (!Number.isFinite(baseLat) || !Number.isFinite(baseLng) || (baseLat === 0 && baseLng === 0)) {
-      setCreateDistanceKm(null);
-      setSuggestedFee(null);
-      setGeoMessage('Local da loja não configurado para calcular distância. Você ainda pode salvar o cadastro.');
-      return;
+      const baseLat = parseFloat(String(config?.baseLat ?? '0'));
+      const baseLng = parseFloat(String(config?.baseLng ?? '0'));
+      if (!Number.isFinite(baseLat) || !Number.isFinite(baseLng) || (baseLat === 0 && baseLng === 0)) {
+        setCreateDistanceKm(null);
+        setSuggestedFee(null);
+        setGeoMessage('Local da loja não configurado para calcular distância. Você ainda pode salvar o cadastro.');
+        return;
+      }
+
+      const haversine = haversineKm(baseLat, baseLng, candidate.lat, candidate.lng);
+      const routeKm = parseFloat((haversine * 1.3).toFixed(2));
+      const eta = estimateEtaMinutes(routeKm);
+      const fee = suggestFee(routeKm, config?.tiers ?? []);
+      setCreateDistanceKm(routeKm);
+      setSuggestedFee(fee);
+      setCreateForm((f) => ({
+        ...f,
+        fee: String(fee),
+        eta: String(eta),
+      }));
+    } catch (err) {
+      console.error('[RuasEntrega] applyCandidate failed', err);
+      setGeoMessage('Não foi possível aplicar este endereço. Tente outro resultado da lista.');
+      setError('Não foi possível aplicar este endereço. Tente outro resultado da lista.');
     }
-
-    const haversine = haversineKm(baseLat, baseLng, candidate.lat, candidate.lng);
-    const routeKm = parseFloat((haversine * 1.3).toFixed(2));
-    const eta = estimateEtaMinutes(routeKm);
-    const fee = suggestFee(routeKm, config?.tiers ?? []);
-    setCreateDistanceKm(routeKm);
-    setSuggestedFee(fee);
-    setCreateForm((f) => ({
-      ...f,
-      fee: String(fee),
-      eta: String(eta),
-    }));
   };
 
-  const handleLocateAddress = async () => {
+  const handleLocateAddress = async (e?: React.SyntheticEvent) => {
+    e?.preventDefault();
+    e?.stopPropagation();
+
     const street = createForm.streetName.trim();
     const neighborhood = createForm.neighborhood.trim();
     const city = createForm.city.trim() || 'Lauro de Freitas';
     if (street.length < 3) {
       setError('Informe o nome da rua (mín. 3 caracteres) para localizar.');
+      setGeoMessage('');
       return;
     }
     if (!neighborhood) {
       setError('Informe o bairro para localizar o endereço.');
+      setGeoMessage('');
       return;
     }
 
@@ -184,18 +196,29 @@ export default function AdminRuasEntrega() {
         street,
         neighborhood,
         city,
+        cep: createForm.cep,
         number: createForm.addressNumber.trim(),
         state: 'Bahia',
       });
+      // Stay on this screen for any outcome — never navigate away.
       if (!result.candidates.length) {
-        setGeoMessage(result.message || 'Nenhum endereço encontrado nesta região.');
+        const msg =
+          result.message ||
+          'Nenhum endereço encontrado nesta região. Verifique rua, bairro e cidade e tente novamente.';
+        setGeoMessage(msg);
+        setError(msg);
         return;
       }
       setGeoCandidates(result.candidates);
       setGeoMessage('Selecione o endereço correto na lista abaixo:');
-    } catch {
+    } catch (err) {
+      const msg =
+        err instanceof Error && err.message
+          ? err.message
+          : 'Não foi possível localizar o endereço agora. Tente novamente em instantes.';
       setGeoCandidates([]);
-      setGeoMessage('Nenhum endereço encontrado nesta região.');
+      setGeoMessage(msg);
+      setError(msg);
     } finally {
       setGeoLoading(false);
     }
@@ -438,7 +461,11 @@ export default function AdminRuasEntrega() {
                 <Button
                   type="button"
                   disabled={geoLoading}
-                  onClick={() => void handleLocateAddress()}
+                  onClick={(ev) => {
+                    ev.preventDefault();
+                    ev.stopPropagation();
+                    void handleLocateAddress(ev);
+                  }}
                   className="w-full h-11 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-white font-bold border border-zinc-700"
                 >
                   {geoLoading ? (
