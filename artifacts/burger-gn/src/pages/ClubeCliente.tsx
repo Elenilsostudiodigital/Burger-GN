@@ -23,6 +23,7 @@ import {
   getSeenLedgerIds,
   markLedgerIdsSeen,
   saveClubePhone,
+  toNationalWhatsappDigits,
 } from '../lib/clubeCliente';
 
 const LEDGER_LABEL: Record<ClientLedgerType, string> = {
@@ -62,30 +63,34 @@ function formatDateTime(v: string | null | undefined) {
 }
 
 function StampProgress({ stamps, goal }: { stamps: number; goal: number }) {
-  const filled = Math.min(Math.max(0, stamps), goal);
+  const safeGoal = Math.max(1, goal);
+  const filled = Math.min(Math.max(0, stamps), safeGoal);
+  const showIcons = safeGoal <= 12;
   return (
     <div className="space-y-2">
-      <div className="flex flex-wrap gap-1.5 justify-center" aria-hidden>
-        {Array.from({ length: goal }).map((_, i) => (
-          <motion.span
-            key={i}
-            initial={{ opacity: 0, scale: 0.7 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ delay: i * 0.03, duration: 0.25 }}
-            className={`text-lg leading-none ${i < filled ? '' : 'opacity-30 grayscale'}`}
-          >
-            {i < filled ? '🍔' : '⬜'}
-          </motion.span>
-        ))}
-      </div>
+      {showIcons ? (
+        <div className="flex flex-wrap gap-1.5 justify-center" aria-hidden>
+          {Array.from({ length: safeGoal }).map((_, i) => (
+            <motion.span
+              key={i}
+              initial={{ opacity: 0, scale: 0.7 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ delay: i * 0.03, duration: 0.25 }}
+              className={`text-lg leading-none ${i < filled ? '' : 'opacity-30 grayscale'}`}
+            >
+              {i < filled ? '🍔' : '⬜'}
+            </motion.span>
+          ))}
+        </div>
+      ) : null}
       <p className="text-center text-zinc-400 text-xs font-bold uppercase tracking-wider">
-        {filled} de {goal} selos
+        {filled} de {safeGoal} selos
       </p>
       <div className="h-2 rounded-full bg-zinc-950 border border-zinc-800 overflow-hidden">
         <motion.div
           className="h-full bg-gradient-to-r from-amber-600 to-amber-400"
           initial={{ width: 0 }}
-          animate={{ width: `${Math.min(100, Math.round((filled / Math.max(1, goal)) * 100))}%` }}
+          animate={{ width: `${Math.min(100, Math.round((filled / safeGoal) * 100))}%` }}
           transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
         />
       </div>
@@ -96,7 +101,7 @@ function StampProgress({ stamps, goal }: { stamps: number; goal: number }) {
 export default function ClubeCliente() {
   const [phoneInput, setPhoneInput] = useState(() => {
     const saved = getSavedClubePhone();
-    return saved ? formatWhatsappInput(saved.length > 11 && saved.startsWith('55') ? saved.slice(2) : saved) : '';
+    return saved ? formatWhatsappInput(saved) : '';
   });
   const [rules, setRules] = useState<PublicClubeRules | null>(null);
   const [data, setData] = useState<PublicClubeMeResponse | null>(null);
@@ -158,7 +163,7 @@ export default function ClubeCliente() {
   }, []);
 
   const lookup = useCallback(async (rawPhone: string, opts?: { silent?: boolean }) => {
-    const digits = rawPhone.replace(/\D/g, '');
+    const digits = toNationalWhatsappDigits(rawPhone);
     if (digits.length < 10) {
       setError('Informe um WhatsApp válido com DDD.');
       return;
@@ -255,7 +260,7 @@ export default function ClubeCliente() {
           </div>
         ) : (
           <>
-            {!member && (
+            {!member && !(data && !data.found) && (
               <motion.section
                 initial={{ opacity: 0, y: 12 }}
                 animate={{ opacity: 1, y: 0 }}

@@ -28,9 +28,18 @@ export function clearClubePhone() {
   } catch { /* ignore */ }
 }
 
+/** Digits only, national BR (DDD + número), max 11. Strips leading 55. */
+export function toNationalWhatsappDigits(value: string): string {
+  let digits = String(value || '').replace(/\D/g, '');
+  if (digits.startsWith('55') && digits.length >= 12) {
+    digits = digits.slice(2);
+  }
+  return digits.slice(0, 11);
+}
+
 /** Format BR WhatsApp as user types. */
 export function formatWhatsappInput(value: string): string {
-  const digits = value.replace(/\D/g, '').slice(0, 11);
+  const digits = toNationalWhatsappDigits(value);
   if (digits.length <= 2) return digits;
   if (digits.length <= 7) return `(${digits.slice(0, 2)}) ${digits.slice(2)}`;
   return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
