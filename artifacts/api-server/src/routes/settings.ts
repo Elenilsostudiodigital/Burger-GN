@@ -5,6 +5,7 @@ import { eq, asc, and } from "drizzle-orm";
 import { requireCompanyAuth } from "../middlewares/auth";
 import { resolvePublicCompany } from "../middlewares/company";
 import { decodePixSettings, decodeGatewayConfig, encodePixSettings } from "../lib/staticPix";
+import { ensureOrderFlowSchema } from "../lib/ensureOrderFlowSchema";
 
 const router = Router();
 const DEFAULT_WHATSAPP_NUMBER = "5571996981707";
@@ -99,11 +100,13 @@ function toAdminPaymentSettings(settings: typeof paymentSettingsTable.$inferSele
     pixConfigured: !!pixCfg?.key,
     prepTimeMin: storeCfg.prepTimeMin,
     prepTimeMax: storeCfg.prepTimeMax,
+    autoFinalizeOnDelivered: settings.autoFinalizeOnDelivered !== false,
   };
 }
 
 router.get("/admin/payment-settings", requireCompanyAuth, async (req, res) => {
   try {
+    await ensureOrderFlowSchema();
     const settings = await getOrCreatePaymentSettings(req.companyId!);
     res.json(toAdminPaymentSettings(settings));
   } catch (err) {
@@ -114,11 +117,13 @@ router.get("/admin/payment-settings", requireCompanyAuth, async (req, res) => {
 
 router.put("/admin/payment-settings", requireCompanyAuth, async (req, res) => {
   try {
+    await ensureOrderFlowSchema();
     const body = req.body as {
       onlinePaymentEnabled?: boolean; gatewayProvider?: string; cashOnDeliveryEnabled?: boolean;
       mercadoPagoAccessToken?: string; mercadoPagoPublicKey?: string; clearMercadoPagoCredentials?: boolean;
       pixKey?: string; pixMerchantName?: string; pixMerchantCity?: string;
       prepTimeMin?: number; prepTimeMax?: number;
+      autoFinalizeOnDelivered?: boolean;
     };
     const settings = await getOrCreatePaymentSettings(req.companyId!);
     const existingCfg = decodeGatewayConfig(settings.gatewayProvider);
@@ -128,6 +133,9 @@ router.put("/admin/payment-settings", requireCompanyAuth, async (req, res) => {
       cashOnDeliveryEnabled: body.cashOnDeliveryEnabled,
       updatedAt: new Date(),
     };
+    if (typeof body.autoFinalizeOnDelivered === "boolean") {
+      patch.autoFinalizeOnDelivered = body.autoFinalizeOnDelivered;
+    }
     Object.keys(patch).forEach((k) => patch[k] === undefined && delete patch[k]);
 
     if (

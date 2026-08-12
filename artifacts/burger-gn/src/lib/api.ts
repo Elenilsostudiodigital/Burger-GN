@@ -725,8 +725,8 @@ export async function reverseGeocode(lat: number, lng: number): Promise<ReverseG
 }
 
 // ── Orders ────────────────────────────────────────────────────────────────────
-export type OrderStatus = "new" | "preparing" | "delivery" | "done" | "cancelled";
-export type WorkflowStage = "awaiting_payment" | "new" | "accepted" | "preparing" | "ready" | "out" | "done";
+export type OrderStatus = "new" | "preparing" | "delivery" | "done" | "cancelled" | "finalized";
+export type WorkflowStage = "awaiting_payment" | "new" | "accepted" | "preparing" | "ready" | "out" | "done" | "finalized";
 export type OrderType = "delivery" | "pickup" | "local";
 export type PaymentMethod = "pix" | "cash" | "card";
 export type CardType = "credit" | "debit";
@@ -753,6 +753,9 @@ export interface Order {
   rejectReason?: string | null;
   review?: OrderReview | null;
   deliveredAt?: string | null;
+  outAt?: string | null;
+  finalizedAt?: string | null;
+  deliveryPersonName?: string | null;
   history?: StatusHistoryEntry[];
   customerNotifyMessage?: string | null;
   /** Prep timer (kitchen countdown) — set on accept, cleared on ready. */
@@ -761,6 +764,7 @@ export interface Order {
   prepTimeMin?: number | null;
   prepTimeMax?: number | null;
   prepDurationSeconds?: number | null;
+  deliveryDurationSeconds?: number | null;
   prepEarlyFinish?: boolean;
   stampsAwarded?: boolean;
   stampSkipped?: boolean;
@@ -823,13 +827,19 @@ export interface PrepDayStats {
   inProgressCount: number;
 }
 export const getPrepStats = () => api.get("/admin/prep-stats") as Promise<PrepDayStats>;
+export const getFinalizedOrders = (limit = 200) =>
+  api.get(`/admin/orders/finalized?limit=${limit}`) as Promise<Order[]>;
 export const updateOrderStatus = (id: number, status: OrderStatus) => api.patch(`/orders/${id}/status`, { status }) as Promise<Order>;
 export const updateOrderWorkflow = (
   id: number,
   workflow: WorkflowStage | "cancelled",
-  opts?: { rejectReason?: string },
+  opts?: { rejectReason?: string; deliveryPersonName?: string },
 ) =>
-  api.patch(`/orders/${id}/status`, { workflow, rejectReason: opts?.rejectReason }) as Promise<Order>;
+  api.patch(`/orders/${id}/status`, {
+    workflow,
+    rejectReason: opts?.rejectReason,
+    deliveryPersonName: opts?.deliveryPersonName,
+  }) as Promise<Order>;
 export const uploadOrderReceipt = (trackingId: string, receiptDataUrl: string) =>
   api.post(`/orders/track/${trackingId}/receipt`, { receiptDataUrl }) as Promise<Order>;
 export const submitOrderReview = (
@@ -879,6 +889,7 @@ export interface PaymentSettingsAdmin {
   mercadoPagoConfigured: boolean; mercadoPagoAccessTokenPreview: string; mercadoPagoPublicKey: string;
   pixKey?: string; pixMerchantName?: string; pixMerchantCity?: string; pixConfigured?: boolean;
   prepTimeMin?: number; prepTimeMax?: number;
+  autoFinalizeOnDelivered?: boolean;
 }
 export const getPaymentSettings = () => api.get("/payment-settings") as Promise<PaymentSettingsPublic>;
 export const getAdminPaymentSettings = () => api.get("/admin/payment-settings") as Promise<PaymentSettingsAdmin>;
@@ -887,6 +898,7 @@ export const updatePaymentSettings = (d: {
   mercadoPagoAccessToken?: string; mercadoPagoPublicKey?: string; clearMercadoPagoCredentials?: boolean;
   pixKey?: string; pixMerchantName?: string; pixMerchantCity?: string;
   prepTimeMin?: number; prepTimeMax?: number;
+  autoFinalizeOnDelivered?: boolean;
 }) => api.put("/admin/payment-settings", d) as Promise<PaymentSettingsAdmin>;
 
 // ── External Links ────────────────────────────────────────────────────────────
@@ -1061,6 +1073,7 @@ export const STATUS_LABELS: Record<OrderStatus, string> = {
   delivery: "Saiu p/ Entrega",
   done: "Entregue",
   cancelled: "Recusado",
+  finalized: "Finalizado",
 };
 export const WORKFLOW_LABELS: Record<WorkflowStage | "cancelled", string> = {
   awaiting_payment: "Aguardando conferência do pagamento",
@@ -1070,6 +1083,7 @@ export const WORKFLOW_LABELS: Record<WorkflowStage | "cancelled", string> = {
   ready: "Pronto",
   out: "Saiu para Entrega",
   done: "Entregue",
+  finalized: "Finalizado",
   cancelled: "Recusado",
 };
 export const PAYMENT_STATUS_LABELS: Record<PaymentStatus, string> = {

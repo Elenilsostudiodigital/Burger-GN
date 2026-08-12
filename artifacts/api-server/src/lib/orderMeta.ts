@@ -7,7 +7,8 @@ export type WorkflowStage =
   | "preparing"
   | "ready"
   | "out"
-  | "done";
+  | "done"
+  | "finalized";
 export type CardType = "credit" | "debit";
 
 export interface StatusHistoryEntry {
@@ -42,6 +43,12 @@ export interface OrderMeta {
   review?: OrderReview;
   /** When admin marked as delivered (ISO). Used for post-delivery UX timing. */
   deliveredAt?: string;
+  /** When order left for delivery (ISO). */
+  outAt?: string;
+  /** When order was finalized / left the ops board (ISO). */
+  finalizedAt?: string;
+  /** Courier / delivery person display name. */
+  deliveryPersonName?: string;
   /** Optional CRM link to clube_members.id (soft; phone match still works for legacy orders). */
   clientMemberId?: number;
   /** Idempotency: stamp already awarded for this order. */
@@ -82,11 +89,12 @@ export const WORKFLOW_LABELS: Record<WorkflowStage | "cancelled", string> = {
   ready: "Pronto",
   out: "Saiu para Entrega",
   done: "Entregue",
+  finalized: "Finalizado",
   cancelled: "Recusado",
 };
 
-/** Maps UI workflow to existing DB `order_status` enum values. */
-export const WORKFLOW_TO_STATUS: Record<WorkflowStage, "new" | "preparing" | "delivery" | "done"> = {
+/** Maps UI workflow to DB `order_status` enum values. */
+export const WORKFLOW_TO_STATUS: Record<WorkflowStage, "new" | "preparing" | "delivery" | "done" | "finalized"> = {
   awaiting_payment: "new",
   new: "new",
   accepted: "preparing",
@@ -94,6 +102,7 @@ export const WORKFLOW_TO_STATUS: Record<WorkflowStage, "new" | "preparing" | "de
   ready: "preparing",
   out: "delivery",
   done: "done",
+  finalized: "finalized",
 };
 
 const META_RE = /<!--BGN_META:([\s\S]*?):BGN_META-->/;
@@ -127,6 +136,9 @@ export function serializeOrderNotes(publicNotes: string, meta: OrderMeta): strin
   if (meta.rejectReason) cleanMeta.rejectReason = meta.rejectReason;
   if (meta.review) cleanMeta.review = meta.review;
   if (meta.deliveredAt) cleanMeta.deliveredAt = meta.deliveredAt;
+  if (meta.outAt) cleanMeta.outAt = meta.outAt;
+  if (meta.finalizedAt) cleanMeta.finalizedAt = meta.finalizedAt;
+  if (meta.deliveryPersonName) cleanMeta.deliveryPersonName = String(meta.deliveryPersonName).slice(0, 120);
   if (typeof meta.clientMemberId === "number") cleanMeta.clientMemberId = meta.clientMemberId;
   if (meta.stampsAwarded) cleanMeta.stampsAwarded = true;
   if (meta.stampSkipped) cleanMeta.stampSkipped = true;
@@ -162,6 +174,7 @@ export function resolveWorkflow(
   meta: OrderMeta,
 ): WorkflowStage | "cancelled" {
   if (status === "cancelled") return "cancelled";
+  if (status === "finalized") return "finalized";
   // Legacy "accepted" folds into preparing — accept jumps straight to kitchen.
   if (meta.workflow === "accepted") return "preparing";
   if (meta.workflow && meta.workflow in WORKFLOW_TO_STATUS) return meta.workflow;
@@ -186,6 +199,14 @@ export function appendHistory(
   if (last?.stage === stage && last.label === entry.label) return meta;
   history.push(entry);
   return { ...meta, history, workflow: stage === "cancelled" ? meta.workflow : stage };
+}
+
+export function deliveryDurationSeconds(meta: OrderMeta): number | null {
+  if (!meta.outAt || !meta.deliveredAt) return null;
+  const start = Date.parse(meta.outAt);
+  const end = Date.parse(meta.deliveredAt);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return null;
+  return Math.round((end - start) / 1000);
 }
 
 /** Customer WhatsApp / in-app notification copy for each status change. */
@@ -217,6 +238,7 @@ export function buildCustomerNotifyMessage(
     case "out":
       return `Olá ${name}! Seu pedido #${orderNumber} saiu para entrega. — The Burger GN`;
     case "done":
+    case "finalized":
       return `Olá ${name}! Seu pedido #${orderNumber} foi entregue. Bom apetite! — The Burger GN`;
     case "cancelled":
       return `Olá ${name}! Infelizmente seu pedido #${orderNumber} foi recusado.${

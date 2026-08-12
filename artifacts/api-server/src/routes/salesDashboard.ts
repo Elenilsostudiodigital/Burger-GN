@@ -1,6 +1,6 @@
 /**
  * Sales dashboard aggregations — computed on the server from real orders.
- * Revenue / ticket / product ranking use status = "done" only.
+ * Revenue / ticket / product ranking use status = "finalized" only.
  */
 import { Router } from "express";
 import { db, ordersTable, orderItemsTable } from "@workspace/db";
@@ -14,7 +14,7 @@ import {
 } from "../lib/salesPeriod";
 
 const router = Router();
-const DONE = "done" as const;
+const DONE = "finalized" as const;
 
 type PaymentMethod = "pix" | "cash" | "card";
 type OrderType = "delivery" | "pickup" | "local";
@@ -36,9 +36,9 @@ async function periodKpis(companyId: number, from: Date, to: Date) {
   const [counts] = await db
     .select({
       total: sql<number>`COUNT(*)`,
-      done: sql<number>`COUNT(*) FILTER (WHERE ${ordersTable.status} = 'done')`,
+      done: sql<number>`COUNT(*) FILTER (WHERE ${ordersTable.status} = 'finalized')`,
       cancelled: sql<number>`COUNT(*) FILTER (WHERE ${ordersTable.status} = 'cancelled')`,
-      inProgress: sql<number>`COUNT(*) FILTER (WHERE ${ordersTable.status} IN ('new', 'preparing', 'delivery'))`,
+      inProgress: sql<number>`COUNT(*) FILTER (WHERE ${ordersTable.status} IN ('new', 'preparing', 'delivery', 'done'))`,
     })
     .from(ordersTable)
     .where(periodFilter);
@@ -240,9 +240,9 @@ router.get("/admin/sales-dashboard", requireCompanyAuth, async (req, res) => {
     const typeRows = await db
       .select({
         orderType: ordersTable.orderType,
-        revenue: sql<string>`COALESCE(SUM(${ordersTable.total}) FILTER (WHERE ${ordersTable.status} = 'done'), 0)`,
+        revenue: sql<string>`COALESCE(SUM(${ordersTable.total}) FILTER (WHERE ${ordersTable.status} = 'finalized'), 0)`,
         count: sql<number>`COUNT(*)`,
-        doneCount: sql<number>`COUNT(*) FILTER (WHERE ${ordersTable.status} = 'done')`,
+        doneCount: sql<number>`COUNT(*) FILTER (WHERE ${ordersTable.status} = 'finalized')`,
       })
       .from(ordersTable)
       .where(periodFilter)

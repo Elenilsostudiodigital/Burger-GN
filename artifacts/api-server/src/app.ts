@@ -10,6 +10,7 @@ import { ensureCompanySchema } from "./lib/ensureCompanySchema";
 import { ensureClubeSchema } from "./lib/ensureClubeSchema";
 import { ensureDeliveryStreetsSchema } from "./lib/ensureDeliveryStreetsSchema";
 import { ensureDeliveryAreasSchema } from "./lib/ensureDeliveryAreasSchema";
+import { ensureOrderFlowSchema } from "./lib/ensureOrderFlowSchema";
 
 const app: Express = express();
 
@@ -87,6 +88,27 @@ app.use("/api", async (req, res, next) => {
   } catch (err) {
     logger.error({ err }, "Failed to ensure delivery areas schema");
     res.status(500).json({ error: "Falha ao preparar o banco de áreas de entrega." });
+  }
+});
+
+/** Ensures finalized status + auto-finalize setting before order/finance routes. */
+app.use("/api", async (req, res, next) => {
+  const p = req.path || "";
+  const needsFlow =
+    p === "/orders" ||
+    p.startsWith("/orders/") ||
+    p.startsWith("/admin/orders") ||
+    p.startsWith("/admin/financial") ||
+    p.startsWith("/admin/sales") ||
+    p.startsWith("/admin/payment-settings") ||
+    p === "/payment-settings";
+  if (!needsFlow) return next();
+  try {
+    await ensureOrderFlowSchema();
+    next();
+  } catch (err) {
+    logger.error({ err }, "Failed to ensure order flow schema");
+    res.status(500).json({ error: "Falha ao preparar fluxo de pedidos." });
   }
 });
 
