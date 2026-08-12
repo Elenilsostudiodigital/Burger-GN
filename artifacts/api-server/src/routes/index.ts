@@ -16,6 +16,7 @@ import financialRouter from "./financial";
 import salesDashboardRouter from "./salesDashboard";
 import clubeRouter from "./clube";
 import clientesRouter from "./clientes";
+import storeRouter from "./store";
 
 const router: IRouter = Router();
 
@@ -29,6 +30,7 @@ router.use(deliveryStreetsRouter);
 router.use(deliveryAreasRouter);
 router.use(kmDeliveryRouter);
 router.use(settingsRouter);
+router.use(storeRouter);
 router.use(ordersRouter);
 router.use(importRouter);
 router.use(paymentsRouter);

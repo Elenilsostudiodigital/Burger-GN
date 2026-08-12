@@ -9,4 +9,5 @@ export * from "./delivery_streets";
 export * from "./delivery_areas";
 export * from "./km_delivery";
 export * from "./settings";
+export * from "./store_settings";
 export * from "./clube";

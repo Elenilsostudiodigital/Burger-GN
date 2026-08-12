@@ -11,11 +11,14 @@ import {
   LayoutDashboard, UtensilsCrossed, Tag, MapPin, Navigation, Settings,
   LogOut, Plus, Pencil, Trash2, Check, X, ToggleLeft, ToggleRight,
   Loader2, CreditCard, Link as LinkIcon, ShieldAlert, ShieldCheck, Upload,
-  MessageCircle, TrendingUp, Crown, Star, Clock,
+  MessageCircle, TrendingUp, Crown, Star, Clock, Store,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { EstablishmentTab } from './EstablishmentTab';
+import { StoreBrandMark } from '../../components/StoreBrand';
+import { useStore } from '../../context/StoreContext';
 
 function AdminNav({ active }: { active: string }) {
   const items = [
@@ -47,7 +50,7 @@ function AdminNav({ active }: { active: string }) {
   );
 }
 
-type Tab = 'pagamento' | 'preparo' | 'links' | 'whatsapp' | 'ruas';
+type Tab = 'estabelecimento' | 'pagamento' | 'preparo' | 'links' | 'whatsapp' | 'ruas';
 
 function PrepTimeTab() {
   const [loading, setLoading] = useState(true);
@@ -507,8 +510,9 @@ function WhatsappTab() {
 
 export default function SettingsHub() {
   const { logout } = useAdmin();
+  const { store, refresh } = useStore();
   const [, setLocation] = useLocation();
-  const [tab, setTab] = useState<Tab>('pagamento');
+  const [tab, setTab] = useState<Tab>('estabelecimento');
 
   const handleLogout = async () => { await logout(); setLocation('/'); };
 
@@ -517,10 +521,10 @@ export default function SettingsHub() {
       <header className="sticky top-0 z-40 bg-zinc-950/95 backdrop-blur border-b border-zinc-800 px-4 py-3">
         <div className="max-w-2xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <Settings size={20} className="text-amber-500" />
+            <StoreBrandMark size={36} />
             <div>
               <h1 className="text-white font-black uppercase text-base leading-none">Configurações</h1>
-              <p className="text-zinc-600 text-xs">Pagamento, preparo e links</p>
+              <p className="text-zinc-600 text-xs">{store.storeName || 'Estabelecimento, pagamento e links'}</p>
             </div>
           </div>
           <button onClick={handleLogout} className="p-2 text-zinc-400 hover:text-red-400 transition-colors">
@@ -531,6 +535,10 @@ export default function SettingsHub() {
 
       <main className="max-w-2xl mx-auto px-4 py-5 space-y-5">
         <div className="flex gap-2 overflow-x-auto no-scrollbar">
+          <button onClick={() => setTab('estabelecimento')}
+            className={`shrink-0 flex-1 min-w-[7.5rem] h-11 rounded-xl font-bold text-sm uppercase tracking-wide transition-all flex items-center justify-center gap-2 ${tab === 'estabelecimento' ? 'bg-amber-500 text-zinc-950' : 'bg-zinc-900 text-zinc-400 border border-zinc-800'}`}>
+            <Store size={16} /> Estabelecimento
+          </button>
           <button onClick={() => setTab('pagamento')}
             className={`shrink-0 flex-1 min-w-[7rem] h-11 rounded-xl font-bold text-sm uppercase tracking-wide transition-all flex items-center justify-center gap-2 ${tab === 'pagamento' ? 'bg-amber-500 text-zinc-950' : 'bg-zinc-900 text-zinc-400 border border-zinc-800'}`}>
             <CreditCard size={16} /> Pagamento
@@ -553,7 +561,9 @@ export default function SettingsHub() {
           </button>
         </div>
 
-        {tab === 'pagamento' ? <PaymentTab /> : tab === 'preparo' ? <PrepTimeTab /> : tab === 'links' ? <LinksTab /> : tab === 'whatsapp' ? <WhatsappTab /> : (
+        {tab === 'estabelecimento' ? (
+          <EstablishmentTab onSaved={() => { void refresh(); }} />
+        ) : tab === 'pagamento' ? <PaymentTab /> : tab === 'preparo' ? <PrepTimeTab /> : tab === 'links' ? <LinksTab /> : tab === 'whatsapp' ? <WhatsappTab /> : (
           <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-5 space-y-3">
             <h3 className="text-white font-black uppercase text-sm">Ruas de Entrega</h3>
             <p className="text-zinc-400 text-sm leading-relaxed">

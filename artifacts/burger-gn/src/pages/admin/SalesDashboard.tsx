@@ -8,6 +8,8 @@ import {
   PAYMENT_METHOD_LABELS, ORDER_TYPE_LABELS,
 } from '../../lib/api';
 import { useAdmin } from '../../context/AdminContext';
+import { useStore } from '../../context/StoreContext';
+import { StoreBrandMark } from '../../components/StoreBrand';
 import { AdminBottomNav } from '../../components/AdminBottomNav';
 import {
   LogOut, Loader2, TrendingUp, TrendingDown, Minus,
@@ -113,6 +115,7 @@ function formatChartLabel(label: string, granularity: string): string {
 
 export default function SalesDashboard() {
   const { logout } = useAdmin();
+  const { store } = useStore();
   const [, setLocation] = useLocation();
   const [preset, setPreset] = useState<SalesPeriodPreset>('today');
   const [customFrom, setCustomFrom] = useState('');
@@ -172,9 +175,12 @@ export default function SalesDashboard() {
     <div className="min-h-screen bg-[#0a0a0a] pb-24">
       <header className="sticky top-0 z-40 bg-zinc-950/95 backdrop-blur border-b border-zinc-800 px-4 py-3">
         <div className="max-w-3xl mx-auto flex items-center justify-between gap-3">
-          <div>
-            <h1 className="text-white font-black uppercase text-base leading-none">Dashboard</h1>
-            <p className="text-zinc-500 text-xs mt-0.5">Vendas · The Burger GN</p>
+          <div className="flex items-center gap-3 min-w-0">
+            <StoreBrandMark size={36} />
+            <div className="min-w-0">
+              <h1 className="text-white font-black uppercase text-base leading-none">Dashboard</h1>
+              <p className="text-zinc-500 text-xs mt-0.5 truncate">Vendas · {store.storeName || 'The Burger GN'}</p>
+            </div>
           </div>
           <div className="flex items-center gap-1">
             <button

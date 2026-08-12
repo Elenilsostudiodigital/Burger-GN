@@ -5,12 +5,15 @@ import { useAdmin } from '../../context/AdminContext';
 import { Lock, Eye, EyeOff, Loader2, Mail } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { StoreBrandMark } from '../../components/StoreBrand';
+import { useStore } from '../../context/StoreContext';
 
 const DEFAULT_EMAIL = 'admin@burgergn.com.br';
 
 export default function AdminLogin() {
   const [, setLocation] = useLocation();
   const { login } = useAdmin();
+  const { store } = useStore();
   const [email, setEmail] = useState(DEFAULT_EMAIL);
   const [password, setPassword] = useState('');
   const [showPass, setShowPass] = useState(false);
@@ -51,10 +54,12 @@ export default function AdminLogin() {
         className="w-full max-w-sm"
       >
         <div className="text-center mb-10">
-          <div className="w-20 h-20 border-2 border-amber-500 rounded-full flex items-center justify-center mx-auto mb-4">
-            <span className="text-amber-500 font-black text-2xl">GN</span>
+          <div className="mx-auto mb-4 flex justify-center">
+            <StoreBrandMark size={80} />
           </div>
-          <h1 className="text-white font-black text-3xl uppercase tracking-tighter">The Burger GN</h1>
+          <h1 className="text-white font-black text-3xl uppercase tracking-tighter">
+            {store.storeName || 'The Burger GN'}
+          </h1>
           <p className="text-zinc-500 text-sm mt-1">Painel Administrativo</p>
         </div>
 

@@ -6,6 +6,8 @@ import {
   useDraggable, useDroppable, closestCenter, type DragEndEvent, type DragStartEvent,
 } from '@dnd-kit/core';
 import { useAdmin } from '../../context/AdminContext';
+import { useStore } from '../../context/StoreContext';
+import { StoreBrandMark } from '../../components/StoreBrand';
 import {
   getOrders, updateOrderWorkflow, updateOrderPaymentStatus, getPrepStats,
   openCustomerWhatsapp, buildCustomerNotifyMessage, WHATSAPP_EXTERNAL_ENABLED,
@@ -536,6 +538,7 @@ function Column({ col, orders, newOrderIds, onAccept, onRefuse, onAdvance, onBac
 export default function AdminDashboard() {
   const [, setLocation] = useLocation();
   const { logout } = useAdmin();
+  const { store } = useStore();
   const [orders, setOrders] = useState<Order[]>([]);
   const [newOrderIds, setNewOrderIds] = useState<Set<number>>(new Set());
   const [loading, setLoading] = useState(true);
@@ -836,12 +839,10 @@ export default function AdminDashboard() {
       <header className="sticky top-0 z-40 bg-zinc-950/95 backdrop-blur border-b border-zinc-800 px-4 py-3">
         <div className="max-w-[1800px] mx-auto flex items-center justify-between gap-3">
           <div className="flex items-center gap-3 min-w-0">
-            <div className="w-9 h-9 border-2 border-amber-500 rounded-full flex items-center justify-center shrink-0">
-              <span className="text-amber-500 font-black text-xs">GN</span>
-            </div>
+            <StoreBrandMark size={36} />
             <div className="min-w-0">
               <h1 className="text-white font-black uppercase text-base leading-none truncate">Painel da Atendente</h1>
-              <p className="text-zinc-600 text-xs">The Burger GN</p>
+              <p className="text-zinc-600 text-xs truncate">{store.storeName || 'The Burger GN'}</p>
             </div>
           </div>
 

@@ -10,6 +10,7 @@ import { ensureCompanySchema } from "./lib/ensureCompanySchema";
 import { ensureClubeSchema } from "./lib/ensureClubeSchema";
 import { ensureDeliveryStreetsSchema } from "./lib/ensureDeliveryStreetsSchema";
 import { ensureDeliveryAreasSchema } from "./lib/ensureDeliveryAreasSchema";
+import { ensureStoreSettingsSchema } from "./lib/ensureStoreSettingsSchema";
 
 const app: Express = express();
 
@@ -90,6 +91,24 @@ app.use("/api", async (req, res, next) => {
   }
 });
 
+/** Ensures establishment/store settings before store + order routes. */
+app.use("/api", async (req, res, next) => {
+  const p = req.path || "";
+  const needsStore =
+    p.startsWith("/store-settings") ||
+    p.startsWith("/admin/store-settings") ||
+    p === "/orders" ||
+    (p.startsWith("/orders") && req.method === "POST");
+  if (!needsStore) return next();
+  try {
+    await ensureStoreSettingsSchema();
+    next();
+  } catch (err) {
+    logger.error({ err }, "Failed to ensure store settings schema");
+    res.status(500).json({ error: "Falha ao preparar configurações do estabelecimento." });
+  }
+});
+
 app.use(
   pinoHttp({
     logger,
@@ -111,7 +130,7 @@ app.use(
 );
 
 app.use(cors({ origin: true, credentials: true }));
-app.use(express.json({ limit: "2mb" }));
+app.use(express.json({ limit: "4mb" }));
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser(process.env["SESSION_SECRET"] || "fallback-secret"));
 

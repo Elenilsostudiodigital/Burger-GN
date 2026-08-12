@@ -24,6 +24,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useStore } from '../context/StoreContext';
 
 type OrderType = 'delivery' | 'pickup' | 'local';
 type PaymentMethod = 'pix' | 'cash' | 'card';
@@ -61,6 +62,7 @@ function formatPhone(v: string | null | undefined) {
 export default function Checkout() {
   const [, setLocation] = useLocation();
   const { cartItems, subtotal, addItem } = useCart();
+  const { store, refresh: refreshStore } = useStore();
 
   const [step, setStep] = useState<CheckoutStep>('fulfillment');
   const [orderType, setOrderType] = useState<OrderType | null>(null);
@@ -577,6 +579,16 @@ export default function Checkout() {
   const onConfirmOrder = async () => {
     if (cartItems.length === 0) { setLocation('/cardapio'); return; }
     if (!orderType) { setStep('fulfillment'); return; }
+
+    const live = await refreshStore();
+    if (!live.isOpen) {
+      setSubmitError(
+        live.closedReason === 'manual'
+          ? 'Estabelecimento fechado no momento.'
+          : (live.blockOrdersMessage || live.statusMessage || 'Estabelecimento fechado no momento.'),
+      );
+      return;
+    }
 
     if (orderType !== 'local') {
       const phoneDigits = form.telefone.replace(/\D/g, '');
@@ -1169,6 +1181,14 @@ export default function Checkout() {
                 </p>
               </div>
 
+              {!store.isOpen && (
+                <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2.5 text-sm text-red-300">
+                  {store.closedReason === 'manual'
+                    ? 'Estabelecimento fechado no momento.'
+                    : (store.blockOrdersMessage || store.statusMessage)}
+                </div>
+              )}
+
               {isDelivery && feeBanner}
 
               <div className="grid grid-cols-1 gap-2">
@@ -1375,12 +1395,14 @@ export default function Checkout() {
             <Button
               type="button"
               onClick={onConfirmOrder}
-              disabled={submitting || !hasValidDeliveryFee || feeLoading}
+              disabled={submitting || !hasValidDeliveryFee || feeLoading || !store.isOpen}
               size="lg"
               className="w-full min-h-[52px] font-bold tracking-wider rounded-xl bg-amber-500 hover:bg-amber-400 text-zinc-950 text-base disabled:opacity-50 disabled:pointer-events-none">
               {submitting
                 ? <><Loader2 size={20} className="animate-spin mr-2" /> Enviando...</>
-                : 'CONFIRMAR PEDIDO'}
+                : !store.isOpen
+                  ? 'ESTABELECIMENTO FECHADO'
+                  : 'CONFIRMAR PEDIDO'}
             </Button>
           </div>
         </div>

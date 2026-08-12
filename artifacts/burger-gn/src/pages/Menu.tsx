@@ -11,6 +11,8 @@ import { ProductRowCard } from '../components/ProductRowCard';
 import { ClubeHomeCard } from '../components/ClubeHomeCard';
 import { ShoppingCart, ExternalLink as ExternalLinkIcon, Search, X } from 'lucide-react';
 import { Link } from 'wouter';
+import { useStore } from '../context/StoreContext';
+import { StoreBrandMark, StoreOpenBadge } from '../components/StoreBrand';
 
 export default function Menu() {
   const [categories, setCategories] = useState<Category[]>([]);
@@ -21,6 +23,7 @@ export default function Menu() {
   const [loading, setLoading] = useState(true);
   const [detailProduct, setDetailProduct] = useState<Product | null>(null);
   const { cartItems, addItem, updateQuantity, totalItems } = useCart();
+  const { store } = useStore();
 
   useEffect(() => {
     Promise.all([getCategories(), getProducts()])
@@ -76,14 +79,17 @@ export default function Menu() {
   return (
     <PageTransition className="bg-[#0a0a0a]">
       <header className="sticky top-0 z-40 bg-zinc-950 border-b border-zinc-800 px-6 py-4">
-        <div className="max-w-md mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 border-2 border-amber-500 rounded-full flex items-center justify-center">
-              <span className="text-amber-500 font-black text-sm">GN</span>
+        <div className="max-w-md mx-auto flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <StoreBrandMark size={40} />
+            <div className="min-w-0">
+              <h1 className="text-xl font-black text-white uppercase tracking-tight truncate">
+                {store.storeName || 'The Burger GN'}
+              </h1>
+              <StoreOpenBadge className="mt-0.5" />
             </div>
-            <h1 className="text-xl font-black text-white uppercase tracking-tight">The Burger GN</h1>
           </div>
-          <Link href="/carrinho" className="relative p-2 text-zinc-300 hover:text-amber-500 transition-colors">
+          <Link href="/carrinho" className="relative p-2 text-zinc-300 hover:text-amber-500 transition-colors shrink-0">
             <ShoppingCart size={24} />
             {totalItems > 0 && (
               <motion.div
@@ -97,6 +103,16 @@ export default function Menu() {
           </Link>
         </div>
       </header>
+
+      {!store.isOpen && (
+        <div className="max-w-md mx-auto px-4 pt-3">
+          <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2.5 text-sm text-red-300">
+            {store.closedReason === 'manual'
+              ? 'Estabelecimento fechado no momento.'
+              : store.statusMessage}
+          </div>
+        </div>
+      )}
 
       <div className="max-w-md mx-auto px-4 pt-3">
         <ClubeHomeCard />
