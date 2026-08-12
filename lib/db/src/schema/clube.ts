@@ -90,10 +90,19 @@ export const clubeMembersTable = pgTable(
     email: text("email").notNull().default(""),
     phone: text("phone").notNull().default(""),
     birthDate: date("birth_date"),
+    /** Selos de fidelidade (programa de carimbos). */
     points: integer("points").notNull().default(0),
     cashbackBalance: numeric("cashback_balance", { precision: 10, scale: 2 })
       .notNull()
       .default("0"),
+    /** Pontos de clube (distintos de selos; preenchidos em importações). */
+    clubPoints: integer("club_points").notNull().default(0),
+    /** Origem da última importação CSV (ex.: anota_ai, excel, outro). */
+    importSource: text("import_source"),
+    /** Primeira importação CSV deste cliente. */
+    importedAt: timestamp("imported_at"),
+    /** Última importação CSV deste cliente. */
+    lastImport: timestamp("last_import"),
     tier: clubeMemberTierEnum("tier").notNull().default("bronze"),
     active: boolean("active").notNull().default(true),
     notes: text("notes").notNull().default(""),
@@ -101,6 +110,30 @@ export const clubeMembersTable = pgTable(
     createdAt: timestamp("created_at").notNull().defaultNow(),
   },
 );
+
+/**
+ * Log de importações CSV de clientes.
+ * Preparado para reuso futuro (export / outros sistemas).
+ */
+export const clientImportLogsTable = pgTable("client_import_logs", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id")
+    .notNull()
+    .references(() => companiesTable.id, { onDelete: "cascade" }),
+  userId: integer("user_id"),
+  userEmail: text("user_email").notNull().default(""),
+  userName: text("user_name").notNull().default(""),
+  fileName: text("file_name").notNull().default(""),
+  source: text("source").notNull().default("outro"),
+  totalRows: integer("total_rows").notNull().default(0),
+  importedCount: integer("imported_count").notNull().default(0),
+  updatedCount: integer("updated_count").notNull().default(0),
+  skippedCount: integer("skipped_count").notNull().default(0),
+  errorCount: integer("error_count").notNull().default(0),
+  errorsJson: text("errors_json").notNull().default("[]"),
+  optionsJson: text("options_json").notNull().default("{}"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
 
 /** Recompensas do programa de fidelidade (troca de pontos). */
 export const clubeLoyaltyRewardsTable = pgTable("clube_loyalty_rewards", {
@@ -189,3 +222,4 @@ export type ClubeLoyaltyReward = typeof clubeLoyaltyRewardsTable.$inferSelect;
 export type ClubeExclusiveCoupon = typeof clubeExclusiveCouponsTable.$inferSelect;
 export type ClubeBirthdayBenefit = typeof clubeBirthdayBenefitsTable.$inferSelect;
 export type ClubeEarlyPromotion = typeof clubeEarlyPromotionsTable.$inferSelect;
+export type ClientImportLog = typeof clientImportLogsTable.$inferSelect;

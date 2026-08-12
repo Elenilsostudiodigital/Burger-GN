@@ -1739,3 +1739,89 @@ export function daysSinceIso(iso: string | null | undefined, now = Date.now()): 
   return Math.max(0, Math.floor((now - t) / (1000 * 60 * 60 * 24)));
 }
 
+// ── CSV client import ────────────────────────────────────────────────────────
+
+export type CsvImportSourceApi = "anota_ai" | "excel" | "outro";
+
+export interface CsvImportOptionsApi {
+  updateExisting: boolean;
+  createMissing: boolean;
+  importCashback: boolean;
+  importStamps: boolean;
+  importBirthDate: boolean;
+  importClubPoints: boolean;
+  skipWithoutPhone: boolean;
+  skipDuplicates: boolean;
+}
+
+export interface CsvImportRowPayload {
+  line: number;
+  name?: string | null;
+  phone?: string | null;
+  celular?: string | null;
+  email?: string | null;
+  cashback?: string | number | null;
+  stamps?: string | number | null;
+  clubPoints?: string | number | null;
+  birthDate?: string | null;
+}
+
+export interface CsvImportErrorApi {
+  line: number;
+  phone?: string;
+  message: string;
+}
+
+export interface CsvImportBatchResponse {
+  imported: number;
+  updated: number;
+  skipped: number;
+  errors: CsvImportErrorApi[];
+  processed: number;
+  seenPhones: string[];
+}
+
+export interface ClientImportLogRow {
+  id: number;
+  fileName: string;
+  source: string;
+  totalRows: number;
+  importedCount: number;
+  updatedCount: number;
+  skippedCount: number;
+  errorCount: number;
+  userEmail: string;
+  userName: string;
+  createdAt: string;
+  errors?: CsvImportErrorApi[];
+}
+
+export const importClientsCsvBatch = (body: {
+  source: CsvImportSourceApi;
+  rows: CsvImportRowPayload[];
+  options: CsvImportOptionsApi;
+  seenPhones?: string[];
+}) =>
+  api.post("/admin/clientes/import/csv/batch", body) as Promise<CsvImportBatchResponse>;
+
+export const finalizeClientsCsvImport = (body: {
+  fileName: string;
+  source: CsvImportSourceApi;
+  totalRows: number;
+  imported: number;
+  updated: number;
+  skipped: number;
+  errors: CsvImportErrorApi[];
+  options: CsvImportOptionsApi;
+}) =>
+  api.post("/admin/clientes/import/csv/finalize", body) as Promise<{
+    ok: boolean;
+    log: ClientImportLogRow;
+  }>;
+
+export const getClientImportLogs = (limit = 20) =>
+  api.get(`/admin/clientes/import/logs?limit=${limit}`) as Promise<{
+    count: number;
+    logs: ClientImportLogRow[];
+  }>;
+

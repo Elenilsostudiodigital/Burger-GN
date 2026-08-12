@@ -32,6 +32,7 @@ import AdminClientsList from "./pages/admin/ClientsList";
 import AdminClientsImport from "./pages/admin/ClientsImport";
 import AdminClientDetail from "./pages/admin/ClientDetail";
 import AdminClientsRecovery from "./pages/admin/ClientsRecovery";
+import AdminClientsSettings from "./pages/admin/ClientsSettings";
 import AdminNovasRuas from "./pages/admin/NovasRuas";
 import AdminRuasEntrega from "./pages/admin/RuasEntrega";
 
@@ -102,6 +103,7 @@ function Router() {
         <Route path="/admin/novas-ruas" component={AdminNovasRuasRoute} />
         <Route path="/admin/ruas-entrega" component={AdminRuasEntregaRoute} />
         <Route path="/admin/entrega-km" component={() => <ProtectedAdminRoute component={AdminKmDelivery} />} />
+        <Route path="/admin/config/clientes" component={() => <ProtectedAdminRoute component={AdminClientsSettings} />} />
         <Route path="/admin/config" component={() => <ProtectedAdminRoute component={AdminSettingsHub} />} />
         <Route path="/admin/importar" component={() => <ProtectedAdminRoute component={AdminImportMenu} />} />
         {/* Home: sales dashboard — keep after more specific /admin/* routes */}

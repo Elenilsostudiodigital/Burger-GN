@@ -11,7 +11,7 @@ import {
   LayoutDashboard, UtensilsCrossed, Tag, MapPin, Navigation, Settings,
   LogOut, Plus, Pencil, Trash2, Check, X, ToggleLeft, ToggleRight,
   Loader2, CreditCard, Link as LinkIcon, ShieldAlert, ShieldCheck, Upload,
-  MessageCircle, TrendingUp, Crown, Star, Clock,
+  MessageCircle, TrendingUp, Crown, Star, Clock, Users,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -47,7 +47,7 @@ function AdminNav({ active }: { active: string }) {
   );
 }
 
-type Tab = 'pagamento' | 'preparo' | 'links' | 'whatsapp' | 'ruas';
+type Tab = 'pagamento' | 'preparo' | 'links' | 'whatsapp' | 'ruas' | 'clientes';
 
 function PrepTimeTab() {
   const [loading, setLoading] = useState(true);
@@ -547,13 +547,34 @@ export default function SettingsHub() {
             className={`shrink-0 flex-1 min-w-[7rem] h-11 rounded-xl font-bold text-sm uppercase tracking-wide transition-all flex items-center justify-center gap-2 ${tab === 'whatsapp' ? 'bg-amber-500 text-zinc-950' : 'bg-zinc-900 text-zinc-400 border border-zinc-800'}`}>
             <MessageCircle size={16} /> WhatsApp
           </button>
+          <button onClick={() => setTab('clientes')}
+            className={`shrink-0 flex-1 min-w-[7rem] h-11 rounded-xl font-bold text-sm uppercase tracking-wide transition-all flex items-center justify-center gap-2 ${tab === 'clientes' ? 'bg-amber-500 text-zinc-950' : 'bg-zinc-900 text-zinc-400 border border-zinc-800'}`}>
+            <Users size={16} /> Clientes
+          </button>
           <button onClick={() => setTab('ruas')}
             className={`shrink-0 flex-1 min-w-[7rem] h-11 rounded-xl font-bold text-sm uppercase tracking-wide transition-all flex items-center justify-center gap-2 ${tab === 'ruas' ? 'bg-amber-500 text-zinc-950' : 'bg-zinc-900 text-zinc-400 border border-zinc-800'}`}>
             <MapPin size={16} /> Ruas de Entrega
           </button>
         </div>
 
-        {tab === 'pagamento' ? <PaymentTab /> : tab === 'preparo' ? <PrepTimeTab /> : tab === 'links' ? <LinksTab /> : tab === 'whatsapp' ? <WhatsappTab /> : (
+        {tab === 'pagamento' ? <PaymentTab /> : tab === 'preparo' ? <PrepTimeTab /> : tab === 'links' ? <LinksTab /> : tab === 'whatsapp' ? <WhatsappTab /> : tab === 'clientes' ? (
+          <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-5 space-y-3">
+            <h3 className="text-white font-black uppercase text-sm">Clientes</h3>
+            <p className="text-zinc-400 text-sm leading-relaxed">
+              Gerencie a base de clientes e importe CSV do Anota AI, Excel ou outros sistemas.
+            </p>
+            <Link href="/admin/config/clientes">
+              <Button className="w-full h-11 rounded-xl font-bold bg-amber-500 text-zinc-950 hover:bg-amber-400">
+                Abrir Clientes e Importar CSV
+              </Button>
+            </Link>
+            <Link href="/admin/clientes">
+              <Button variant="outline" className="w-full h-11 rounded-xl font-bold border-zinc-700">
+                Ir para lista de clientes
+              </Button>
+            </Link>
+          </div>
+        ) : (
           <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-5 space-y-3">
             <h3 className="text-white font-black uppercase text-sm">Ruas de Entrega</h3>
             <p className="text-zinc-400 text-sm leading-relaxed">
