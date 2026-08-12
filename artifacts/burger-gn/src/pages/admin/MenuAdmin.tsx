@@ -1,5 +1,4 @@
 import React, { useEffect, useState } from 'react';
-import { Link } from 'wouter';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   getAdminProducts, getAdminCategories, createProduct, updateProduct, deleteProduct,
@@ -9,14 +8,14 @@ import {
 import { useAdmin } from '../../context/AdminContext';
 import { useLocation } from 'wouter';
 import {
-  LayoutDashboard, UtensilsCrossed, Plus, Pencil, Trash2, Check, X,
-  ToggleLeft, ToggleRight, Loader2, Tag, MapPin, LogOut, Navigation, Settings, Upload,
-  TrendingUp, Crown,
+  UtensilsCrossed, Plus, Pencil, Trash2, Check, X,
+  ToggleLeft, ToggleRight, Loader2, LogOut,
 } from 'lucide-react';
 import type { Addon } from '../../lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { AdminBottomNav } from '../../components/AdminBottomNav';
 
 type Tab = 'products' | 'categories';
 
@@ -409,65 +408,7 @@ export default function MenuAdmin() {
       </main>
 
       {/* Bottom nav */}
-      <nav className="fixed bottom-0 left-0 right-0 bg-zinc-950/95 backdrop-blur border-t border-zinc-800 z-40">
-        <div className="max-w-2xl mx-auto flex">
-          <Link href="/admin/pedidos" className="flex-1">
-            <div className="flex flex-col items-center gap-0.5 py-2.5 text-zinc-500 hover:text-white transition-colors">
-              <LayoutDashboard size={18} />
-              <span className="text-[9px] font-bold uppercase">Pedidos</span>
-            </div>
-          </Link>
-          <Link href="/admin/cardapio" className="flex-1">
-            <div className="flex flex-col items-center gap-0.5 py-2.5 text-amber-500">
-              <UtensilsCrossed size={18} />
-              <span className="text-[9px] font-bold uppercase">Cardápio</span>
-            </div>
-          </Link>
-          <Link href="/admin/financeiro" className="flex-1">
-            <div className="flex flex-col items-center gap-0.5 py-2.5 text-zinc-500 hover:text-white transition-colors">
-              <TrendingUp size={18} />
-              <span className="text-[9px] font-bold uppercase">Financeiro</span>
-            </div>
-          </Link>
-
-          <Link href="/admin/cupons" className="flex-1">
-            <div className="flex flex-col items-center gap-0.5 py-2.5 text-zinc-500 hover:text-white transition-colors">
-              <Tag size={18} />
-              <span className="text-[9px] font-bold uppercase">Cupons</span>
-            </div>
-          </Link>
-          <Link href="/admin/clube" className="flex-1">
-            <div className="flex flex-col items-center gap-0.5 py-2.5 text-zinc-500 hover:text-white transition-colors">
-              <Crown size={18} />
-              <span className="text-[9px] font-bold uppercase">Clube Burger</span>
-            </div>
-          </Link>
-          <Link href="/admin/taxas" className="flex-1">
-            <div className="flex flex-col items-center gap-0.5 py-2.5 text-zinc-500 hover:text-white transition-colors">
-              <MapPin size={18} />
-              <span className="text-[9px] font-bold uppercase">Bairros</span>
-            </div>
-          </Link>
-          <Link href="/admin/entrega-km" className="flex-1">
-            <div className="flex flex-col items-center gap-0.5 py-2.5 text-zinc-500 hover:text-white transition-colors">
-              <Navigation size={18} />
-              <span className="text-[9px] font-bold uppercase">Por KM</span>
-            </div>
-          </Link>
-          <Link href="/admin/config" className="flex-1">
-            <div className="flex flex-col items-center gap-0.5 py-2.5 text-zinc-500 hover:text-white transition-colors">
-              <Settings size={18} />
-              <span className="text-[9px] font-bold uppercase">Config</span>
-            </div>
-          </Link>
-          <Link href="/admin/importar" className="flex-1">
-            <div className="flex flex-col items-center gap-0.5 py-2.5 text-zinc-500 hover:text-white transition-colors">
-              <Upload size={18} />
-              <span className="text-[9px] font-bold uppercase">Importar</span>
-            </div>
-          </Link>
-        </div>
-      </nav>
+      <AdminBottomNav active="/admin/cardapio" />
     </div>
   );
 }

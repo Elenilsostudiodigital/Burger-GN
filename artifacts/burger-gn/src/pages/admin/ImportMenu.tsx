@@ -3,11 +3,12 @@ import { Link } from 'wouter';
 import { useLocation } from 'wouter';
 import * as XLSX from 'xlsx';
 import {
-  LayoutDashboard, UtensilsCrossed, Tag, MapPin, Navigation, Settings, LogOut,
-  Upload, Link as LinkIcon, FileText, Loader2, Check, X, AlertTriangle, Download, TrendingUp, Crown,
+  UtensilsCrossed, LogOut,
+  Upload, Link as LinkIcon, FileText, Loader2, Check, X, AlertTriangle, Download,
 } from 'lucide-react';
 import { useAdmin } from '../../context/AdminContext';
 import { Button } from '@/components/ui/button';
+import { AdminBottomNav } from '../../components/AdminBottomNav';
 import {
   parseImportText, fetchImportLink, commitImport,
   ImportDraft, ImportDraftProduct, ImportCommitResult,
@@ -283,65 +284,7 @@ export default function ImportMenu() {
         )}
       </main>
 
-      <nav className="fixed bottom-0 left-0 right-0 bg-zinc-950/95 backdrop-blur border-t border-zinc-800 z-40">
-        <div className="max-w-2xl mx-auto flex overflow-x-auto no-scrollbar">
-          <Link href="/admin/pedidos" className="flex-1 min-w-[14%]">
-            <div className="flex flex-col items-center gap-0.5 py-2.5 text-zinc-500 hover:text-white transition-colors">
-              <LayoutDashboard size={18} />
-              <span className="text-[9px] font-bold uppercase">Pedidos</span>
-            </div>
-          </Link>
-          <Link href="/admin/cardapio" className="flex-1 min-w-[14%]">
-            <div className="flex flex-col items-center gap-0.5 py-2.5 text-zinc-500 hover:text-white transition-colors">
-              <UtensilsCrossed size={18} />
-              <span className="text-[9px] font-bold uppercase">Cardápio</span>
-            </div>
-          </Link>
-          <Link href="/admin/financeiro" className="flex-1 min-w-[14%]">
-            <div className="flex flex-col items-center gap-0.5 py-2.5 text-zinc-500 hover:text-white transition-colors">
-              <TrendingUp size={18} />
-              <span className="text-[9px] font-bold uppercase">Financeiro</span>
-            </div>
-          </Link>
-
-          <Link href="/admin/cupons" className="flex-1 min-w-[14%]">
-            <div className="flex flex-col items-center gap-0.5 py-2.5 text-zinc-500 hover:text-white transition-colors">
-              <Tag size={18} />
-              <span className="text-[9px] font-bold uppercase">Cupons</span>
-            </div>
-          </Link>
-          <Link href="/admin/clube" className="flex-1 min-w-[14%]">
-            <div className="flex flex-col items-center gap-0.5 py-2.5 text-zinc-500 hover:text-white transition-colors">
-              <Crown size={18} />
-              <span className="text-[9px] font-bold uppercase">Clube Burger</span>
-            </div>
-          </Link>
-          <Link href="/admin/taxas" className="flex-1 min-w-[14%]">
-            <div className="flex flex-col items-center gap-0.5 py-2.5 text-zinc-500 hover:text-white transition-colors">
-              <MapPin size={18} />
-              <span className="text-[9px] font-bold uppercase">Bairros</span>
-            </div>
-          </Link>
-          <Link href="/admin/entrega-km" className="flex-1 min-w-[14%]">
-            <div className="flex flex-col items-center gap-0.5 py-2.5 text-zinc-500 hover:text-white transition-colors">
-              <Navigation size={18} />
-              <span className="text-[9px] font-bold uppercase">Por KM</span>
-            </div>
-          </Link>
-          <Link href="/admin/config" className="flex-1 min-w-[14%]">
-            <div className="flex flex-col items-center gap-0.5 py-2.5 text-zinc-500 hover:text-white transition-colors">
-              <Settings size={18} />
-              <span className="text-[9px] font-bold uppercase">Config</span>
-            </div>
-          </Link>
-          <Link href="/admin/importar" className="flex-1 min-w-[14%]">
-            <div className="flex flex-col items-center gap-0.5 py-2.5 text-amber-500">
-              <Upload size={18} />
-              <span className="text-[9px] font-bold uppercase">Importar</span>
-            </div>
-          </Link>
-        </div>
-      </nav>
+      <AdminBottomNav active="/admin/importar" />
     </div>
   );
 }

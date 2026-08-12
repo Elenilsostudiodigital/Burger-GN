@@ -3,6 +3,7 @@ import {
   LayoutDashboard, UtensilsCrossed, Tag, MapPin, Settings, Crown,
   TrendingUp, Star, Upload, Navigation, Users, BarChart3,
 } from 'lucide-react';
+import { HorizontalScrollNav } from './HorizontalScrollNav';
 
 const ITEMS = [
   { href: '/admin', icon: BarChart3, label: 'Início' },
@@ -22,14 +23,23 @@ const ITEMS = [
 
 export function AdminBottomNav({ active }: { active: string }) {
   return (
-    <nav className="fixed bottom-0 left-0 right-0 bg-zinc-950/95 backdrop-blur border-t border-zinc-800 z-40">
-      <div className="max-w-2xl mx-auto flex overflow-x-auto no-scrollbar">
+    <nav className="fixed bottom-0 left-0 right-0 bg-zinc-950/95 backdrop-blur border-t border-zinc-800 z-40 pb-safe">
+      <HorizontalScrollNav
+        className="max-w-2xl mx-auto"
+        contentClassName="px-0"
+      >
         {ITEMS.map((item) => {
           const isActive = active === item.href
             || (item.href !== '/admin' && active.startsWith(item.href));
           return (
-            <Link key={item.href} href={item.href} className="flex-1 min-w-[64px]">
-              <div className={`flex flex-col items-center gap-0.5 py-2.5 ${
+            <Link
+              key={item.href}
+              href={item.href}
+              className="shrink-0 min-w-[64px] flex-1"
+            >
+              <div
+                data-nav-active={isActive ? 'true' : undefined}
+                className={`flex flex-col items-center gap-0.5 py-2.5 whitespace-nowrap ${
                 isActive ? 'text-amber-500' : 'text-zinc-500 hover:text-white'
               }`}>
                 <item.icon size={18} />
@@ -38,7 +48,7 @@ export function AdminBottomNav({ active }: { active: string }) {
             </Link>
           );
         })}
-      </div>
+      </HorizontalScrollNav>
     </nav>
   );
 }

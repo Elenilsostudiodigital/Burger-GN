@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Link, useLocation } from 'wouter';
+import { useLocation } from 'wouter';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   getAdminCoupons, getCouponStats, createCoupon, updateCoupon, deleteCoupon,
@@ -7,42 +7,14 @@ import {
 } from '../../lib/api';
 import { useAdmin } from '../../context/AdminContext';
 import {
-  LayoutDashboard, UtensilsCrossed, Tag, MapPin, Navigation, Settings, LogOut,
+  Tag, LogOut,
   Plus, Pencil, Trash2, Check, X, ToggleLeft, ToggleRight,
-  Loader2, Percent, DollarSign, Calendar, Upload, TrendingUp, Crown,
+  Loader2, Percent, DollarSign, Calendar,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-
-function AdminNav({ active }: { active: string }) {
-  const navItems = [
-    { href: '/admin', icon: <TrendingUp size={17} />, label: 'Início' },
-    { href: '/admin/pedidos', icon: <LayoutDashboard size={18} />, label: 'Pedidos' },
-    { href: '/admin/cardapio', icon: <UtensilsCrossed size={18} />, label: 'Cardápio' },
-    { href: '/admin/financeiro', icon: <TrendingUp size={18} />, label: 'Financeiro' },
-    { href: '/admin/cupons', icon: <Tag size={18} />, label: 'Cupons' },
-    { href: '/admin/clube', icon: <Crown size={18} />, label: 'Clube Burger' },
-    { href: '/admin/taxas', icon: <MapPin size={18} />, label: 'Bairros' },
-    { href: '/admin/entrega-km', icon: <Navigation size={18} />, label: 'Por KM' },
-    { href: '/admin/config', icon: <Settings size={18} />, label: 'Config' },
-    { href: '/admin/importar', icon: <Upload size={18} />, label: 'Importar' },
-  ];
-  return (
-    <nav className="fixed bottom-0 left-0 right-0 bg-zinc-950/95 backdrop-blur border-t border-zinc-800 z-40">
-      <div className="max-w-2xl mx-auto flex">
-        {navItems.map(item => (
-          <Link key={item.href} href={item.href} className="flex-1">
-            <div className={`flex flex-col items-center gap-0.5 py-2.5 transition-colors ${active === item.href ? 'text-amber-500' : 'text-zinc-500 hover:text-white'}`}>
-              {item.icon}
-              <span className="text-[9px] font-bold uppercase">{item.label}</span>
-            </div>
-          </Link>
-        ))}
-      </div>
-    </nav>
-  );
-}
+import { AdminBottomNav } from '../../components/AdminBottomNav';
 
 interface CouponForm {
   code: string; discountType: DiscountType; discountValue: string;
@@ -348,7 +320,7 @@ export default function Coupons() {
         )}
       </main>
 
-      <AdminNav active="/admin/cupons" />
+      <AdminBottomNav active="/admin/cupons" />
     </div>
   );
 }

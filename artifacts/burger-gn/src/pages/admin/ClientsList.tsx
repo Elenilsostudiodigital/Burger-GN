@@ -11,6 +11,7 @@ import {
 } from '../../lib/api';
 import { AdminBottomNav } from '../../components/AdminBottomNav';
 import { ClientsSubnav } from '../../components/ClientsSubnav';
+import { HorizontalScrollNav } from '../../components/HorizontalScrollNav';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -172,18 +173,20 @@ export default function ClientsList() {
               className="w-full h-11 rounded-xl bg-zinc-900 border border-zinc-800 pl-10 pr-3 text-sm text-white placeholder:text-zinc-600 focus:border-amber-500 focus:outline-none"
             />
           </div>
-          <div className="flex gap-2 overflow-x-auto no-scrollbar">
+          <HorizontalScrollNav contentClassName="gap-2">
             <button type="button" onClick={() => setOrigin('')}
-              className={`shrink-0 h-9 px-3 rounded-lg text-[11px] font-bold uppercase ${!origin ? 'bg-amber-500 text-zinc-950' : 'bg-zinc-900 border border-zinc-800 text-zinc-400'}`}>
+              data-nav-active={!origin ? 'true' : undefined}
+              className={`shrink-0 h-9 px-3 rounded-lg text-[11px] font-bold uppercase whitespace-nowrap ${!origin ? 'bg-amber-500 text-zinc-950' : 'bg-zinc-900 border border-zinc-800 text-zinc-400'}`}>
               Todas
             </button>
             {CLIENT_ORIGIN_OPTIONS.map((o) => (
               <button key={o.id} type="button" onClick={() => setOrigin(o.id)}
-                className={`shrink-0 h-9 px-3 rounded-lg text-[11px] font-bold uppercase ${origin === o.id ? 'bg-amber-500 text-zinc-950' : 'bg-zinc-900 border border-zinc-800 text-zinc-400'}`}>
+                data-nav-active={origin === o.id ? 'true' : undefined}
+                className={`shrink-0 h-9 px-3 rounded-lg text-[11px] font-bold uppercase whitespace-nowrap ${origin === o.id ? 'bg-amber-500 text-zinc-950' : 'bg-zinc-900 border border-zinc-800 text-zinc-400'}`}>
                 {o.label}
               </button>
             ))}
-          </div>
+          </HorizontalScrollNav>
         </div>
 
         {toast && <p className="text-green-400 text-sm flex items-center gap-2"><Check size={14} /> {toast}</p>}

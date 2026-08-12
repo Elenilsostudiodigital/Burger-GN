@@ -9,6 +9,7 @@ import {
 } from '../../lib/api';
 import { useAdmin } from '../../context/AdminContext';
 import { AdminBottomNav } from '../../components/AdminBottomNav';
+import { HorizontalScrollNav } from '../../components/HorizontalScrollNav';
 import {
   LogOut, Loader2, TrendingUp, TrendingDown, Minus,
   ShoppingBag, Wallet, Users, Receipt, Package, CreditCard,
@@ -206,13 +207,14 @@ export default function SalesDashboard() {
       <main className="max-w-3xl mx-auto px-4 py-4 space-y-4">
         {/* Period filters */}
         <section className="space-y-3">
-          <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1 -mx-1 px-1">
+          <HorizontalScrollNav contentClassName="gap-2 pb-1 -mx-1 px-1">
             {PRESETS.map((p) => (
               <button
                 key={p.key}
                 type="button"
                 onClick={() => setPreset(p.key)}
-                className={`shrink-0 h-9 px-3 rounded-xl text-[11px] font-bold uppercase tracking-wide ${
+                data-nav-active={preset === p.key ? 'true' : undefined}
+                className={`shrink-0 h-9 px-3 rounded-xl text-[11px] font-bold uppercase tracking-wide whitespace-nowrap ${
                   preset === p.key
                     ? 'bg-amber-500 text-zinc-950'
                     : 'bg-zinc-900 text-zinc-400 border border-zinc-800'
@@ -221,7 +223,7 @@ export default function SalesDashboard() {
                 {p.label}
               </button>
             ))}
-          </div>
+          </HorizontalScrollNav>
           {preset === 'custom' && (
             <div className="grid grid-cols-2 gap-3 rounded-2xl border border-zinc-800 bg-zinc-900 p-3">
               <div className="space-y-1">

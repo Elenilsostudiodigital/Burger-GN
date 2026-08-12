@@ -1,5 +1,6 @@
 import { Link } from 'wouter';
 import { List, UserPlus, Flame } from 'lucide-react';
+import { HorizontalScrollNav } from './HorizontalScrollNav';
 
 type Tab = 'lista' | 'importar' | 'recuperacao';
 
@@ -11,13 +12,18 @@ const TABS: { id: Tab; href: string; label: string; icon: typeof List }[] = [
 
 export function ClientsSubnav({ active }: { active: Tab }) {
   return (
-    <div className="flex gap-2">
+    <HorizontalScrollNav contentClassName="gap-2">
       {TABS.map((tab) => {
         const on = active === tab.id;
         return (
-          <Link key={tab.id} href={tab.href} className="flex-1">
+          <Link
+            key={tab.id}
+            href={tab.href}
+            className="shrink-0 flex-1 min-w-[6.5rem]"
+          >
             <div
-              className={`h-11 rounded-xl font-bold text-[11px] uppercase flex items-center justify-center gap-1.5 px-1 ${
+              data-nav-active={on ? 'true' : undefined}
+              className={`h-11 rounded-xl font-bold text-[11px] uppercase flex items-center justify-center gap-1.5 px-2 whitespace-nowrap ${
                 on
                   ? 'bg-amber-500 text-zinc-950'
                   : 'bg-zinc-900 border border-zinc-800 text-zinc-400 hover:border-amber-500/40'
@@ -29,6 +35,6 @@ export function ClientsSubnav({ active }: { active: Tab }) {
           </Link>
         );
       })}
-    </div>
+    </HorizontalScrollNav>
   );
 }
