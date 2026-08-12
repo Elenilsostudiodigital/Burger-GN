@@ -9,7 +9,7 @@ import { getAdminAreaRequestsPendingCount } from '../lib/api';
 const ITEMS = [
   { href: '/admin', icon: BarChart3, label: 'Início' },
   { href: '/admin/pedidos', icon: LayoutDashboard, label: 'Pedidos' },
-  { href: '/admin/solicitacoes-areas', icon: MapPinned, label: 'Solicitações' },
+  { href: '/admin/solicitacoes-areas', icon: MapPinned, label: 'Solic. Área' },
   { href: '/admin/clientes', icon: Users, label: 'Clientes' },
   { href: '/admin/avaliacoes', icon: Star, label: 'Avaliações' },
   { href: '/admin/cardapio', icon: UtensilsCrossed, label: 'Cardápio' },

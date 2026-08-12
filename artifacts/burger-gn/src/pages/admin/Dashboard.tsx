@@ -12,7 +12,8 @@ import {
   REJECT_REASON_SUGGESTIONS, RECEIPT_REJECT_SUGGESTIONS,
   Order, WorkflowStage, PrepDayStats,
   ORDER_TYPE_LABELS, PAYMENT_METHOD_LABELS, PAYMENT_STATUS_LABELS, CARD_TYPE_LABELS, WORKFLOW_LABELS,
-  getAdminAreaRequestsPendingCount,
+  getAdminAreaRequests,
+  DeliveryAreaRequest,
 } from '../../lib/api';
 import {
   LayoutDashboard, UtensilsCrossed, LogOut, Bell, BellOff,
@@ -21,6 +22,7 @@ import {
   ChevronLeft, ChevronRight, GripVertical, X, Crown, Filter, ImageIcon, CheckCircle2, Check, Ban, Star, Users,
 } from 'lucide-react';
 import { PrepCountdown, prepCardBorderClass } from '../../components/PrepCountdown';
+import { AreaRequestAdminCard } from '../../components/AreaRequestAdminCard';
 import {
   computePrepRemainingSeconds,
   formatPrepDuration,
@@ -543,6 +545,7 @@ export default function AdminDashboard() {
   const [notification, setNotification] = useState<string | null>(null);
   const [notificationHref, setNotificationHref] = useState<string | null>(null);
   const [pendingAreaRequests, setPendingAreaRequests] = useState(0);
+  const [areaRequests, setAreaRequests] = useState<DeliveryAreaRequest[]>([]);
   const [activeDragOrder, setActiveDragOrder] = useState<Order | null>(null);
   const [showCancelled, setShowCancelled] = useState(false);
   const [filter, setFilter] = useState<'all' | ColumnKey>('all');
@@ -578,22 +581,28 @@ export default function AdminDashboard() {
     try { setPrepStats(await getPrepStats()); } catch { /* ignore */ }
   }, []);
 
+  const fetchAreaRequests = useCallback(async () => {
+    try {
+      const rows = await getAdminAreaRequests('pending');
+      const list = Array.isArray(rows) ? rows : [];
+      setAreaRequests(list);
+      setPendingAreaRequests(list.length);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
   useEffect(() => {
     fetchOrders();
     fetchPrepStats();
-    const loadPendingAreas = () => {
-      getAdminAreaRequestsPendingCount()
-        .then((r) => setPendingAreaRequests(Number(r?.count ?? 0)))
-        .catch(() => {});
-    };
-    loadPendingAreas();
+    fetchAreaRequests();
     const interval = setInterval(() => {
       fetchOrders();
       fetchPrepStats();
-      loadPendingAreas();
+      fetchAreaRequests();
     }, 30000);
     return () => clearInterval(interval);
-  }, [fetchOrders, fetchPrepStats]);
+  }, [fetchOrders, fetchPrepStats, fetchAreaRequests]);
 
   useEffect(() => {
     fetchOrders();
@@ -650,13 +659,14 @@ export default function AdminDashboard() {
         if (data.customerName) name = data.customerName;
       } catch { /* ignore */ }
       setPendingAreaRequests((n) => n + 1);
-      setNotificationHref('/admin/solicitacoes-areas');
+      setNotificationHref('/admin/pedidos');
       setNotification(`📍 Nova solicitação de área de ${name}`);
       setTimeout(() => setNotification(null), 8000);
+      void fetchAreaRequests();
     });
 
     return () => es.close();
-  }, [fetchOrders]);
+  }, [fetchOrders, fetchAreaRequests]);
 
   const applyUpdated = (id: number, updated: Order) => {
     setOrders(prev => prev.map(o => o.id === id ? { ...o, ...updated, items: updated.items?.length ? updated.items : o.items } : o));
@@ -966,7 +976,15 @@ export default function AdminDashboard() {
         )}
       </header>
 
-      <main className="flex-1 px-4 py-5 overflow-hidden">
+      <main className="flex-1 px-4 py-5 overflow-hidden flex flex-col">
+        <div className={`max-w-[1800px] mx-auto w-full mb-4 space-y-3 overflow-y-auto shrink-0 ${areaRequests.length ? 'max-h-[46vh]' : 'hidden'}`}>
+          <h2 className="text-amber-400 text-xs font-black uppercase tracking-widest">
+            Solicitações de Área ({areaRequests.length})
+          </h2>
+          {areaRequests.map((req) => (
+            <AreaRequestAdminCard key={req.id} request={req} onChanged={() => void fetchAreaRequests()} />
+          ))}
+        </div>
         {loading ? (
           <div className="flex justify-center py-16">
             <div className="w-8 h-8 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
@@ -1138,7 +1156,7 @@ export default function AdminDashboard() {
           {[
             { href: '/admin', icon: TrendingUp, label: 'Início', active: false },
             { href: '/admin/pedidos', icon: LayoutDashboard, label: 'Pedidos', active: true },
-            { href: '/admin/solicitacoes-areas', icon: MapPin, label: 'Solicitações', active: false },
+            { href: '/admin/solicitacoes-areas', icon: MapPin, label: 'Solicitações de Área', active: false },
             { href: '/admin/clientes', icon: Users, label: 'Clientes', active: false },
             { href: '/admin/avaliacoes', icon: Star, label: 'Avaliações', active: false },
             { href: '/admin/cardapio', icon: UtensilsCrossed, label: 'Cardápio' },
