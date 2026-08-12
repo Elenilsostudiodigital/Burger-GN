@@ -159,6 +159,33 @@ export function normalizePolygon(raw: unknown): DeliveryAreaPolygon | null {
   return null;
 }
 
+/** Approximate a circle as a closed GeoJSON polygon around a WGS84 point. */
+export function circlePolygon(
+  lat: number,
+  lng: number,
+  radiusKm: number,
+  steps = 32,
+): DeliveryAreaPolygon | null {
+  if (![lat, lng, radiusKm].every(Number.isFinite) || radiusKm <= 0) return null;
+  const latRad = radiusKm / 111.32;
+  const cosLat = Math.cos((lat * Math.PI) / 180);
+  const lngRad = radiusKm / (111.32 * (Math.abs(cosLat) < 0.01 ? 0.01 : cosLat));
+  const ring: number[][] = [];
+  for (let i = 0; i < steps; i++) {
+    const angle = (i / steps) * 2 * Math.PI;
+    ring.push([lng + lngRad * Math.cos(angle), lat + latRad * Math.sin(angle)]);
+  }
+  ring.push(ring[0]!);
+  if (ring.length < 4) return null;
+  return { type: "Polygon", coordinates: [ring] };
+}
+
+export function coverageRadiusKm(type: "rua" | "bairro" | "regiao"): number {
+  if (type === "rua") return 0.28;
+  if (type === "bairro") return 1.1;
+  return 2.4;
+}
+
 export function calcAreaFee(minFee: number, feePerKm: number, distanceKm: number): number {
   const min = Number.isFinite(minFee) ? Math.max(0, minFee) : 0;
   const per = Number.isFinite(feePerKm) ? Math.max(0, feePerKm) : 0;

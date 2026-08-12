@@ -296,6 +296,70 @@ export const toggleAdminDeliveryArea = (id: number, enabled: boolean) =>
 export const deleteAdminDeliveryArea = (id: number) =>
   api.delete(`/admin/delivery-areas/${id}`);
 
+// ── Delivery area requests (customer → admin) ─────────────────────────────────
+export type AreaCoverageType = "rua" | "bairro" | "regiao";
+export interface DeliveryAreaRequest {
+  id: number;
+  customerName: string;
+  phone: string;
+  address: string;
+  addressNumber: string;
+  addressComplement: string;
+  neighborhood: string;
+  city: string;
+  cep: string;
+  lat: number | null;
+  lng: number | null;
+  distanceKm: number | null;
+  status: "pending" | "approved" | "rejected" | string;
+  coverageType: AreaCoverageType | null;
+  areaId: number | null;
+  streetId: number | null;
+  zoneId: number | null;
+  reviewedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  fullAddress: string;
+}
+
+export const requestDeliveryAreaAnalysis = (d: {
+  customerName: string;
+  phone: string;
+  address: string;
+  addressNumber?: string;
+  addressComplement?: string;
+  neighborhood?: string;
+  city?: string;
+  cep?: string;
+  lat?: number | null;
+  lng?: number | null;
+  distanceKm?: number | null;
+}) => api.post("/delivery/area-requests", d) as Promise<{
+  ok: boolean;
+  alreadyPending: boolean;
+  request: DeliveryAreaRequest;
+}>;
+
+export const getAdminAreaRequests = (status = "pending") =>
+  api.get(`/admin/delivery-area-requests?status=${encodeURIComponent(status)}`) as Promise<DeliveryAreaRequest[]>;
+export const getAdminAreaRequest = (id: number) =>
+  api.get(`/admin/delivery-area-requests/${id}`) as Promise<DeliveryAreaRequest>;
+export const getAdminAreaRequestsPendingCount = () =>
+  api.get("/admin/delivery-area-requests/pending-count") as Promise<{ count: number }>;
+export const approveAreaRequest = (id: number, d: {
+  type: AreaCoverageType;
+  minFee: string | number;
+  feePerKm?: string | number;
+  color?: string;
+  risk?: boolean;
+  blockReason?: string;
+}) => api.post(`/admin/delivery-area-requests/${id}/approve`, d) as Promise<{
+  request: DeliveryAreaRequest;
+  area: { id: number; name: string; color: string; status: string } | null;
+}>;
+export const rejectAreaRequest = (id: number) =>
+  api.post(`/admin/delivery-area-requests/${id}/reject`, {}) as Promise<DeliveryAreaRequest>;
+
 // ── Import Cardápio ────────────────────────────────────────────────────────────
 export interface ImportDraftCategory { name: string; slug: string; }
 export interface ImportDraftProduct { name: string; description: string; price: number; image: string; available: boolean; categorySlug: string; categoryName: string; include?: boolean; }
@@ -692,6 +756,8 @@ export interface ReverseGeocodeResult {
   numero: string;
   bairro: string;
   displayName: string;
+  cep: string;
+  city: string;
 }
 
 /** Resolve street/neighborhood from GPS coords for delivery checkout. */
@@ -706,6 +772,7 @@ export async function reverseGeocode(lat: number, lng: number): Promise<ReverseG
         road?: string; pedestrian?: string; residential?: string; street?: string;
         house_number?: string; suburb?: string; neighbourhood?: string; city_district?: string;
         quarter?: string; village?: string;
+        postcode?: string; city?: string; town?: string; municipality?: string; state?: string;
       };
     };
     const addr = data?.address;
@@ -717,6 +784,8 @@ export async function reverseGeocode(lat: number, lng: number): Promise<ReverseG
       endereco,
       numero,
       bairro,
+      cep: String(addr.postcode || "").replace(/\D/g, "").slice(0, 8),
+      city: addr.city || addr.town || addr.municipality || "",
       displayName: data.display_name || [endereco, numero, bairro].filter(Boolean).join(", "),
     };
   } catch {

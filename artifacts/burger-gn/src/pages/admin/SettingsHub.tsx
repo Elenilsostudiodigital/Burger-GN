@@ -567,6 +567,11 @@ export default function SettingsHub() {
                 📍 Ver Novas Ruas
               </Button>
             </Link>
+            <Link href="/admin/solicitacoes-areas">
+              <Button variant="outline" className="w-full h-11 rounded-xl font-bold border-zinc-700">
+                📍 Solicitações de Áreas
+              </Button>
+            </Link>
           </div>
         )}
       </main>

@@ -5,7 +5,7 @@ import { PageTransition } from '../components/PageTransition';
 import {
   createOrder, validateCoupon, getDeliveryZones, getDeliveryFee, getKmDeliveryConfig,
   geocodeAddress, reverseGeocode, haversineKm, findKmTier, getPaymentSettings,
-  checkDeliveryStreet, resolveDeliveryArea,
+  checkDeliveryStreet, resolveDeliveryArea, requestDeliveryAreaAnalysis,
   ValidateCouponResult, DeliveryZone, KmDeliveryConfig, PaymentSettingsPublic,
 } from '../lib/api';
 import { saveMyOrder } from '../lib/myOrder';
@@ -82,6 +82,12 @@ export default function Checkout() {
   const [streetPendingMessage, setStreetPendingMessage] = useState('');
   const [streetNotes, setStreetNotes] = useState('');
   const [streetEtaMinutes, setStreetEtaMinutes] = useState<number | null>(null);
+  const [streetInactive, setStreetInactive] = useState(false);
+  const [geoCep, setGeoCep] = useState('');
+  const [geoCity, setGeoCity] = useState('Lauro de Freitas');
+  const [areaRequestState, setAreaRequestState] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
+  const [areaRequestError, setAreaRequestError] = useState('');
+  const [customBairro, setCustomBairro] = useState(false);
   const feeDebounce = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const streetDebounce = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
@@ -330,6 +336,7 @@ export default function Checkout() {
 
         // Inactive registered street: do not accept delivery there.
         if (result.known && result.active === false) {
+          setStreetInactive(true);
           setFeeFound(false);
           setDeliveryFee(0);
           setFeeMessage('');
@@ -341,6 +348,7 @@ export default function Checkout() {
           return;
         }
 
+        setStreetInactive(false);
         if (result.known && result.fee != null && Number.isFinite(result.fee)) {
           setDeliveryFee(result.fee);
           setFeeFound(true);
@@ -378,6 +386,12 @@ export default function Checkout() {
     setStreetPendingMessage('');
     setStreetNotes('');
     setStreetEtaMinutes(null);
+    setStreetInactive(false);
+    setGeoCep('');
+    setGeoCity('Lauro de Freitas');
+    setAreaRequestState('idle');
+    setAreaRequestError('');
+    setCustomBairro(false);
     setGpsError('');
     setLocationLabel('');
     setAddressMode(null);
@@ -394,6 +408,64 @@ export default function Checkout() {
         <div className="whitespace-pre-line text-amber-100/95">{streetNotes}</div>
       </div>
     ) : null;
+
+  useEffect(() => {
+    setAreaRequestState('idle');
+    setAreaRequestError('');
+  }, [form.endereco, form.numero, form.bairro, customerCoords?.lat, customerCoords?.lng]);
+
+  const handleRequestAreaAnalysis = async () => {
+    if (areaRequestState === 'sending' || areaRequestState === 'sent') return;
+    const name = form.nome.trim();
+    const phone = form.telefone.replace(/\D/g, '');
+    if (!name || phone.length < 8) {
+      setAreaRequestState('error');
+      setAreaRequestError('Informe seu nome e telefone antes de solicitar a análise.');
+      return;
+    }
+    setAreaRequestState('sending');
+    setAreaRequestError('');
+    try {
+      let lat = customerCoords?.lat ?? null;
+      let lng = customerCoords?.lng ?? null;
+      let dist = distanceKm;
+      if ((lat == null || lng == null) && form.endereco.trim()) {
+        const coords = await geocodeAddress(
+          `${form.endereco}, ${form.numero}, ${form.bairro}, ${geoCity || 'Lauro de Freitas'}, Bahia, Brasil`,
+        );
+        if (coords) {
+          lat = coords.lat;
+          lng = coords.lng;
+          if (dist == null && kmConfig) {
+            const baseLat = parseFloat(String(kmConfig.baseLat ?? '0'));
+            const baseLng = parseFloat(String(kmConfig.baseLng ?? '0'));
+            if (Number.isFinite(baseLat) && Number.isFinite(baseLng) && !(baseLat === 0 && baseLng === 0)) {
+              dist = parseFloat(haversineKm(baseLat, baseLng, lat, lng).toFixed(2));
+            }
+          }
+        }
+      }
+      await requestDeliveryAreaAnalysis({
+        customerName: name,
+        phone,
+        address: form.endereco.trim() || locationLabel || 'Localização GPS',
+        addressNumber: form.numero.trim(),
+        addressComplement: form.complemento.trim(),
+        neighborhood: form.bairro.trim() === '__outro__' ? '' : form.bairro.trim(),
+        city: geoCity || 'Lauro de Freitas',
+        cep: geoCep,
+        lat,
+        lng,
+        distanceKm: dist,
+      });
+      setAreaRequestState('sent');
+    } catch (err) {
+      setAreaRequestState('error');
+      setAreaRequestError(err instanceof Error ? err.message : 'Não foi possível enviar a solicitação.');
+    }
+  };
+
+  const showAreaRequestCta = feeFound === false && !streetInactive;
 
   const goBack = () => {
     setFieldError('');
@@ -491,6 +563,8 @@ export default function Checkout() {
           if (resolved) {
             setLocationLabel(resolved.displayName);
             const nextBairro = resolved.bairro || 'GPS';
+            setGeoCep(resolved.cep || '');
+            setGeoCity(resolved.city || 'Lauro de Freitas');
             setForm(prev => ({
               ...prev,
               endereco: resolved.endereco || prev.endereco || 'Localização GPS',
@@ -785,9 +859,48 @@ export default function Checkout() {
       ) : feeFound === false ? (
         <motion.div key="fee-warn" initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
           className="space-y-2">
-          {streetPendingMessage ? (
+          {streetInactive && streetPendingMessage ? (
             <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-amber-200 text-sm whitespace-pre-line leading-relaxed">
               {streetPendingMessage}
+            </div>
+          ) : showAreaRequestCta ? (
+            <div className="rounded-xl border border-orange-800/40 bg-orange-900/20 px-4 py-4 space-y-3">
+              <div className="flex items-start gap-2">
+                <AlertCircle size={16} className="text-orange-400 mt-0.5 shrink-0" />
+                <div className="space-y-1 min-w-0">
+                  <p className="text-orange-300 text-sm font-bold leading-snug">
+                    Atualmente ainda não realizamos entregas nesta região.
+                  </p>
+                  <p className="text-orange-200/80 text-sm leading-snug">
+                    Podemos analisar a possibilidade de atender seu endereço.
+                  </p>
+                </div>
+              </div>
+              <div className={areaRequestState === 'sent' ? '' : 'hidden'}>
+                <p className="text-emerald-300 text-sm font-semibold leading-relaxed">
+                  Recebemos sua solicitação. Em breve analisaremos a disponibilidade de entrega para sua região.
+                </p>
+              </div>
+              <div className={areaRequestState === 'sent' ? 'hidden' : ''}>
+                <button
+                  type="button"
+                  disabled={areaRequestState === 'sending'}
+                  onClick={() => void handleRequestAreaAnalysis()}
+                  className="w-full h-11 rounded-xl bg-amber-500 hover:bg-amber-400 text-zinc-950 font-black text-sm disabled:opacity-60"
+                >
+                  <span className="inline-flex items-center justify-center gap-2">
+                    <Loader2
+                      size={16}
+                      className={`animate-spin ${areaRequestState === 'sending' ? '' : 'hidden'}`}
+                    />
+                    <span className={areaRequestState === 'sending' ? 'hidden' : ''}>📍</span>
+                    <span>Solicitar análise da minha região</span>
+                  </span>
+                </button>
+              </div>
+              <p className={`text-red-400 text-xs ${areaRequestState === 'error' ? '' : 'hidden'}`}>
+                {areaRequestError || 'Não foi possível enviar a solicitação.'}
+              </p>
             </div>
           ) : (
             <div className="flex items-start gap-2 bg-orange-900/20 border border-orange-800/40 rounded-xl px-4 py-3">
@@ -1097,19 +1210,37 @@ export default function Checkout() {
                 <div className="space-y-1.5">
                   <Label className="text-zinc-400 text-xs">Bairro *</Label>
                   {zones.length > 0 && !kmEnabled ? (
-                    <div className="relative">
-                      <select
-                        value={form.bairro}
-                        onChange={e => setField('bairro', e.target.value)}
-                        className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 h-11 text-white text-sm focus:border-amber-500 focus:outline-none appearance-none pr-8"
-                      >
-                        <option value="" disabled>Selecione seu bairro</option>
-                        {zones.map(z => (
-                          <option key={z.id} value={z.neighborhood}>{z.neighborhood}</option>
-                        ))}
-                        <option value="__outro__">Outro bairro</option>
-                      </select>
-                      <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" />
+                    <div className="space-y-2">
+                      <div className="relative">
+                        <select
+                          value={customBairro ? '__outro__' : form.bairro}
+                          onChange={e => {
+                            if (e.target.value === '__outro__') {
+                              setCustomBairro(true);
+                              setField('bairro', '');
+                            } else {
+                              setCustomBairro(false);
+                              setField('bairro', e.target.value);
+                            }
+                          }}
+                          className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 h-11 text-white text-sm focus:border-amber-500 focus:outline-none appearance-none pr-8"
+                        >
+                          <option value="" disabled>Selecione seu bairro</option>
+                          {zones.map(z => (
+                            <option key={z.id} value={z.neighborhood}>{z.neighborhood}</option>
+                          ))}
+                          <option value="__outro__">Outro bairro</option>
+                        </select>
+                        <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" />
+                      </div>
+                      {customBairro ? (
+                        <Input
+                          value={form.bairro}
+                          onChange={e => setField('bairro', e.target.value)}
+                          placeholder="Qual o nome do bairro?"
+                          className="bg-zinc-950 border-zinc-800 h-11 text-white text-sm focus:border-amber-500"
+                        />
+                      ) : null}
                     </div>
                   ) : (
                     <Input

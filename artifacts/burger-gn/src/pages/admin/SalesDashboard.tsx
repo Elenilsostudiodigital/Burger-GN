@@ -6,6 +6,7 @@ import {
 import {
   getSalesDashboard, SalesDashboardReport, SalesPeriodPreset,
   PAYMENT_METHOD_LABELS, ORDER_TYPE_LABELS,
+  getAdminAreaRequestsPendingCount,
 } from '../../lib/api';
 import { useAdmin } from '../../context/AdminContext';
 import { AdminBottomNav } from '../../components/AdminBottomNav';
@@ -120,6 +121,8 @@ export default function SalesDashboard() {
   const [report, setReport] = useState<SalesDashboardReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [pendingAreaRequests, setPendingAreaRequests] = useState(0);
+  const [areaNotice, setAreaNotice] = useState<string | null>(null);
   const requestId = useRef(0);
 
   const query = useMemo(() => {
@@ -152,6 +155,31 @@ export default function SalesDashboard() {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query.preset, query.from, query.to, canLoad]);
+
+  useEffect(() => {
+    const loadPending = () => {
+      getAdminAreaRequestsPendingCount()
+        .then((r) => setPendingAreaRequests(Number(r?.count ?? 0)))
+        .catch(() => {});
+    };
+    loadPending();
+    const es = new EventSource('/api/orders/stream', { withCredentials: true });
+    es.addEventListener('area_request', (e) => {
+      let name = 'um cliente';
+      try {
+        const data = JSON.parse((e as MessageEvent).data) as { customerName?: string };
+        if (data.customerName) name = data.customerName;
+      } catch { /* ignore */ }
+      setPendingAreaRequests((n) => n + 1);
+      setAreaNotice(`Nova solicitação de área de ${name}`);
+      setTimeout(() => setAreaNotice(null), 8000);
+    });
+    const id = setInterval(loadPending, 20000);
+    return () => {
+      es.close();
+      clearInterval(id);
+    };
+  }, []);
 
   const chartData = useMemo(() => {
     if (!report) return [];
@@ -204,6 +232,22 @@ export default function SalesDashboard() {
       </header>
 
       <main className="max-w-3xl mx-auto px-4 py-4 space-y-4">
+        <div className={areaNotice ? '' : 'hidden'}>
+          <Link
+            href="/admin/solicitacoes-areas"
+            className="block rounded-xl bg-amber-500 text-zinc-950 text-center font-bold text-sm py-3 px-4"
+          >
+            📍 {areaNotice || 'Nova solicitação de área'}
+          </Link>
+        </div>
+        <div className={pendingAreaRequests > 0 && !areaNotice ? '' : 'hidden'}>
+          <Link
+            href="/admin/solicitacoes-areas"
+            className="block rounded-xl border border-amber-500/40 bg-amber-500/10 text-amber-300 text-center font-bold text-sm py-3 px-4"
+          >
+            {pendingAreaRequests} solicitação{pendingAreaRequests === 1 ? '' : 'ões'} de área aguardando análise
+          </Link>
+        </div>
         {/* Period filters */}
         <section className="space-y-3">
           <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1 -mx-1 px-1">
