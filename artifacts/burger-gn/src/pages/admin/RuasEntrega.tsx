@@ -1,14 +1,17 @@
 /**
- * Ruas de Entrega — rewritten from scratch for a stable React DOM tree.
+ * Ruas de Entrega — stable React DOM tree (no insertBefore).
  *
- * Root cause of recurring NotFoundError (insertBefore):
- * conditional mount/unmount of OSM <iframe> next to toggling siblings, plus an
- * anonymous route wrapper that remounted the page fiber.
+ * Root cause of NotFoundError (insertBefore):
+ * siblings under <main> were conditionally mounted/unmounted (pageError,
+ * edit form, listLoading spinner ↔ empty ↔ list, candidates empty ↔ results)
+ * while the create form (with StreetMapPreview) stayed mounted nearby.
+ * React then called insertBefore against a reference node that was no longer
+ * a child of that parent.
  *
- * This rewrite:
- * - no iframe (static map <img> only)
- * - create form always mounted when open (no nested map ternaries)
- * - results panel always present (empty state via text, not null siblings)
+ * Contract:
+ * - no iframe (static map <img> via StreetMapPreview)
+ * - every <main> panel stays mounted; show/hide only via CSS `hidden`
+ * - results/list empty states never swap element types via ternary null
  * - Localizar Endereço never remounts the map host
  */
 import React, { useEffect, useState } from 'react';
@@ -349,6 +352,18 @@ export default function AdminRuasEntrega() {
     }
   };
 
+  const showPageError = Boolean(pageError) && !showForm;
+  const showEmptyList = !listLoading && list.length === 0;
+  const showList = !listLoading && list.length > 0;
+  const hasCandidates = candidates.length > 0;
+  const feeLabel =
+    suggestedFee != null ? `Taxa (sugerida ${fmtMoney(suggestedFee)})` : 'Taxa';
+  const resultsTitle = geoLoading
+    ? 'Buscando…'
+    : hasCandidates
+      ? `Resultados (${candidates.length})`
+      : 'Resultados';
+
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-white pb-24">
       <header className="sticky top-0 z-30 bg-zinc-950/95 border-b border-zinc-800 px-4 py-3 backdrop-blur">
@@ -366,6 +381,11 @@ export default function AdminRuasEntrega() {
         </div>
       </header>
 
+      {/*
+        Fixed sibling tree under <main>: never mount/unmount panels.
+        Visibility is CSS-only (`hidden`) so React never insertBefore across
+        a reference node that disappeared during listLoading / edit toggles.
+      */}
       <main className="max-w-3xl mx-auto px-4 py-4 space-y-4">
         <div className="flex flex-col sm:flex-row gap-2">
           <div className="relative flex-1">
@@ -394,18 +414,17 @@ export default function AdminRuasEntrega() {
           </div>
         </div>
 
-        {pageError && !showForm ? (
-          <p className="text-red-400 text-sm" role="alert">
-            {pageError}
-          </p>
-        ) : null}
+        <p
+          className={`text-red-400 text-sm min-h-[1.25rem] ${showPageError ? '' : 'invisible'}`}
+          role={showPageError ? 'alert' : undefined}
+        >
+          {pageError || '\u00a0'}
+        </p>
 
-        {/* Create form — toggled via CSS visibility to avoid unmounting map subtree mid-session */}
         <section
           className={`rounded-2xl border border-amber-500/30 bg-zinc-900/80 p-4 space-y-4 ${
             showForm ? '' : 'hidden'
           }`}
-          aria-hidden={!showForm}
         >
           <div className="flex items-center justify-between gap-2">
             <h2 className="text-white font-black text-sm uppercase tracking-tight">Cadastrar Nova Rua</h2>
@@ -418,7 +437,9 @@ export default function AdminRuasEntrega() {
             </button>
           </div>
 
-          {formError ? <p className="text-red-400 text-sm">{formError}</p> : null}
+          <p className={`text-red-400 text-sm min-h-[1.25rem] ${formError ? '' : 'invisible'}`}>
+            {formError || '\u00a0'}
+          </p>
 
           <div className="grid md:grid-cols-2 gap-4">
             <div className="space-y-3">
@@ -469,15 +490,12 @@ export default function AdminRuasEntrega() {
                 onClick={() => void handleLocate()}
                 className="w-full h-11 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-white font-bold border border-zinc-700"
               >
-                {geoLoading ? (
-                  <>
-                    <Loader2 className="animate-spin mr-2" size={16} /> Localizando…
-                  </>
-                ) : (
-                  <>
-                    <MapPin className="mr-2" size={16} /> Localizar Endereço
-                  </>
-                )}
+                <span className={`inline-flex items-center ${geoLoading ? '' : 'hidden'}`}>
+                  <Loader2 className="animate-spin mr-2" size={16} /> Localizando…
+                </span>
+                <span className={`inline-flex items-center ${geoLoading ? 'hidden' : ''}`}>
+                  <MapPin className="mr-2" size={16} /> Localizar Endereço
+                </span>
               </Button>
 
               <div>
@@ -504,9 +522,7 @@ export default function AdminRuasEntrega() {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <Label className="text-zinc-500 text-xs">
-                    Taxa {suggestedFee != null ? `(sugerida ${fmtMoney(suggestedFee)})` : ''}
-                  </Label>
+                  <Label className="text-zinc-500 text-xs">{feeLabel}</Label>
                   <Input
                     value={form.fee}
                     onChange={(e) => patchForm({ fee: e.target.value })}
@@ -532,61 +548,55 @@ export default function AdminRuasEntrega() {
                 message={geoStatus}
               />
 
-              {/* Results panel — always mounted; content swaps textually */}
               <div className="rounded-xl border border-zinc-800 bg-zinc-950/80 p-3 min-h-[8rem]">
-                <p className="text-amber-300 text-xs font-bold mb-2">
-                  {geoLoading
-                    ? 'Buscando…'
-                    : candidates.length > 0
-                      ? `Resultados (${candidates.length})`
-                      : 'Resultados'}
+                <p className="text-amber-300 text-xs font-bold mb-2">{resultsTitle}</p>
+                <p
+                  className={`text-zinc-600 text-xs ${hasCandidates ? 'hidden' : ''}`}
+                >
+                  {geoStatus || 'Nenhum resultado ainda.'}
                 </p>
-                {candidates.length === 0 ? (
-                  <p className="text-zinc-600 text-xs">{geoStatus || 'Nenhum resultado ainda.'}</p>
-                ) : (
-                  <div className="space-y-1.5 max-h-56 overflow-y-auto">
-                    {candidates.map((c) => {
-                      const active = selectedId === String(c.id);
-                      const label = [c.streetName, c.neighborhood || c.city].filter(Boolean).join(' — ');
-                      return (
-                        <button
-                          key={String(c.id)}
-                          type="button"
-                          onClick={() => applyCandidate(c)}
-                          className={`w-full text-left rounded-lg border px-3 py-2.5 transition-colors ${
-                            active
-                              ? 'border-amber-500 bg-amber-500/10'
-                              : 'border-zinc-800 bg-zinc-900/60 hover:border-zinc-600'
-                          }`}
-                        >
-                          <p className="text-white text-sm font-bold">{label}</p>
-                          <p className="text-zinc-500 text-[11px] mt-0.5 truncate">
-                            {String(c.displayName ?? '')}
-                          </p>
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
+                <div
+                  className={`space-y-1.5 max-h-56 overflow-y-auto ${hasCandidates ? '' : 'hidden'}`}
+                >
+                  {candidates.map((c) => {
+                    const active = selectedId === String(c.id);
+                    const label = [c.streetName, c.neighborhood || c.city].filter(Boolean).join(' — ');
+                    return (
+                      <button
+                        key={String(c.id)}
+                        type="button"
+                        onClick={() => applyCandidate(c)}
+                        className={`w-full text-left rounded-lg border px-3 py-2.5 transition-colors ${
+                          active
+                            ? 'border-amber-500 bg-amber-500/10'
+                            : 'border-zinc-800 bg-zinc-900/60 hover:border-zinc-600'
+                        }`}
+                      >
+                        <p className="text-white text-sm font-bold">{label}</p>
+                        <p className="text-zinc-500 text-[11px] mt-0.5 truncate">
+                          {String(c.displayName ?? '')}
+                        </p>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
 
               <div className="rounded-xl border border-zinc-800 bg-zinc-950/80 px-3 py-3 text-sm text-zinc-400 min-h-[4.5rem]">
-                {distanceKm != null ? (
-                  <p>
-                    Distância estimada:{' '}
-                    <span className="text-white font-bold">{distanceKm.toFixed(1)} km</span>
-                  </p>
-                ) : (
-                  <p>Distância: —</p>
-                )}
-                {suggestedFee != null ? (
-                  <p className="mt-1">
-                    Taxa sugerida:{' '}
-                    <span className="text-amber-400 font-bold">{fmtMoney(suggestedFee)}</span>
-                  </p>
-                ) : (
-                  <p className="mt-1">Taxa sugerida: —</p>
-                )}
+                <p className={distanceKm != null ? '' : 'hidden'}>
+                  Distância estimada:{' '}
+                  <span className="text-white font-bold">
+                    {distanceKm != null ? `${distanceKm.toFixed(1)} km` : ''}
+                  </span>
+                </p>
+                <p className={distanceKm != null ? 'hidden' : ''}>Distância: —</p>
+                <p className={`mt-1 ${suggestedFee != null ? '' : 'hidden'}`}>
+                  Taxa sugerida:{' '}
+                  <span className="text-amber-400 font-bold">
+                    {suggestedFee != null ? fmtMoney(suggestedFee) : ''}
+                  </span>
+                </p>
+                <p className={`mt-1 ${suggestedFee != null ? 'hidden' : ''}`}>Taxa sugerida: —</p>
               </div>
             </div>
           </div>
@@ -598,7 +608,10 @@ export default function AdminRuasEntrega() {
               onClick={() => void handleSave()}
               className="flex-1 h-11 rounded-xl bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold"
             >
-              {saving ? <Loader2 className="animate-spin" size={16} /> : 'Salvar Rua'}
+              <span className={saving ? '' : 'hidden'}>
+                <Loader2 className="animate-spin" size={16} />
+              </span>
+              <span className={saving ? 'hidden' : ''}>Salvar Rua</span>
             </Button>
             <Button
               type="button"
@@ -611,101 +624,108 @@ export default function AdminRuasEntrega() {
           </div>
         </section>
 
-        {editing ? (
-          <section className="rounded-2xl border border-amber-500/30 bg-zinc-900/80 p-4 space-y-3">
-            <h2 className="text-white font-black text-sm">{editing.streetName}</h2>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label className="text-zinc-500 text-xs">Bairro</Label>
-                <Input
-                  value={editNeighborhood}
-                  onChange={(e) => setEditNeighborhood(e.target.value)}
-                  className="bg-zinc-950 border-zinc-800 h-11 text-white"
-                />
-              </div>
-              <div>
-                <Label className="text-zinc-500 text-xs">Cidade</Label>
-                <Input
-                  value={editCity}
-                  onChange={(e) => setEditCity(e.target.value)}
-                  className="bg-zinc-950 border-zinc-800 h-11 text-white"
-                />
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label className="text-zinc-500 text-xs">Taxa</Label>
-                <Input
-                  value={editFee}
-                  onChange={(e) => setEditFee(e.target.value)}
-                  className="bg-zinc-950 border-zinc-800 h-11 text-white"
-                />
-              </div>
-              <div>
-                <Label className="text-zinc-500 text-xs">Tempo (min)</Label>
-                <Input
-                  value={editEta}
-                  onChange={(e) => setEditEta(e.target.value.replace(/\D/g, ''))}
-                  className="bg-zinc-950 border-zinc-800 h-11 text-white"
-                />
-              </div>
-            </div>
+        <section
+          className={`rounded-2xl border border-amber-500/30 bg-zinc-900/80 p-4 space-y-3 ${
+            editing ? '' : 'hidden'
+          }`}
+        >
+          <h2 className="text-white font-black text-sm">{editing?.streetName || 'Editar rua'}</h2>
+          <div className="grid grid-cols-2 gap-3">
             <div>
-              <Label className="text-zinc-500 text-xs">Horário máximo de entrega</Label>
+              <Label className="text-zinc-500 text-xs">Bairro</Label>
               <Input
-                value={editMaxDeliveryTime}
-                onChange={(e) => setEditMaxDeliveryTime(normalizeTimeInput(e.target.value))}
-                placeholder="Ex: 21:00"
+                value={editNeighborhood}
+                onChange={(e) => setEditNeighborhood(e.target.value)}
                 className="bg-zinc-950 border-zinc-800 h-11 text-white"
               />
             </div>
             <div>
-              <Label className="text-zinc-500 text-xs">Observações</Label>
-              <textarea
-                value={editNotes}
-                onChange={(e) => setEditNotes(e.target.value)}
-                rows={3}
-                className="w-full mt-1 rounded-xl bg-zinc-950 border border-zinc-800 px-3 py-2 text-sm text-white resize-y"
+              <Label className="text-zinc-500 text-xs">Cidade</Label>
+              <Input
+                value={editCity}
+                onChange={(e) => setEditCity(e.target.value)}
+                className="bg-zinc-950 border-zinc-800 h-11 text-white"
               />
             </div>
-            <label className="flex items-center gap-2 text-sm text-zinc-300 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={editActive}
-                onChange={(e) => setEditActive(e.target.checked)}
-                className="rounded border-zinc-700"
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label className="text-zinc-500 text-xs">Taxa</Label>
+              <Input
+                value={editFee}
+                onChange={(e) => setEditFee(e.target.value)}
+                className="bg-zinc-950 border-zinc-800 h-11 text-white"
               />
-              Rua ativa
-            </label>
-            <div className="flex gap-2">
-              <Button
-                type="button"
-                disabled={saving}
-                onClick={() => void handleSaveEdit()}
-                className="flex-1 h-11 rounded-xl"
-              >
-                {saving ? <Loader2 className="animate-spin" size={16} /> : 'Salvar'}
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setEditing(null)}
-                className="h-11 rounded-xl border-zinc-700"
-              >
-                Cancelar
-              </Button>
             </div>
-          </section>
-        ) : null}
+            <div>
+              <Label className="text-zinc-500 text-xs">Tempo (min)</Label>
+              <Input
+                value={editEta}
+                onChange={(e) => setEditEta(e.target.value.replace(/\D/g, ''))}
+                className="bg-zinc-950 border-zinc-800 h-11 text-white"
+              />
+            </div>
+          </div>
+          <div>
+            <Label className="text-zinc-500 text-xs">Horário máximo de entrega</Label>
+            <Input
+              value={editMaxDeliveryTime}
+              onChange={(e) => setEditMaxDeliveryTime(normalizeTimeInput(e.target.value))}
+              placeholder="Ex: 21:00"
+              className="bg-zinc-950 border-zinc-800 h-11 text-white"
+            />
+          </div>
+          <div>
+            <Label className="text-zinc-500 text-xs">Observações</Label>
+            <textarea
+              value={editNotes}
+              onChange={(e) => setEditNotes(e.target.value)}
+              rows={3}
+              className="w-full mt-1 rounded-xl bg-zinc-950 border border-zinc-800 px-3 py-2 text-sm text-white resize-y"
+            />
+          </div>
+          <label className="flex items-center gap-2 text-sm text-zinc-300 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={editActive}
+              onChange={(e) => setEditActive(e.target.checked)}
+              className="rounded border-zinc-700"
+            />
+            Rua ativa
+          </label>
+          <div className="flex gap-2">
+            <Button
+              type="button"
+              disabled={saving}
+              onClick={() => void handleSaveEdit()}
+              className="flex-1 h-11 rounded-xl"
+            >
+              <span className={saving ? '' : 'hidden'}>
+                <Loader2 className="animate-spin" size={16} />
+              </span>
+              <span className={saving ? 'hidden' : ''}>Salvar</span>
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setEditing(null)}
+              className="h-11 rounded-xl border-zinc-700"
+            >
+              Cancelar
+            </Button>
+          </div>
+        </section>
 
-        {listLoading ? (
-          <div className="flex justify-center py-16">
+        <section className="min-h-[8rem]">
+          <div className={`flex justify-center py-16 ${listLoading ? '' : 'hidden'}`}>
             <Loader2 className="animate-spin text-amber-500" />
           </div>
-        ) : list.length === 0 ? (
-          <p className="text-zinc-500 text-sm text-center py-10">Nenhuma rua cadastrada ainda.</p>
-        ) : (
-          <div className="space-y-2">
+          <p
+            className={`text-zinc-500 text-sm text-center py-10 ${showEmptyList ? '' : 'hidden'}`}
+          >
+            Nenhuma rua cadastrada ainda.
+          </p>
+          <div className={`space-y-2 ${showList ? '' : 'hidden'}`}>
             {list.map((s) => (
               <div
                 key={s.id}
@@ -730,7 +750,8 @@ export default function AdminRuasEntrega() {
                       className="p-2 text-zinc-400 hover:text-amber-400"
                       aria-label="Ativar/Desativar"
                     >
-                      {s.active ? <ToggleRight size={20} /> : <ToggleLeft size={20} />}
+                      <ToggleRight size={20} className={s.active ? '' : 'hidden'} />
+                      <ToggleLeft size={20} className={s.active ? 'hidden' : ''} />
                     </button>
                     <button
                       type="button"
@@ -753,7 +774,7 @@ export default function AdminRuasEntrega() {
               </div>
             ))}
           </div>
-        )}
+        </section>
       </main>
 
       <AdminBottomNav active="/admin/ruas-entrega" />

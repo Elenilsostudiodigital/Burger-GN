@@ -76,6 +76,15 @@ const checks = [
     ok: pageCode.includes("showForm ? '' : 'hidden'") || pageCode.includes('showForm ? "" : "hidden"'),
   },
   {
+    name: "list/edit/pageError panels stay mounted (no ternary null siblings under main)",
+    ok:
+      !pageCode.match(/\{pageError\s*&&/) &&
+      !pageCode.match(/\{editing\s*\?\s*\(/) &&
+      !pageCode.match(/\{listLoading\s*\?\s*\(/) &&
+      pageCode.includes("showEmptyList") &&
+      pageCode.includes("showList"),
+  },
+  {
     name: "App uses stable AdminRuasEntregaRoute (no anonymous arrow wrapper)",
     ok:
       app.includes("function AdminRuasEntregaRoute") &&
