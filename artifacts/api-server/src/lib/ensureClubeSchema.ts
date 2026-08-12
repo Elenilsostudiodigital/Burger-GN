@@ -55,12 +55,45 @@ CREATE TABLE IF NOT EXISTS clube_members (
   birth_date DATE,
   points INTEGER NOT NULL DEFAULT 0,
   cashback_balance NUMERIC(10,2) NOT NULL DEFAULT 0,
+  club_points INTEGER NOT NULL DEFAULT 0,
+  import_source TEXT,
+  imported_at TIMESTAMP,
+  last_import TIMESTAMP,
   tier clube_member_tier NOT NULL DEFAULT 'bronze',
   active BOOLEAN NOT NULL DEFAULT true,
   notes TEXT NOT NULL DEFAULT '',
   joined_at TIMESTAMP NOT NULL DEFAULT NOW(),
   created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE clube_members
+  ADD COLUMN IF NOT EXISTS club_points INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE clube_members
+  ADD COLUMN IF NOT EXISTS import_source TEXT;
+ALTER TABLE clube_members
+  ADD COLUMN IF NOT EXISTS imported_at TIMESTAMP;
+ALTER TABLE clube_members
+  ADD COLUMN IF NOT EXISTS last_import TIMESTAMP;
+
+CREATE TABLE IF NOT EXISTS client_import_logs (
+  id SERIAL PRIMARY KEY,
+  company_id INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  user_id INTEGER,
+  user_email TEXT NOT NULL DEFAULT '',
+  user_name TEXT NOT NULL DEFAULT '',
+  file_name TEXT NOT NULL DEFAULT '',
+  source TEXT NOT NULL DEFAULT 'outro',
+  total_rows INTEGER NOT NULL DEFAULT 0,
+  imported_count INTEGER NOT NULL DEFAULT 0,
+  updated_count INTEGER NOT NULL DEFAULT 0,
+  skipped_count INTEGER NOT NULL DEFAULT 0,
+  error_count INTEGER NOT NULL DEFAULT 0,
+  errors_json TEXT NOT NULL DEFAULT '[]',
+  options_json TEXT NOT NULL DEFAULT '{}',
+  created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS client_import_logs_company_idx
+  ON client_import_logs(company_id);
 
 CREATE TABLE IF NOT EXISTS clube_loyalty_rewards (
   id SERIAL PRIMARY KEY,

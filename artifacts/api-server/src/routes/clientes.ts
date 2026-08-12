@@ -29,6 +29,12 @@ import {
   type RecoveryFilter,
 } from "../lib/clientStats";
 import { parseOrderNotes } from "../lib/orderMeta";
+import {
+  finalizeCsvImportLog,
+  listCsvImportLogs,
+  normalizeImportOptions,
+  processCsvImportBatch,
+} from "../lib/clientCsvImport";
 
 async function loadFidelitySettings(companyId: number) {
   const [settings] = await db
@@ -153,6 +159,160 @@ function isRecoveryFilter(value: string): value is RecoveryFilter {
 // ── Origins ──────────────────────────────────────────────────────────────────
 router.get("/admin/clientes/origins", requireCompanyAuth, (_req, res) => {
   res.json(CLIENT_ORIGIN_LABELS);
+});
+
+// ── CSV import (modular; phone = unique key) ─────────────────────────────────
+router.post("/admin/clientes/import/csv/batch", requireCompanyAuth, async (req, res) => {
+  try {
+    const body = req.body as {
+      source?: string;
+      rows?: unknown[];
+      options?: Partial<import("../lib/clientCsvImport").CsvImportOptions>;
+      seenPhones?: string[];
+    };
+
+    const sourceRaw = String(body.source || "outro");
+    const source =
+      sourceRaw === "anota_ai" || sourceRaw === "excel" || sourceRaw === "outro"
+        ? sourceRaw
+        : "outro";
+
+    const rowsRaw = Array.isArray(body.rows) ? body.rows : [];
+    if (rowsRaw.length === 0) {
+      res.status(400).json({ error: "Nenhuma linha para importar." });
+      return;
+    }
+    if (rowsRaw.length > 200) {
+      res.status(400).json({ error: "Máximo de 200 linhas por lote." });
+      return;
+    }
+
+    const rows = rowsRaw.map((r, i) => {
+      const row = (r && typeof r === "object" ? r : {}) as Record<string, unknown>;
+      return {
+        line: typeof row["line"] === "number" ? row["line"] : i + 2,
+        name: row["name"] != null ? String(row["name"]) : null,
+        phone: row["phone"] != null ? String(row["phone"]) : null,
+        celular: row["celular"] != null ? String(row["celular"]) : null,
+        email: row["email"] != null ? String(row["email"]) : null,
+        cashback: row["cashback"] as string | number | null | undefined,
+        stamps: row["stamps"] as string | number | null | undefined,
+        clubPoints: row["clubPoints"] as string | number | null | undefined,
+        birthDate: row["birthDate"] != null ? String(row["birthDate"]) : null,
+        notes: row["notes"] != null ? String(row["notes"]) : null,
+      };
+    });
+
+    const options = normalizeImportOptions(body.options);
+    const seenPhones = new Set(
+      (Array.isArray(body.seenPhones) ? body.seenPhones : [])
+        .map((p) => normalizeClientPhone(String(p)))
+        .filter(Boolean),
+    );
+
+    const result = await processCsvImportBatch({
+      companyId: req.companyId!,
+      source,
+      rows,
+      options,
+      seenPhones,
+    });
+
+    res.json({
+      ...result,
+      seenPhones: [...seenPhones],
+    });
+  } catch (err) {
+    req.log.error({ err }, "Failed CSV import batch");
+    res.status(500).json({ error: "Falha ao processar lote de importação." });
+  }
+});
+
+router.post("/admin/clientes/import/csv/finalize", requireCompanyAuth, async (req, res) => {
+  try {
+    const body = req.body as {
+      fileName?: string;
+      source?: string;
+      totalRows?: number;
+      imported?: number;
+      updated?: number;
+      skipped?: number;
+      errors?: import("../lib/clientCsvImport").CsvImportError[];
+      options?: Partial<import("../lib/clientCsvImport").CsvImportOptions>;
+    };
+
+    const sourceRaw = String(body.source || "outro");
+    const source =
+      sourceRaw === "anota_ai" || sourceRaw === "excel" || sourceRaw === "outro"
+        ? sourceRaw
+        : "outro";
+
+    const log = await finalizeCsvImportLog({
+      companyId: req.companyId!,
+      userId: req.companyUserId,
+      fileName: String(body.fileName || "import.csv"),
+      source,
+      totalRows: Math.max(0, Number(body.totalRows) || 0),
+      imported: Math.max(0, Number(body.imported) || 0),
+      updated: Math.max(0, Number(body.updated) || 0),
+      skipped: Math.max(0, Number(body.skipped) || 0),
+      errors: Array.isArray(body.errors) ? body.errors.slice(0, 200) : [],
+      options: normalizeImportOptions(body.options),
+    });
+
+    res.status(201).json({
+      ok: true,
+      log: {
+        id: log.id,
+        fileName: log.fileName,
+        source: log.source,
+        totalRows: log.totalRows,
+        importedCount: log.importedCount,
+        updatedCount: log.updatedCount,
+        skippedCount: log.skippedCount,
+        errorCount: log.errorCount,
+        userEmail: log.userEmail,
+        userName: log.userName,
+        createdAt: log.createdAt,
+      },
+    });
+  } catch (err) {
+    req.log.error({ err }, "Failed to finalize CSV import log");
+    res.status(500).json({ error: "Falha ao registrar log de importação." });
+  }
+});
+
+router.get("/admin/clientes/import/logs", requireCompanyAuth, async (req, res) => {
+  try {
+    const limit = Math.min(100, Math.max(1, Number(req.query["limit"]) || 20));
+    const logs = await listCsvImportLogs(req.companyId!, limit);
+    res.json({
+      count: logs.length,
+      logs: logs.map((log) => ({
+        id: log.id,
+        fileName: log.fileName,
+        source: log.source,
+        totalRows: log.totalRows,
+        importedCount: log.importedCount,
+        updatedCount: log.updatedCount,
+        skippedCount: log.skippedCount,
+        errorCount: log.errorCount,
+        userEmail: log.userEmail,
+        userName: log.userName,
+        createdAt: log.createdAt,
+        errors: (() => {
+          try {
+            return JSON.parse(log.errorsJson || "[]");
+          } catch {
+            return [];
+          }
+        })(),
+      })),
+    });
+  } catch (err) {
+    req.log.error({ err }, "Failed to list CSV import logs");
+    res.status(500).json({ error: "Falha ao listar logs de importação." });
+  }
 });
 
 // ── Recuperação de clientes (computed from order history) ─────────────────────
