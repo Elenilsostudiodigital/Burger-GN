@@ -9,6 +9,7 @@ import {
   StreetRequestDetail,
 } from '../../lib/api';
 import { AdminBottomNav } from '../../components/AdminBottomNav';
+import { StreetMapPreview } from '../../components/StreetMapPreview';
 import { ArrowLeft, Loader2, MapPin, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -195,21 +196,40 @@ export default function AdminNovasRuas() {
                   <h2 className="text-amber-500 text-xs font-bold uppercase tracking-wider flex items-center gap-1.5">
                     <MapPin size={14} /> Localização
                   </h2>
-                  {detail.mapEmbed ? (
-                    <iframe
-                      title="Mapa da rua"
-                      src={detail.mapEmbed}
-                      className="w-full h-44 rounded-xl border border-zinc-800 bg-zinc-950"
-                      loading="lazy"
-                    />
-                  ) : (
-                    <p className="text-zinc-500 text-xs">Sem coordenadas para exibir o mapa.</p>
-                  )}
+                  {/* Static map only — never mount/unmount an OSM iframe here */}
+                  <StreetMapPreview
+                    lat={
+                      detail.request.lat != null && Number.isFinite(Number(detail.request.lat))
+                        ? Number(detail.request.lat)
+                        : null
+                    }
+                    lng={
+                      detail.request.lng != null && Number.isFinite(Number(detail.request.lng))
+                        ? Number(detail.request.lng)
+                        : null
+                    }
+                    message="Sem coordenadas para exibir o mapa."
+                  />
                   <div className="space-y-1 text-sm">
-                    <p>📏 Distância pela rota: <strong className="text-amber-400">{detail.request.routeDistanceKm != null ? `${detail.request.routeDistanceKm.toFixed(1)} km` : '—'}</strong></p>
-                    <p>🚗 Tempo estimado: <strong className="text-amber-400">{detail.request.etaMinutes != null ? `${detail.request.etaMinutes} min` : '—'}</strong></p>
+                    <p>
+                      Distância pela rota:{' '}
+                      <strong className="text-amber-400">
+                        {detail.request.routeDistanceKm != null
+                          ? `${Number(detail.request.routeDistanceKm).toFixed(1)} km`
+                          : '—'}
+                      </strong>
+                    </p>
+                    <p>
+                      Tempo estimado:{' '}
+                      <strong className="text-amber-400">
+                        {detail.request.etaMinutes != null ? `${detail.request.etaMinutes} min` : '—'}
+                      </strong>
+                    </p>
                     <p className="text-zinc-500 text-xs">
-                      Base checkout (Haversine): {detail.request.distanceKm != null ? `${detail.request.distanceKm.toFixed(1)} km` : '—'}
+                      Base checkout (Haversine):{' '}
+                      {detail.request.distanceKm != null
+                        ? `${Number(detail.request.distanceKm).toFixed(1)} km`
+                        : '—'}
                     </p>
                   </div>
                 </section>

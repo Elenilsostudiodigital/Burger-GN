@@ -10,6 +10,7 @@ import {
 } from '../lib/api';
 import { saveMyOrder } from '../lib/myOrder';
 import { ErrorBoundary } from '../components/ErrorBoundary';
+import { StreetMapPreview } from '../components/StreetMapPreview';
 import {
   ClubeFidelityRedeemPrompt,
   FidelityRedeemSelection,
@@ -55,11 +56,6 @@ function formatPhone(v: string | null | undefined) {
   if (n.length <= 2) return n;
   if (n.length <= 7) return `(${n.slice(0, 2)}) ${n.slice(2)}`;
   return `(${n.slice(0, 2)}) ${n.slice(2, 7)}-${n.slice(7)}`;
-}
-
-function mapEmbedUrl(lat: number, lng: number) {
-  const d = 0.012;
-  return `https://www.openstreetmap.org/export/embed.html?bbox=${lng - d}%2C${lat - d}%2C${lng + d}%2C${lat + d}&layer=mapnik&marker=${lat}%2C${lng}`;
 }
 
 export default function Checkout() {
@@ -954,12 +950,13 @@ export default function Checkout() {
                 <p className="text-zinc-500 text-sm">Verifique o marcador no mapa e a taxa de entrega antes de continuar.</p>
               </div>
 
-              {gpsLoading && (
-                <div className="flex flex-col items-center justify-center py-16 gap-3 text-zinc-400">
-                  <Loader2 size={32} className="animate-spin text-amber-500" />
-                  <p className="text-sm">Obtendo sua localização...</p>
-                </div>
-              )}
+              {/* Stable map host — static <img>, never mount/unmount an iframe */}
+              <StreetMapPreview
+                lat={customerCoords?.lat ?? null}
+                lng={customerCoords?.lng ?? null}
+                loading={gpsLoading}
+                message={gpsError || 'Aguardando sua localização…'}
+              />
 
               {gpsError && !gpsLoading && (
                 <div className="space-y-3">
@@ -980,25 +977,16 @@ export default function Checkout() {
 
               {!gpsLoading && customerCoords && (
                 <>
-                  <div className="rounded-2xl overflow-hidden border border-zinc-800 bg-zinc-900">
-                    <iframe
-                      title="Mapa da entrega"
-                      src={mapEmbedUrl(customerCoords.lat, customerCoords.lng)}
-                      className="w-full h-56 border-0"
-                      loading="lazy"
-                      referrerPolicy="no-referrer-when-downgrade"
-                    />
-                    <div className="px-4 py-3 space-y-1 border-t border-zinc-800">
-                      <div className="flex items-center gap-2 text-amber-500 text-xs font-bold uppercase tracking-wider">
-                        <MapPin size={14} /> Local detectado
-                      </div>
-                      <p className="text-zinc-300 text-sm leading-snug">{locationLabel || `${customerCoords.lat.toFixed(5)}, ${customerCoords.lng.toFixed(5)}`}</p>
-                      {distanceKm !== null && (
-                        <p className="text-zinc-500 text-xs flex items-center gap-1.5">
-                          <Navigation size={12} /> Distância aproximada: {distanceKm.toFixed(1)} km
-                        </p>
-                      )}
+                  <div className="rounded-2xl border border-zinc-800 bg-zinc-900 px-4 py-3 space-y-1">
+                    <div className="flex items-center gap-2 text-amber-500 text-xs font-bold uppercase tracking-wider">
+                      <MapPin size={14} /> Local detectado
                     </div>
+                    <p className="text-zinc-300 text-sm leading-snug">{locationLabel || `${customerCoords.lat.toFixed(5)}, ${customerCoords.lng.toFixed(5)}`}</p>
+                    {distanceKm !== null && (
+                      <p className="text-zinc-500 text-xs flex items-center gap-1.5">
+                        <Navigation size={12} /> Distância aproximada: {distanceKm.toFixed(1)} km
+                      </p>
+                    )}
                   </div>
 
                   {feeBanner}

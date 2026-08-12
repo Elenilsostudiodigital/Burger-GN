@@ -1,4 +1,4 @@
-import express, { type Express } from "express";
+import express, { type Express, type NextFunction, type Request, type Response } from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
 import path from "node:path";
@@ -6,19 +6,39 @@ import fs from "node:fs";
 import pinoHttp from "pino-http";
 import router from "./routes";
 import { logger } from "./lib/logger";
+import { ensureCompanySchema } from "./lib/ensureCompanySchema";
 import { ensureClubeSchema } from "./lib/ensureClubeSchema";
 import { ensureDeliveryStreetsSchema } from "./lib/ensureDeliveryStreetsSchema";
 
 const app: Express = express();
 
+/** Company tables are required by nearly every authenticated/public commerce route. */
+app.use("/api", async (req, res, next) => {
+  const p = req.path || "";
+  if (p === "/healthz" || p.startsWith("/healthz/")) return next();
+  try {
+    await ensureCompanySchema();
+    next();
+  } catch (err) {
+    logger.error({ err }, "Failed to ensure company schema");
+    const detail = err instanceof Error ? err.message : String(err);
+    const missingRelation = /relation .* does not exist/i.test(detail);
+    res.status(500).json({
+      error: missingRelation
+        ? "Banco de dados incompleto: tabelas da empresa ausentes. Tente novamente em instantes."
+        : "Falha ao conectar ou preparar o banco de dados da loja.",
+    });
+  }
+});
+
 /** Ensures additive Clube/CRM schema before handlers that touch those tables. */
 app.use("/api", async (req, res, next) => {
-  const path = req.path || "";
+  const p = req.path || "";
   const needsClubeSchema =
-    path.startsWith("/admin/clientes") ||
-    path.startsWith("/admin/clube") ||
-    path === "/orders" ||
-    path.startsWith("/orders/");
+    p.startsWith("/admin/clientes") ||
+    p.startsWith("/admin/clube") ||
+    p === "/orders" ||
+    p.startsWith("/orders/");
   if (!needsClubeSchema) return next();
   try {
     await ensureClubeSchema();
@@ -31,13 +51,13 @@ app.use("/api", async (req, res, next) => {
 
 /** Ensures delivery streets tables before street/fee handlers. */
 app.use("/api", async (req, res, next) => {
-  const path = req.path || "";
+  const p = req.path || "";
   const needsStreets =
-    path.startsWith("/delivery/streets") ||
-    path.startsWith("/admin/delivery-street") ||
-    path.startsWith("/admin/delivery-streets") ||
-    path === "/orders" ||
-    path.startsWith("/orders/");
+    p.startsWith("/delivery/streets") ||
+    p.startsWith("/admin/delivery-street") ||
+    p.startsWith("/admin/delivery-streets") ||
+    p === "/orders" ||
+    p.startsWith("/orders/");
   if (!needsStreets) return next();
   try {
     await ensureDeliveryStreetsSchema();
@@ -84,5 +104,18 @@ if (staticDir && fs.existsSync(staticDir)) {
     res.sendFile(path.join(staticDir, "index.html"));
   });
 }
+
+/** Always return JSON for unhandled /api errors (never Express HTML 500 pages). */
+app.use((err: unknown, req: Request, res: Response, next: NextFunction) => {
+  if (res.headersSent) return next(err);
+  logger.error({ err, url: req.url }, "Unhandled API error");
+  const wantsApi = (req.originalUrl || req.url || "").startsWith("/api");
+  if (!wantsApi) return next(err);
+  const message =
+    err instanceof Error && err.message
+      ? err.message
+      : "Internal server error";
+  res.status(500).json({ error: message });
+});
 
 export default app;
