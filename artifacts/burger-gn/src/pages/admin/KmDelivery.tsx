@@ -52,6 +52,8 @@ export default function KmDelivery() {
   const { logout } = useAdmin();
   const [, setLocation] = useLocation();
   const [tab, setTab] = useState<'config' | 'areas'>('config');
+  /** Keep Áreas mounted after first visit so Leaflet host is never remounted mid-save. */
+  const [areasMounted, setAreasMounted] = useState(false);
 
   const [config, setConfig] = useState<KmDeliveryConfig | null>(null);
   const [tiers, setTiers] = useState<KmDeliveryTier[]>([]);
@@ -94,6 +96,10 @@ export default function KmDelivery() {
   };
 
   useEffect(() => { load(); }, []);
+
+  useEffect(() => {
+    if (tab === 'areas') setAreasMounted(true);
+  }, [tab]);
 
   const handleGetGPS = () => {
     if (!navigator.geolocation) return;
@@ -174,10 +180,11 @@ export default function KmDelivery() {
         </div>
       </header>
 
-      {loading ? (
-        <div className="flex justify-center py-20"><div className="w-8 h-8 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" /></div>
-      ) : (
-        <main className="max-w-2xl mx-auto px-4 py-5 space-y-5">
+      <div className={`flex justify-center py-20 ${loading ? '' : 'hidden'}`}>
+        <div className="w-8 h-8 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
+      </div>
+
+      <main className={`max-w-2xl mx-auto px-4 py-5 space-y-5 ${loading ? 'hidden' : ''}`}>
 
           <div className="flex gap-1 p-1 rounded-xl bg-zinc-900 border border-zinc-800">
             <button
@@ -200,10 +207,15 @@ export default function KmDelivery() {
             </button>
           </div>
 
-          {tab === 'areas' ? (
-            <DeliveryAreasAdmin />
-          ) : (
-          <>
+          {/*
+            Both panels stay mounted (CSS hidden). Unmounting DeliveryAreasAdmin
+            while Leaflet owns the map host caused insertBefore on Salvar Área.
+          */}
+          <div className={tab === 'areas' ? '' : 'hidden'}>
+            {areasMounted ? <DeliveryAreasAdmin active={tab === 'areas'} /> : null}
+          </div>
+
+          <div className={`space-y-5 ${tab === 'config' ? '' : 'hidden'}`}>
 
           {/* Enable toggle */}
           <div className={`rounded-2xl p-5 border transition-all ${cfEnabled ? 'bg-amber-500/10 border-amber-500/30' : 'bg-zinc-900 border-zinc-800'}`}>
@@ -400,10 +412,8 @@ export default function KmDelivery() {
               </Button>
             )}
           </section>
-          </>
-          )}
-        </main>
-      )}
+          </div>
+      </main>
 
       <AdminNav active="/admin/entrega-km" />
     </div>

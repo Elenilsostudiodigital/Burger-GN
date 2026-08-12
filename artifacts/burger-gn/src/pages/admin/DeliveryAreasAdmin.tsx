@@ -1,8 +1,18 @@
 /**
- * Áreas de Entrega — admin map panel (Leaflet + Geoman).
+ * Áreas de Entrega — stable React DOM + Leaflet/Geoman (no insertBefore).
  *
- * Flow: Desenhar → Finalizar (Geoman) → formulário → Salvar Área → DB
- * Areas are always reloaded from the API on mount and after save/delete.
+ * Root cause of NotFoundError (insertBefore) on "Salvar Área":
+ * During save, React siblings were conditionally mounted/unmounted in the same
+ * commit where Leaflet removed the draft layer and the list swapped
+ * (loading spinner ↔ empty ↔ cards; cancel button; success banner).
+ * React then called insertBefore against a reference node that was no longer
+ * a child of that parent → ErrorBoundary.
+ *
+ * Contract:
+ * - Fixed sibling tree under the root; show/hide only via CSS `hidden` / `invisible`
+ * - Never set loading=true on post-save refresh (silent reload)
+ * - Leaflet mutations deferred to rAF after React commits
+ * - Map host div never remounts; polygons live only inside Leaflet (not React children)
  */
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import L from "leaflet";
@@ -53,7 +63,6 @@ const emptyForm = (status: "active" | "blocked" = "active"): FormState => ({
   priority: "0",
 });
 
-/** Extract Polygon/MultiPolygon from Leaflet layer / GeoJSON / Feature / FeatureCollection. */
 function polygonFromUnknown(raw: unknown): DeliveryAreaPolygon | null {
   if (!raw || typeof raw !== "object") return null;
   const obj = raw as Record<string, unknown>;
@@ -66,9 +75,7 @@ function polygonFromUnknown(raw: unknown): DeliveryAreaPolygon | null {
   if (obj.type === "MultiPolygon" && Array.isArray(obj.coordinates)) {
     return { type: "MultiPolygon", coordinates: obj.coordinates as number[][][][] };
   }
-  if (obj.type === "Feature") {
-    return polygonFromUnknown(obj.geometry);
-  }
+  if (obj.type === "Feature") return polygonFromUnknown(obj.geometry);
   if (obj.type === "FeatureCollection" && Array.isArray(obj.features)) {
     for (const f of obj.features as unknown[]) {
       const p = polygonFromUnknown(f);
@@ -88,39 +95,24 @@ function polygonFromLayer(layer: L.Layer): DeliveryAreaPolygon | null {
   const fromGeo = polygonFromUnknown(anyLayer.toGeoJSON?.());
   if (fromGeo) return fromGeo;
 
-  // Fallback: build ring from Leaflet latlngs
   try {
     const latlngs = anyLayer.getLatLngs?.();
-    const ringSrc = Array.isArray(latlngs)
-      ? Array.isArray(latlngs[0])
-        ? (Array.isArray((latlngs[0] as unknown[])[0])
-            ? (latlngs[0] as L.LatLng[])
-            : (latlngs as L.LatLng[]))
-        : (latlngs as L.LatLng[])
-      : null;
-    // Prefer first ring of polygon
     let ring: L.LatLng[] | null = null;
     if (Array.isArray(latlngs) && latlngs.length > 0) {
       const first = latlngs[0];
       if (first && typeof first === "object" && "lat" in (first as object)) {
         ring = latlngs as L.LatLng[];
       } else if (Array.isArray(first)) {
-        const inner = first[0];
-        if (inner && typeof inner === "object" && "lat" in (inner as object)) {
-          ring = first as L.LatLng[];
-        } else if (Array.isArray(first) && first.length && typeof first[0] === "object" && "lat" in (first[0] as object)) {
+        if (first[0] && typeof first[0] === "object" && "lat" in (first[0] as object)) {
           ring = first as L.LatLng[];
         }
       }
     }
-    if (!ring && ringSrc) ring = ringSrc;
     if (!ring || ring.length < 3) return null;
     const coords = ring.map((ll) => [ll.lng, ll.lat] as number[]);
-    const first = coords[0]!;
-    const last = coords[coords.length - 1]!;
-    if (first[0] !== last[0] || first[1] !== last[1]) {
-      coords.push([first[0]!, first[1]!]);
-    }
+    const a = coords[0]!;
+    const b = coords[coords.length - 1]!;
+    if (a[0] !== b[0] || a[1] !== b[1]) coords.push([a[0]!, a[1]!]);
     if (coords.length < 4) return null;
     return { type: "Polygon", coordinates: [coords] };
   } catch {
@@ -142,20 +134,31 @@ function formFromArea(area: DeliveryArea): FormState {
   };
 }
 
-export default function DeliveryAreasAdmin() {
+function deferLeaflet(fn: () => void) {
+  requestAnimationFrame(() => {
+    try {
+      fn();
+    } catch {
+      /* ignore leaflet timing errors */
+    }
+  });
+}
+
+export default function DeliveryAreasAdmin({ active = true }: { active?: boolean }) {
   const mapHostRef = useRef<HTMLDivElement | null>(null);
   const formRef = useRef<HTMLElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
   const layerGroupRef = useRef<L.LayerGroup | null>(null);
   const draftLayerRef = useRef<L.Layer | null>(null);
-  const areasRef = useRef<DeliveryArea[]>([]);
+  const areasPaintRef = useRef<DeliveryArea[]>([]);
+  const selectedPaintRef = useRef<number | null>(null);
 
   const [mapReady, setMapReady] = useState(false);
   const [areas, setAreas] = useState<DeliveryArea[]>([]);
   const [areasEnabled, setAreasEnabled] = useState(false);
   const [baseLat, setBaseLat] = useState(DEFAULT_CENTER[0]);
   const [baseLng, setBaseLng] = useState(DEFAULT_CENTER[1]);
-  const [loading, setLoading] = useState(true);
+  const [initialLoading, setInitialLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -166,7 +169,14 @@ export default function DeliveryAreasAdmin() {
   const [draftPolygon, setDraftPolygon] = useState<DeliveryAreaPolygon | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm());
 
-  areasRef.current = areas;
+  areasPaintRef.current = areas;
+  selectedPaintRef.current = selectedId;
+
+  const showForm = formMode === "create" || formMode === "edit";
+  const showCancel = drawing || formMode === "create";
+  const showBlockReason = form.status === "blocked";
+  const showEmptyList = !initialLoading && areas.length === 0;
+  const showList = !initialLoading && areas.length > 0;
 
   const openForm = useCallback((mode: FormMode, opts?: { scroll?: boolean }) => {
     setFormMode(mode);
@@ -179,23 +189,27 @@ export default function DeliveryAreasAdmin() {
 
   const clearDraftLayer = useCallback(() => {
     const map = mapRef.current;
-    if (draftLayerRef.current && map) {
+    const layer = draftLayerRef.current;
+    draftLayerRef.current = null;
+    if (!map || !layer) return;
+    deferLeaflet(() => {
       try {
-        map.removeLayer(draftLayerRef.current);
+        if (map.hasLayer(layer)) map.removeLayer(layer);
       } catch {
         /* ignore */
       }
-    }
-    draftLayerRef.current = null;
+    });
   }, []);
 
-  const paintAreasOnMap = useCallback(
-    (list: DeliveryArea[], highlightId: number | null) => {
-      const map = mapRef.current;
-      const group = layerGroupRef.current;
-      if (!map || !group) return;
-      group.clearLayers();
-
+  const paintAreasOnMap = useCallback((list: DeliveryArea[], highlightId: number | null) => {
+    const map = mapRef.current;
+    const group = layerGroupRef.current;
+    if (!map || !group) return;
+    deferLeaflet(() => {
+      const g = layerGroupRef.current;
+      const m = mapRef.current;
+      if (!g || !m) return;
+      g.clearLayers();
       for (const area of list) {
         try {
           const gj = L.geoJSON(area.polygon as GeoJSON.GeoJsonObject, {
@@ -212,7 +226,7 @@ export default function DeliveryAreasAdmin() {
                 clearDraftLayer();
                 setDraftPolygon(null);
                 setDrawing(false);
-                map.pm.disableDraw();
+                m.pm.disableDraw();
                 setSelectedId(area.id);
                 setEditingId(area.id);
                 setForm(formFromArea(area));
@@ -220,17 +234,17 @@ export default function DeliveryAreasAdmin() {
               });
             },
           });
-          group.addLayer(gj);
+          g.addLayer(gj);
         } catch {
           /* skip bad polygon */
         }
       }
-    },
-    [clearDraftLayer, openForm],
-  );
+    });
+  }, [clearDraftLayer, openForm]);
 
-  const refresh = useCallback(async () => {
-    setLoading(true);
+  const refresh = useCallback(async (opts?: { silent?: boolean }) => {
+    const silent = opts?.silent === true;
+    if (!silent) setInitialLoading(true);
     setError("");
     try {
       const [list, settings] = await Promise.all([
@@ -253,15 +267,14 @@ export default function DeliveryAreasAdmin() {
       setError(err instanceof Error ? err.message : "Erro ao carregar áreas");
       return [];
     } finally {
-      setLoading(false);
+      setInitialLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    void refresh();
+    void refresh({ silent: false });
   }, [refresh]);
 
-  // Init map
   useEffect(() => {
     if (!mapHostRef.current || mapRef.current) return;
 
@@ -296,12 +309,22 @@ export default function DeliveryAreasAdmin() {
     });
 
     const onCreate = (e: unknown) => {
-      const ev = e as { layer?: L.Layer; shape?: string };
+      const ev = e as { layer?: L.Layer };
       const layer = ev.layer;
       if (!layer) return;
 
-      clearDraftLayer();
+      // Drop previous draft via Leaflet only (not React children).
+      const prev = draftLayerRef.current;
       draftLayerRef.current = layer;
+      if (prev && prev !== layer) {
+        deferLeaflet(() => {
+          try {
+            if (map.hasLayer(prev)) map.removeLayer(prev);
+          } catch {
+            /* ignore */
+          }
+        });
+      }
 
       const poly = polygonFromLayer(layer);
       setDraftPolygon(poly);
@@ -316,7 +339,6 @@ export default function DeliveryAreasAdmin() {
     };
 
     map.on("pm:create", onCreate as L.LeafletEventHandlerFn);
-
     mapRef.current = map;
     setMapReady(true);
     setTimeout(() => map.invalidateSize(), 100);
@@ -338,11 +360,19 @@ export default function DeliveryAreasAdmin() {
     map.setView([baseLat, baseLng], map.getZoom() || 13);
   }, [baseLat, baseLng]);
 
-  // Always repaint saved areas when list/map/selection changes
   useEffect(() => {
     if (!mapReady) return;
     paintAreasOnMap(areas, selectedId);
   }, [areas, selectedId, mapReady, paintAreasOnMap]);
+
+  useEffect(() => {
+    if (!active || !mapRef.current) return;
+    const t = window.setTimeout(() => {
+      mapRef.current?.invalidateSize();
+      paintAreasOnMap(areasPaintRef.current, selectedPaintRef.current);
+    }, 80);
+    return () => window.clearTimeout(t);
+  }, [active, paintAreasOnMap]);
 
   const startDraw = () => {
     const map = mapRef.current;
@@ -386,6 +416,7 @@ export default function DeliveryAreasAdmin() {
       const updated = await toggleAdminDeliveryArea(area.id, !area.enabled);
       setAreas((prev) => prev.map((a) => (a.id === updated.id ? updated : a)));
       setSuccess(updated.enabled ? "Área ligada." : "Área desligada.");
+      setError("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erro ao ligar/desligar");
     }
@@ -398,12 +429,10 @@ export default function DeliveryAreasAdmin() {
     try {
       if (!form.name.trim()) {
         setError("Informe o nome da área.");
-        setSaving(false);
         return;
       }
       if (form.status === "blocked" && !form.blockReason.trim()) {
         setError("Informe o motivo do bloqueio.");
-        setSaving(false);
         return;
       }
 
@@ -419,19 +448,17 @@ export default function DeliveryAreasAdmin() {
           notes: form.notes.trim(),
           priority: Number(form.priority) || 0,
         });
-        await refresh();
+        await refresh({ silent: true });
         setSelectedId(updated.id);
         setEditingId(updated.id);
         setForm(formFromArea(updated));
         openForm("edit", { scroll: false });
         setSuccess("Área atualizada.");
       } else {
-        // Prefer live geometry from the draft layer; fall back to state
-        let polygon =
+        const polygon =
           (draftLayerRef.current ? polygonFromLayer(draftLayerRef.current) : null) || draftPolygon;
         if (!polygon) {
           setError("Desenhe e finalize a área no mapa antes de salvar.");
-          setSaving(false);
           return;
         }
         const created = await createAdminDeliveryArea({
@@ -448,9 +475,10 @@ export default function DeliveryAreasAdmin() {
           enabled: true,
           city: "Lauro de Freitas",
         });
+        // Capture draft ref then clear after React state settles
         clearDraftLayer();
         setDraftPolygon(null);
-        await refresh();
+        await refresh({ silent: true });
         setSelectedId(created.id);
         setEditingId(created.id);
         setForm(formFromArea(created));
@@ -474,17 +502,21 @@ export default function DeliveryAreasAdmin() {
         setFormMode(null);
         setForm(emptyForm());
       }
-      await refresh();
+      await refresh({ silent: true });
       setSuccess("Área excluída.");
+      setError("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erro ao excluir");
     }
   };
 
-  const showForm = formMode === "create" || formMode === "edit";
-
   return (
     <div className="space-y-4">
+      {/*
+        Fixed sibling tree: never mount/unmount panels below.
+        Visibility is CSS-only so React never insertBefore across a removed node
+        while Leaflet mutates the map host.
+      */}
       <div
         className={`rounded-2xl p-4 border transition-all ${
           areasEnabled ? "bg-emerald-500/10 border-emerald-500/30" : "bg-zinc-900 border-zinc-800"
@@ -519,11 +551,13 @@ export default function DeliveryAreasAdmin() {
         <div ref={mapHostRef} className="w-full h-[320px] sm:h-[420px] z-0" />
       </div>
 
-      {drawing && (
-        <p className="text-amber-400 text-xs font-bold text-center">
-          Desenhando… toque nos vértices e finalize o polígono no mapa.
-        </p>
-      )}
+      <p
+        className={`text-amber-400 text-xs font-bold text-center min-h-[1rem] ${
+          drawing ? "" : "invisible"
+        }`}
+      >
+        Desenhando… toque nos vértices e finalize o polígono no mapa.
+      </p>
 
       <div className="flex gap-2">
         <Button
@@ -534,28 +568,30 @@ export default function DeliveryAreasAdmin() {
         >
           <Plus size={16} className="mr-1" /> Desenhar área
         </Button>
-        {(drawing || formMode === "create") && (
-          <Button
-            type="button"
-            variant="outline"
-            onClick={cancelDraft}
-            className="h-11 rounded-xl border-zinc-700 text-zinc-300"
-          >
-            <X size={16} />
-          </Button>
-        )}
+        <Button
+          type="button"
+          variant="outline"
+          onClick={cancelDraft}
+          className={`h-11 rounded-xl border-zinc-700 text-zinc-300 ${showCancel ? "" : "invisible pointer-events-none"}`}
+        >
+          <X size={16} />
+        </Button>
       </div>
 
-      {error && (
-        <p className="text-red-400 text-sm" role="alert">
-          {error}
-        </p>
-      )}
-      {success && !error && (
-        <p className="text-emerald-400 text-sm" role="status">
-          {success}
-        </p>
-      )}
+      <p
+        className={`text-red-400 text-sm min-h-[1.25rem] ${error ? "" : "invisible"}`}
+        role={error ? "alert" : undefined}
+      >
+        {error || "\u00a0"}
+      </p>
+      <p
+        className={`text-emerald-400 text-sm min-h-[1.25rem] ${
+          success && !error ? "" : "invisible"
+        }`}
+        role={success && !error ? "status" : undefined}
+      >
+        {success || "\u00a0"}
+      </p>
 
       <section
         ref={formRef}
@@ -604,17 +640,15 @@ export default function DeliveryAreasAdmin() {
             />
           </div>
         </div>
-        {form.status === "blocked" && (
-          <div className="space-y-1.5">
-            <Label className="text-zinc-400 text-xs">Motivo do bloqueio</Label>
-            <Input
-              value={form.blockReason}
-              onChange={(e) => setForm((f) => ({ ...f, blockReason: e.target.value }))}
-              className="bg-zinc-950 border-zinc-800 text-white h-11"
-              placeholder="Ex.: Área de risco — não entregamos"
-            />
-          </div>
-        )}
+        <div className={`space-y-1.5 ${showBlockReason ? "" : "hidden"}`}>
+          <Label className="text-zinc-400 text-xs">Motivo do bloqueio</Label>
+          <Input
+            value={form.blockReason}
+            onChange={(e) => setForm((f) => ({ ...f, blockReason: e.target.value }))}
+            className="bg-zinc-950 border-zinc-800 text-white h-11"
+            placeholder="Ex.: Área de risco — não entregamos"
+          />
+        </div>
         <div className="grid grid-cols-2 gap-3">
           <div className="space-y-1.5">
             <Label className="text-zinc-400 text-xs">Taxa mínima (R$)</Label>
@@ -667,12 +701,12 @@ export default function DeliveryAreasAdmin() {
           onClick={() => void handleSave()}
           className="w-full h-11 rounded-xl bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold"
         >
-          {saving ? (
-            <Loader2 className="animate-spin" size={16} />
-          ) : (
-            <Check size={16} className="mr-1" />
-          )}
-          Salvar Área
+          <span className={`inline-flex items-center ${saving ? "" : "hidden"}`}>
+            <Loader2 className="animate-spin mr-2" size={16} /> Salvando…
+          </span>
+          <span className={`inline-flex items-center ${saving ? "hidden" : ""}`}>
+            <Check size={16} className="mr-1" /> Salvar Área
+          </span>
         </Button>
       </section>
 
@@ -680,14 +714,18 @@ export default function DeliveryAreasAdmin() {
         <h3 className="text-zinc-400 text-xs font-bold uppercase tracking-wider">
           Áreas cadastradas ({areas.length})
         </h3>
-        {loading ? (
-          <div className="flex justify-center py-8">
-            <Loader2 className="animate-spin text-amber-500" />
-          </div>
-        ) : areas.length === 0 ? (
-          <p className="text-zinc-600 text-sm py-4 text-center">Nenhuma área salva ainda.</p>
-        ) : (
-          areas.map((area) => (
+        <div
+          className={`flex justify-center py-8 ${initialLoading ? "" : "hidden"}`}
+        >
+          <Loader2 className="animate-spin text-amber-500" />
+        </div>
+        <p
+          className={`text-zinc-600 text-sm py-4 text-center ${showEmptyList ? "" : "hidden"}`}
+        >
+          Nenhuma área salva ainda.
+        </p>
+        <div className={`space-y-2 ${showList ? "" : "hidden"}`}>
+          {areas.map((area) => (
             <div
               key={area.id}
               className={`rounded-xl border px-3 py-3 flex items-start gap-3 ${
@@ -742,8 +780,8 @@ export default function DeliveryAreasAdmin() {
                 </button>
               </div>
             </div>
-          ))
-        )}
+          ))}
+        </div>
       </section>
     </div>
   );
