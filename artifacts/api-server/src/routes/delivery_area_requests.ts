@@ -420,7 +420,13 @@ router.post("/admin/delivery-area-requests/:id/approve", requireCompanyAuth, asy
     if (status === "active") {
       const streetName = displayStreetName(request.address || request.neighborhood || name);
       const streetKey = normalizeStreetKey(streetName);
-      if (streetKey) {
+      const genericStreet =
+        !streetKey
+        || streetKey === "gps"
+        || streetKey === "localizacao gps"
+        || streetKey === "s n"
+        || streetKey === "sn";
+      if (streetKey && !genericStreet) {
         const [known] = await db
           .select()
           .from(deliveryStreetsTable)
@@ -472,7 +478,11 @@ router.post("/admin/delivery-area-requests/:id/approve", requireCompanyAuth, asy
         }
       }
 
-      if (coverageType === "bairro" && request.neighborhood.trim()) {
+      if (
+        coverageType === "bairro"
+        && request.neighborhood.trim()
+        && normalizeStreetKey(request.neighborhood) !== "gps"
+      ) {
         const [knownZone] = await db
           .select()
           .from(deliveryZonesTable)
