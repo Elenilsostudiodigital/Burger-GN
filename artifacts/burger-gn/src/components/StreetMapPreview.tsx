@@ -94,7 +94,7 @@ export function StreetMapPreview({
         >
           Abrir no OpenStreetMap
         </a>
-        <p className={`text-zinc-600 text-xs ${hasCoords ? 'invisible absolute' : ''}`}>
+        <p className={`text-zinc-600 text-xs ${hasCoords ? 'invisible' : ''}`}>
           {message || 'Nenhum ponto selecionado ainda.'}
         </p>
       </div>
