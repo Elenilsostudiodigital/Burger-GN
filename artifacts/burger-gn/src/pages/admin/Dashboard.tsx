@@ -12,6 +12,8 @@ import {
   REJECT_REASON_SUGGESTIONS, RECEIPT_REJECT_SUGGESTIONS,
   Order, WorkflowStage, PrepDayStats,
   ORDER_TYPE_LABELS, PAYMENT_METHOD_LABELS, PAYMENT_STATUS_LABELS, CARD_TYPE_LABELS, WORKFLOW_LABELS,
+  getAdminAreaRequests,
+  DeliveryAreaRequest,
 } from '../../lib/api';
 import {
   LayoutDashboard, UtensilsCrossed, LogOut, Bell, BellOff,
@@ -20,6 +22,7 @@ import {
   ChevronLeft, ChevronRight, GripVertical, X, Crown, Filter, ImageIcon, CheckCircle2, Check, Ban, Star, Users,
 } from 'lucide-react';
 import { PrepCountdown, prepCardBorderClass } from '../../components/PrepCountdown';
+import { AreaRequestAdminCard } from '../../components/AreaRequestAdminCard';
 import {
   computePrepRemainingSeconds,
   formatPrepDuration,
@@ -540,6 +543,9 @@ export default function AdminDashboard() {
   const [newOrderIds, setNewOrderIds] = useState<Set<number>>(new Set());
   const [loading, setLoading] = useState(true);
   const [notification, setNotification] = useState<string | null>(null);
+  const [notificationHref, setNotificationHref] = useState<string | null>(null);
+  const [pendingAreaRequests, setPendingAreaRequests] = useState(0);
+  const [areaRequests, setAreaRequests] = useState<DeliveryAreaRequest[]>([]);
   const [activeDragOrder, setActiveDragOrder] = useState<Order | null>(null);
   const [showCancelled, setShowCancelled] = useState(false);
   const [filter, setFilter] = useState<'all' | ColumnKey>('all');
@@ -575,15 +581,28 @@ export default function AdminDashboard() {
     try { setPrepStats(await getPrepStats()); } catch { /* ignore */ }
   }, []);
 
+  const fetchAreaRequests = useCallback(async () => {
+    try {
+      const rows = await getAdminAreaRequests('pending');
+      const list = Array.isArray(rows) ? rows : [];
+      setAreaRequests(list);
+      setPendingAreaRequests(list.length);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
   useEffect(() => {
     fetchOrders();
     fetchPrepStats();
+    fetchAreaRequests();
     const interval = setInterval(() => {
       fetchOrders();
       fetchPrepStats();
+      fetchAreaRequests();
     }, 30000);
     return () => clearInterval(interval);
-  }, [fetchOrders, fetchPrepStats]);
+  }, [fetchOrders, fetchPrepStats, fetchAreaRequests]);
 
   useEffect(() => {
     fetchOrders();
@@ -599,6 +618,7 @@ export default function AdminDashboard() {
         : order.workflow === 'new' && order.paymentStatus === 'paid'
           ? `🔔 Pedido aguardando confirmação #${order.orderNumber} de ${order.customerName}`
           : `🔔 Novo pedido #${order.orderNumber} de ${order.customerName}`;
+      setNotificationHref(null);
       setNotification(label);
       setTimeout(() => setNotification(null), 6000);
       setTimeout(() => setNewOrderIds(prev => { const s = new Set(prev); s.delete(order.id); return s; }), 30000);
@@ -627,12 +647,26 @@ export default function AdminDashboard() {
     });
     es.addEventListener('order_payment', () => {
       fetchOrders();
+      setNotificationHref(null);
       setNotification('🔔 Status de pagamento atualizado');
       setTimeout(() => setNotification(null), 4000);
     });
+    es.addEventListener('area_request', (e) => {
+      if (soundEnabledRef.current) playBeep();
+      let name = 'um cliente';
+      try {
+        const data = JSON.parse((e as MessageEvent).data) as { customerName?: string };
+        if (data.customerName) name = data.customerName;
+      } catch { /* ignore */ }
+      setPendingAreaRequests((n) => n + 1);
+      setNotificationHref('/admin/pedidos');
+      setNotification(`📍 Nova solicitação de área de ${name}`);
+      setTimeout(() => setNotification(null), 8000);
+      void fetchAreaRequests();
+    });
 
     return () => es.close();
-  }, [fetchOrders]);
+  }, [fetchOrders, fetchAreaRequests]);
 
   const applyUpdated = (id: number, updated: Order) => {
     setOrders(prev => prev.map(o => o.id === id ? { ...o, ...updated, items: updated.items?.length ? updated.items : o.items } : o));
@@ -809,7 +843,11 @@ export default function AdminDashboard() {
         {notification && (
           <motion.div initial={{ y: -60 }} animate={{ y: 0 }} exit={{ y: -60 }}
             className="fixed top-0 left-0 right-0 z-50 bg-amber-500 text-zinc-950 text-center font-bold text-sm py-3 px-4 shadow-lg">
-            {notification}
+            {notificationHref ? (
+              <Link href={notificationHref} className="underline underline-offset-2">
+                {notification}
+              </Link>
+            ) : notification}
           </motion.div>
         )}
       </AnimatePresence>
@@ -867,6 +905,20 @@ export default function AdminDashboard() {
           </div>
 
           <div className="flex items-center gap-1 shrink-0">
+            <Link
+              href="/admin/solicitacoes-areas"
+              className="relative p-2 text-zinc-400 hover:text-amber-400"
+              title="Solicitações de Áreas"
+            >
+              <MapPin size={20} />
+              <span
+                className={`absolute -top-0.5 -right-0.5 bg-amber-500 text-zinc-950 text-[9px] font-black min-w-4 h-4 px-0.5 rounded-full flex items-center justify-center ${
+                  pendingAreaRequests > 0 ? '' : 'invisible'
+                }`}
+              >
+                {pendingAreaRequests > 9 ? '9+' : pendingAreaRequests}
+              </span>
+            </Link>
             <button onClick={() => setShowCancelled(true)} className="p-2 text-zinc-400 hover:text-red-400 relative" title="Recusados">
               <XCircle size={20} />
               {cancelledOrders.length > 0 && (
@@ -924,7 +976,15 @@ export default function AdminDashboard() {
         )}
       </header>
 
-      <main className="flex-1 px-4 py-5 overflow-hidden">
+      <main className="flex-1 px-4 py-5 overflow-hidden flex flex-col">
+        <div className={`max-w-[1800px] mx-auto w-full mb-4 space-y-3 overflow-y-auto shrink-0 ${areaRequests.length ? 'max-h-[46vh]' : 'hidden'}`}>
+          <h2 className="text-amber-400 text-xs font-black uppercase tracking-widest">
+            Solicitações de Área ({areaRequests.length})
+          </h2>
+          {areaRequests.map((req) => (
+            <AreaRequestAdminCard key={req.id} request={req} onChanged={() => void fetchAreaRequests()} />
+          ))}
+        </div>
         {loading ? (
           <div className="flex justify-center py-16">
             <div className="w-8 h-8 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
@@ -1096,6 +1156,7 @@ export default function AdminDashboard() {
           {[
             { href: '/admin', icon: TrendingUp, label: 'Início', active: false },
             { href: '/admin/pedidos', icon: LayoutDashboard, label: 'Pedidos', active: true },
+            { href: '/admin/solicitacoes-areas', icon: MapPin, label: 'Solicitações de Área', active: false },
             { href: '/admin/clientes', icon: Users, label: 'Clientes', active: false },
             { href: '/admin/avaliacoes', icon: Star, label: 'Avaliações', active: false },
             { href: '/admin/cardapio', icon: UtensilsCrossed, label: 'Cardápio' },

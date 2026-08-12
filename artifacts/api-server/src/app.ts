@@ -77,7 +77,9 @@ app.use("/api", async (req, res, next) => {
   const p = req.path || "";
   const needsAreas =
     p.startsWith("/delivery/resolve-area") ||
+    p.startsWith("/delivery/area-requests") ||
     p.startsWith("/admin/delivery-areas") ||
+    p.startsWith("/admin/delivery-area-requests") ||
     p === "/orders" ||
     p.startsWith("/orders/");
   if (!needsAreas) return next();

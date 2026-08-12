@@ -205,6 +205,13 @@ export default function KmDelivery() {
             >
               <Shapes size={14} /> Áreas de Entrega
             </button>
+            <button
+              type="button"
+              onClick={() => setLocation('/admin/solicitacoes-areas')}
+              className="flex-1 h-10 rounded-lg text-xs font-bold uppercase tracking-wide transition-colors text-zinc-400 hover:text-white"
+            >
+              Solicitações
+            </button>
           </div>
 
           {/*

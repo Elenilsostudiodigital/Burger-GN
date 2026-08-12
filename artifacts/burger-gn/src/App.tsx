@@ -34,6 +34,7 @@ import AdminClientDetail from "./pages/admin/ClientDetail";
 import AdminClientsRecovery from "./pages/admin/ClientsRecovery";
 import AdminNovasRuas from "./pages/admin/NovasRuas";
 import AdminRuasEntrega from "./pages/admin/RuasEntrega";
+import AdminAreaRequests from "./pages/admin/AreaRequests";
 
 const queryClient = new QueryClient();
 
@@ -71,6 +72,9 @@ function AdminRuasEntregaRoute() {
 function AdminNovasRuasRoute() {
   return <ProtectedAdminRoute component={AdminNovasRuas} />;
 }
+function AdminAreaRequestsRoute() {
+  return <ProtectedAdminRoute component={AdminAreaRequests} />;
+}
 
 function Router() {
   return (
@@ -100,6 +104,7 @@ function Router() {
         <Route path="/admin/avaliacoes" component={() => <ProtectedAdminRoute component={AdminReviews} />} />
         <Route path="/admin/taxas" component={() => <ProtectedAdminRoute component={AdminDeliveryZones} />} />
         <Route path="/admin/novas-ruas" component={AdminNovasRuasRoute} />
+        <Route path="/admin/solicitacoes-areas" component={AdminAreaRequestsRoute} />
         <Route path="/admin/ruas-entrega" component={AdminRuasEntregaRoute} />
         <Route path="/admin/entrega-km" component={() => <ProtectedAdminRoute component={AdminKmDelivery} />} />
         <Route path="/admin/config" component={() => <ProtectedAdminRoute component={AdminSettingsHub} />} />
