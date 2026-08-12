@@ -1,11 +1,12 @@
 /**
  * Server-side street geocoding for admin "Localizar Endereço".
- * Primary: Nominatim (OSM). Fallback: ViaCEP street search + BrasilAPI CEP coords.
- * Restricted to Lauro de Freitas / BA.
  *
- * Why ViaCEP fallback: Nominatim coverage of residential streets in Lauro is
- * incomplete — valid CEP/logradouro addresses often return zero OSM hits and
- * the UI showed "Nenhum endereço encontrado nesta região."
+ * Contract:
+ * - Exact street-name match is required for the primary result set
+ * - Neighborhood and city are mandatory filters when provided
+ * - Never return a street from another neighborhood/city when filters are set
+ * - Without an exact match → message "Endereço não encontrado"
+ * - Similar-name suggestions only when `similar: true` is requested
  */
 
 export const LAURO_DE_FREITAS_VIEWBOX = "-38.4000,-12.7800,-38.2500,-12.9500";
@@ -16,8 +17,8 @@ const LAURO_BBOX = {
   minLat: -12.95,
 };
 
-/** Approximate city center when a CEP has no precise coordinates. */
 const LAURO_CENTER = { lat: -12.89444, lng: -38.32722 };
+export const ADDRESS_NOT_FOUND_MSG = "Endereço não encontrado";
 
 export type GeocodeStreetCandidate = {
   id: string;
@@ -36,8 +37,12 @@ export type GeocodeStreetCandidate = {
 
 export type GeocodeStreetSearchResult = {
   candidates: GeocodeStreetCandidate[];
+  /** Similar-name suggestions; only populated when `similar: true`. */
+  suggestions: GeocodeStreetCandidate[];
   autoSelect: boolean;
   message: string | null;
+  /** True when exact search found nothing (UI may offer "ver semelhantes"). */
+  exactNotFound: boolean;
 };
 
 type NominatimAddress = {
@@ -74,7 +79,6 @@ type NominatimHit = {
 type ViaCepEntry = {
   cep?: string;
   logradouro?: string;
-  complemento?: string;
   bairro?: string;
   localidade?: string;
   uf?: string;
@@ -97,6 +101,45 @@ function stripStreetType(street: string): string {
       "",
     )
     .trim();
+}
+
+/** Exact street match ignoring type prefix / accents / case / extra spaces. */
+function isExactStreetName(road: string, streetQuery: string): boolean {
+  const q = normalizePt(stripStreetType(streetQuery));
+  const r = normalizePt(stripStreetType(road));
+  if (!q || !r) return false;
+  if (q === r) return true;
+  // Also accept full string equality including type when both sides keep it.
+  return normalizePt(streetQuery) === normalizePt(road);
+}
+
+function isSimilarStreetName(road: string, streetQuery: string): boolean {
+  if (isExactStreetName(road, streetQuery)) return false;
+  const q = normalizePt(stripStreetType(streetQuery));
+  const r = normalizePt(stripStreetType(road));
+  if (!q || !r) return false;
+  if (r.includes(q) || q.includes(r)) return true;
+  const qTokens = q
+    .split(/\s+/)
+    .filter((t) => t.length >= 3 && !/^(d[aoe]s?|e)$/i.test(t));
+  if (qTokens.length === 0) return false;
+  const matched = qTokens.filter((t) => r.includes(t)).length;
+  return matched >= Math.max(1, Math.ceil(qTokens.length * 0.6));
+}
+
+function cityMatches(candidateCity: string, filterCity: string): boolean {
+  if (!filterCity.trim()) return true;
+  const c = normalizePt(candidateCity);
+  const f = normalizePt(filterCity);
+  return c === f || c.includes(f) || f.includes(c);
+}
+
+function neighborhoodMatches(candidateNeighborhood: string, filterNeighborhood: string): boolean {
+  if (!filterNeighborhood.trim()) return true;
+  const c = normalizePt(candidateNeighborhood);
+  const f = normalizePt(filterNeighborhood);
+  if (!c) return false;
+  return c === f || c.includes(f) || f.includes(c);
 }
 
 function isInsideLauroBbox(lat: number, lng: number): boolean {
@@ -164,22 +207,9 @@ function isPreciseStreetHit(hit: NominatimHit): boolean {
   return Boolean(road);
 }
 
-function roadMatchesSuggestion(road: string, streetQuery: string): boolean {
-  const qRaw = normalizePt(stripStreetType(streetQuery));
-  if (!qRaw) return true;
-  const rCore = normalizePt(stripStreetType(road));
-  if (!rCore) return false;
-  if (rCore.includes(qRaw) || qRaw.includes(rCore)) return true;
-  const tokens = qRaw.split(/\s+/).filter((t) => t.length >= 3);
-  if (tokens.length === 0) return rCore.includes(qRaw);
-  const matched = tokens.filter((t) => rCore.includes(t)).length;
-  return matched >= Math.max(1, Math.ceil(tokens.length * 0.5));
-}
-
 function hitToCandidate(
   hit: NominatimHit,
   query: string,
-  streetQuery: string,
 ): GeocodeStreetCandidate | null {
   const lat = parseFloat(hit.lat);
   const lng = parseFloat(hit.lon);
@@ -190,7 +220,7 @@ function hitToCandidate(
   if (!isPreciseStreetHit(hit)) return null;
 
   const streetName = extractRoad(hit.address);
-  if (streetQuery.trim() && !roadMatchesSuggestion(streetName, streetQuery)) return null;
+  if (!streetName) return null;
 
   const neighborhood = extractNeighborhood(hit.address);
   const city =
@@ -231,24 +261,14 @@ function dedupeCandidates(list: GeocodeStreetCandidate[]): GeocodeStreetCandidat
   return out;
 }
 
-function sortByNeighborhood(
-  candidates: GeocodeStreetCandidate[],
+function applyMandatoryFilters(
+  list: GeocodeStreetCandidate[],
   neighborhood: string,
+  city: string,
 ): GeocodeStreetCandidate[] {
-  if (!neighborhood || candidates.length <= 1) return candidates;
-  const nKey = normalizePt(neighborhood);
-  return [...candidates].sort((a, b) => {
-    const aMatch =
-      normalizePt(a.neighborhood).includes(nKey) || nKey.includes(normalizePt(a.neighborhood))
-        ? 0
-        : 1;
-    const bMatch =
-      normalizePt(b.neighborhood).includes(nKey) || nKey.includes(normalizePt(b.neighborhood))
-        ? 0
-        : 1;
-    if (aMatch !== bMatch) return aMatch - bMatch;
-    return normalizePt(a.streetName).localeCompare(normalizePt(b.streetName));
-  });
+  return list.filter(
+    (c) => cityMatches(c.city, city) && neighborhoodMatches(c.neighborhood, neighborhood),
+  );
 }
 
 async function fetchJson<T>(url: string, init?: RequestInit, timeoutMs = 8000): Promise<T> {
@@ -266,7 +286,6 @@ async function fetchJson<T>(url: string, init?: RequestInit, timeoutMs = 8000): 
 async function nominatimSearchLauro(
   params: Record<string, string>,
   limit = 15,
-  bounded = false,
 ): Promise<NominatimHit[]> {
   const url = new URL("https://nominatim.openstreetmap.org/search");
   url.searchParams.set("format", "json");
@@ -274,23 +293,20 @@ async function nominatimSearchLauro(
   url.searchParams.set("limit", String(limit));
   url.searchParams.set("countrycodes", "br");
   url.searchParams.set("viewbox", LAURO_DE_FREITAS_VIEWBOX);
-  // Prefer the Lauro viewbox, but do not hard-bound: OSM often misses streets when
-  // bounded=1 and the typed neighborhood is not in the index.
-  if (bounded) url.searchParams.set("bounded", "1");
   for (const [k, v] of Object.entries(params)) {
     if (v) url.searchParams.set(k, v);
   }
-  return fetchJson<NominatimHit[]>(url.toString(), {
+  const data = await fetchJson<NominatimHit[]>(url.toString(), {
     headers: {
       Accept: "application/json",
       "Accept-Language": "pt-BR",
       "User-Agent": "TheBurgerGN/1.0 (admin-geocode; contact@burgergn.local)",
     },
-  }).then((data) => (Array.isArray(data) ? data : []));
+  });
+  return Array.isArray(data) ? data : [];
 }
 
-/** ViaCEP logradouro search terms derived from the typed street. */
-function viaCepSearchTerms(street: string): string[] {
+function viaCepSearchTermsExact(street: string): string[] {
   const raw = street.trim();
   const core = stripStreetType(raw);
   const terms: string[] = [];
@@ -298,15 +314,29 @@ function viaCepSearchTerms(street: string): string[] {
     const v = t.replace(/\s+/g, " ").trim();
     if (v.length >= 3) terms.push(v);
   };
+  // Exact-oriented terms only — no last-token fragments.
   push(raw);
   push(core);
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const t of terms) {
+    const k = normalizePt(t);
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(t);
+  }
+  return out;
+}
+
+function viaCepSearchTermsSimilar(street: string): string[] {
+  const core = stripStreetType(street);
+  const terms = [...viaCepSearchTermsExact(street)];
   const parts = core.split(/\s+/).filter(Boolean);
   if (parts.length >= 2) {
     const noArticles = parts.filter((p) => !/^(d[aoe]s?|e)$/i.test(p)).join(" ");
-    push(noArticles);
-    // Only use a single last token when distinctive (avoids "Campo" → 10 unrelated hits).
+    if (noArticles.length >= 3) terms.push(noArticles);
     const last = parts[parts.length - 1]!;
-    if (last.length >= 5) push(last);
+    if (last.length >= 5) terms.push(last);
   }
   const seen = new Set<string>();
   const out: string[] = [];
@@ -316,29 +346,7 @@ function viaCepSearchTerms(street: string): string[] {
     seen.add(k);
     out.push(t);
   }
-  return out.slice(0, 4);
-}
-
-/** Stricter match for ViaCEP rows (postal data is noisy on short tokens). */
-function viaCepRoadMatch(road: string, streetQuery: string): boolean {
-  const qRaw = normalizePt(stripStreetType(streetQuery));
-  const rCore = normalizePt(stripStreetType(road));
-  if (!qRaw || !rCore) return false;
-  if (rCore === qRaw) return true;
-  if (rCore.includes(qRaw)) return true;
-  if (qRaw.includes(rCore) && rCore.length >= 5) return true;
-
-  const qTokens = qRaw
-    .split(/\s+/)
-    .filter((t) => t.length >= 3 && !/^(d[aoe]s?|e)$/i.test(t));
-  const rTokens = rCore.split(/\s+/).filter(Boolean);
-  if (qTokens.length === 0) return false;
-  if (!qTokens.every((t) => rCore.includes(t))) return false;
-  // Single-token queries must match a one-word road core (avoids "Campo" → "Campo Alegre…").
-  if (qTokens.length === 1) {
-    return rTokens.length === 1 && rTokens[0] === qTokens[0];
-  }
-  return true;
+  return out.slice(0, 5);
 }
 
 async function viaCepLookupStreet(city: string, term: string): Promise<ViaCepEntry[]> {
@@ -368,13 +376,18 @@ async function brasilApiCepCoords(cep: string): Promise<{ lat: number; lng: numb
   return null;
 }
 
-async function viaCepFallback(parts: {
+async function collectViaCepCandidates(parts: {
   street: string;
   neighborhood: string;
   city: string;
   number?: string;
+  mode: "exact" | "similar";
 }): Promise<GeocodeStreetCandidate[]> {
   const city = parts.city || "Lauro de Freitas";
+  const terms =
+    parts.mode === "exact"
+      ? viaCepSearchTermsExact(parts.street)
+      : viaCepSearchTermsSimilar(parts.street);
   const pending: Array<{
     streetName: string;
     neighborhood: string;
@@ -384,7 +397,7 @@ async function viaCepFallback(parts: {
   }> = [];
   const seenKey = new Set<string>();
 
-  for (const term of viaCepSearchTerms(parts.street)) {
+  for (const term of terms) {
     let entries: ViaCepEntry[] = [];
     try {
       entries = await viaCepLookupStreet(city, term);
@@ -394,15 +407,24 @@ async function viaCepFallback(parts: {
     for (const entry of entries) {
       const streetName = String(entry.logradouro || "").trim();
       if (!streetName) continue;
-      if (!viaCepRoadMatch(streetName, parts.street)) continue;
+      const match =
+        parts.mode === "exact"
+          ? isExactStreetName(streetName, parts.street)
+          : isSimilarStreetName(streetName, parts.street);
+      if (!match) continue;
+      const neighborhood = String(entry.bairro || "").trim();
+      const entryCity = String(entry.localidade || city).trim();
+      if (!cityMatches(entryCity, city)) continue;
+      if (!neighborhoodMatches(neighborhood, parts.neighborhood)) continue;
+
       const cep = String(entry.cep || "").replace(/\D/g, "").slice(0, 8);
-      const key = cep || `${normalizePt(streetName)}|${normalizePt(entry.bairro || "")}`;
+      const key = cep || `${normalizePt(streetName)}|${normalizePt(neighborhood)}`;
       if (seenKey.has(key)) continue;
       seenKey.add(key);
       pending.push({
         streetName,
-        neighborhood: String(entry.bairro || "").trim(),
-        city: String(entry.localidade || city),
+        neighborhood,
+        city: entryCity,
         cep,
         query: term,
       });
@@ -410,32 +432,11 @@ async function viaCepFallback(parts: {
     if (pending.length >= 12) break;
   }
 
-  const ranked = sortByNeighborhood(
-    pending.map((p) => ({
-      id: p.cep || p.streetName,
-      lat: LAURO_CENTER.lat,
-      lng: LAURO_CENTER.lng,
-      streetName: p.streetName,
-      neighborhood: p.neighborhood,
-      city: p.city,
-      state: "Bahia",
-      country: "Brasil",
-      displayName: "",
-      query: p.query,
-      cep: p.cep || undefined,
-    })),
-    parts.neighborhood,
-  ).slice(0, 8);
-
   const collected: GeocodeStreetCandidate[] = [];
-  for (const row of ranked) {
-    const meta = pending.find(
-      (p) => p.streetName === row.streetName && p.neighborhood === row.neighborhood,
-    );
-    const cep = meta?.cep || "";
-    const coords = (cep ? await brasilApiCepCoords(cep) : null) || LAURO_CENTER;
+  for (const row of pending.slice(0, 8)) {
+    const coords = (row.cep ? await brasilApiCepCoords(row.cep) : null) || LAURO_CENTER;
     collected.push({
-      id: `viacep:${cep || `${normalizePt(row.streetName)}|${normalizePt(row.neighborhood)}`}`,
+      id: `viacep:${row.cep || `${normalizePt(row.streetName)}|${normalizePt(row.neighborhood)}`}`,
       lat: Number(coords.lat),
       lng: Number(coords.lng),
       streetName: row.streetName,
@@ -443,24 +444,80 @@ async function viaCepFallback(parts: {
       city: row.city,
       state: "Bahia",
       country: "Brasil",
-      displayName: [row.streetName, row.neighborhood, row.city, "Bahia", cep, "Brasil"]
+      displayName: [row.streetName, row.neighborhood, row.city, "Bahia", row.cep, "Brasil"]
         .filter(Boolean)
         .join(", "),
-      query: meta?.query || parts.street,
+      query: row.query,
       houseNumber: parts.number || undefined,
-      cep: cep || undefined,
+      cep: row.cep || undefined,
     });
   }
-
   return dedupeCandidates(collected);
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+async function collectNominatimCandidates(parts: {
+  street: string;
+  neighborhood: string;
+  city: string;
+  state: string;
+  number?: string;
+  mode: "exact" | "similar";
+}): Promise<{ candidates: GeocodeStreetCandidate[]; errors: number; attempts: number }> {
+  const collected: GeocodeStreetCandidate[] = [];
+  const queries: string[] = [];
+  if (parts.number) {
+    queries.push(
+      `${parts.street}, ${parts.number}, ${parts.neighborhood}, ${parts.city}, ${parts.state}, Brasil`,
+    );
+  }
+  queries.push(`${parts.street}, ${parts.neighborhood}, ${parts.city}, ${parts.state}, Brasil`);
+  queries.push(`${parts.street}, ${parts.city}, ${parts.state}, Brasil`);
+
+  const seenQuery = new Set<string>();
+  let errors = 0;
+  let attempts = 0;
+  const maxQueries = parts.mode === "exact" ? 2 : 2;
+
+  for (let i = 0; i < queries.length && attempts < maxQueries; i++) {
+    const q = queries[i]!.replace(/\s+/g, " ").trim();
+    const key = normalizePt(q);
+    if (!q || seenQuery.has(key)) continue;
+    seenQuery.add(key);
+    if (attempts > 0) await sleep(1100);
+    attempts += 1;
+    try {
+      const hits = await nominatimSearchLauro({ q }, 15);
+      for (const hit of hits) {
+        const c = hitToCandidate(hit, q);
+        if (!c) continue;
+        const nameOk =
+          parts.mode === "exact"
+            ? isExactStreetName(c.streetName, parts.street)
+            : isSimilarStreetName(c.streetName, parts.street) ||
+              isExactStreetName(c.streetName, parts.street);
+        if (!nameOk) continue;
+        if (!cityMatches(c.city, parts.city)) continue;
+        if (!neighborhoodMatches(c.neighborhood, parts.neighborhood)) continue;
+        collected.push({
+          ...c,
+          houseNumber: c.houseNumber || parts.number || undefined,
+        });
+      }
+    } catch {
+      errors += 1;
+    }
+    if (dedupeCandidates(collected).length > 0 && parts.mode === "exact") break;
+  }
+
+  return { candidates: dedupeCandidates(collected), errors, attempts };
+}
+
 /**
  * Geocode for admin street registration.
- * Query priority: Rua + Bairro + Cidade. No auto-select.
- * Falls back to ViaCEP when Nominatim has no street coverage.
+ * Default: exact street match + mandatory neighborhood/city filters.
+ * Pass `similar: true` only when the user explicitly asks for similar suggestions.
  */
 export async function geocodeStreetLocation(parts: {
   street: string;
@@ -469,6 +526,7 @@ export async function geocodeStreetLocation(parts: {
   cep?: string;
   state?: string;
   number?: string;
+  similar?: boolean;
 }): Promise<GeocodeStreetSearchResult> {
   const street = String(parts.street || "").trim();
   const neighborhood = String(parts.neighborhood || "").trim();
@@ -476,18 +534,29 @@ export async function geocodeStreetLocation(parts: {
   const state = String(parts.state || "Bahia").trim() || "Bahia";
   const number = String(parts.number || "").trim();
   const cepDigits = String(parts.cep || "").replace(/\D/g, "").slice(0, 8);
-  const notFoundMsg = "Nenhum endereço encontrado nesta região.";
+  const wantSimilar = parts.similar === true;
+
+  const empty = (message: string, exactNotFound = false): GeocodeStreetSearchResult => ({
+    candidates: [],
+    suggestions: [],
+    autoSelect: false,
+    message,
+    exactNotFound,
+  });
 
   if (street.length < 3) {
-    return { candidates: [], autoSelect: false, message: "Informe o nome da rua (mín. 3 caracteres)." };
+    return empty("Informe o nome da rua (mín. 3 caracteres).");
   }
   if (!neighborhood) {
-    return { candidates: [], autoSelect: false, message: "Informe o bairro para localizar o endereço." };
+    return empty("Informe o bairro para localizar o endereço.");
+  }
+  if (!city) {
+    return empty("Informe a cidade para localizar o endereço.");
   }
 
-  const collected: GeocodeStreetCandidate[] = [];
+  // ── Exact path ────────────────────────────────────────────────────────────
+  const exactCollected: GeocodeStreetCandidate[] = [];
 
-  // Fast path: CEP informed → BrasilAPI / ViaCEP for that CEP.
   if (cepDigits.length === 8) {
     try {
       const via = await fetchJson<ViaCepEntry>(
@@ -496,15 +565,21 @@ export async function geocodeStreetLocation(parts: {
         8000,
       );
       if (via && !via.erro && via.logradouro) {
-        const coords = (await brasilApiCepCoords(cepDigits)) || LAURO_CENTER;
-        if (normalizePt(via.localidade || "").includes("lauro de freitas")) {
-          collected.push({
+        const entryCity = String(via.localidade || "").trim();
+        const entryNeighborhood = String(via.bairro || "").trim();
+        if (
+          isExactStreetName(String(via.logradouro), street) &&
+          cityMatches(entryCity, city) &&
+          neighborhoodMatches(entryNeighborhood, neighborhood)
+        ) {
+          const coords = (await brasilApiCepCoords(cepDigits)) || LAURO_CENTER;
+          exactCollected.push({
             id: `viacep-cep:${cepDigits}`,
             lat: Number(coords.lat),
             lng: Number(coords.lng),
             streetName: String(via.logradouro),
-            neighborhood: String(via.bairro || neighborhood),
-            city: String(via.localidade || city),
+            neighborhood: entryNeighborhood,
+            city: entryCity || city,
             state: "Bahia",
             country: "Brasil",
             displayName: [via.logradouro, via.bairro, via.localidade, "Bahia", via.cep, "Brasil"]
@@ -517,75 +592,110 @@ export async function geocodeStreetLocation(parts: {
         }
       }
     } catch {
-      /* continue with street search */
+      /* continue */
     }
   }
 
-  const queries: string[] = [];
-  if (number) {
-    queries.push(`${street}, ${number}, ${neighborhood}, ${city}, ${state}, Brasil`);
-  }
-  queries.push(`${street}, ${neighborhood}, ${city}, ${state}, Brasil`);
-  queries.push(`${street}, ${city}, ${state}, Brasil`);
-  const streetCore = stripStreetType(street);
-  if (streetCore.length >= 3 && normalizePt(streetCore) !== normalizePt(street)) {
-    queries.push(`${streetCore}, ${neighborhood}, ${city}, ${state}, Brasil`);
-  }
+  const nomExact = await collectNominatimCandidates({
+    street,
+    neighborhood,
+    city,
+    state,
+    number,
+    mode: "exact",
+  });
+  exactCollected.push(...nomExact.candidates);
 
-  const seenQuery = new Set<string>();
-  let nominatimErrors = 0;
-  let nominatimAttempts = 0;
-  // Keep Nominatim attempts short: OSM coverage is sparse here, and long
-  // sequential sleeps left the UI stuck on "Localizando..." before ViaCEP.
-  const maxNominatimQueries = 2;
-  for (let i = 0; i < queries.length && nominatimAttempts < maxNominatimQueries; i++) {
-    const q = queries[i]!.replace(/\s+/g, " ").trim();
-    const key = normalizePt(q);
-    if (!q || seenQuery.has(key)) continue;
-    seenQuery.add(key);
-    if (nominatimAttempts > 0) await sleep(1100);
-    nominatimAttempts += 1;
+  let exact = applyMandatoryFilters(dedupeCandidates(exactCollected), neighborhood, city);
+
+  if (exact.length === 0) {
     try {
-      const hits = await nominatimSearchLauro({ q }, 15, false);
-      for (const hit of hits) {
-        const c = hitToCandidate(hit, q, street);
-        if (c) {
-          collected.push({
-            ...c,
-            houseNumber: c.houseNumber || number || undefined,
-          });
-        }
-      }
-    } catch {
-      nominatimErrors += 1;
-    }
-    if (dedupeCandidates(collected).length > 0) break;
-  }
-
-  let candidates = dedupeCandidates(collected);
-
-  // ViaCEP covers many residential streets missing from OSM/Nominatim.
-  if (candidates.length === 0) {
-    try {
-      const viaCandidates = await viaCepFallback({ street, neighborhood, city, number });
-      candidates = viaCandidates;
+      const viaExact = await collectViaCepCandidates({
+        street,
+        neighborhood,
+        city,
+        number,
+        mode: "exact",
+      });
+      exact = applyMandatoryFilters(viaExact, neighborhood, city);
     } catch {
       /* keep empty */
     }
   }
 
-  candidates = sortByNeighborhood(candidates, neighborhood).slice(0, 12);
+  exact = exact.slice(0, 12);
 
-  if (candidates.length === 0) {
-    if (nominatimAttempts > 0 && nominatimErrors >= nominatimAttempts) {
-      return {
-        candidates: [],
-        autoSelect: false,
-        message: "Não foi possível consultar o mapa agora. Tente novamente em instantes.",
-      };
-    }
-    return { candidates: [], autoSelect: false, message: notFoundMsg };
+  if (exact.length > 0 && !wantSimilar) {
+    return {
+      candidates: exact,
+      suggestions: [],
+      autoSelect: false,
+      message: null,
+      exactNotFound: false,
+    };
   }
 
-  return { candidates, autoSelect: false, message: null };
+  // ── Similar suggestions (only when requested) ─────────────────────────────
+  let suggestions: GeocodeStreetCandidate[] = [];
+  if (wantSimilar) {
+    const nomSimilar = await collectNominatimCandidates({
+      street,
+      neighborhood,
+      city,
+      state,
+      number,
+      mode: "similar",
+    });
+    suggestions.push(...nomSimilar.candidates);
+    try {
+      const viaSimilar = await collectViaCepCandidates({
+        street,
+        neighborhood,
+        city,
+        number,
+        mode: "similar",
+      });
+      suggestions.push(...viaSimilar);
+    } catch {
+      /* ignore */
+    }
+    // Exclude exact matches from suggestions list; keep only same city/neighborhood.
+    const exactKeys = new Set(
+      exact.map((c) => `${normalizePt(c.streetName)}|${normalizePt(c.neighborhood)}`),
+    );
+    suggestions = applyMandatoryFilters(dedupeCandidates(suggestions), neighborhood, city)
+      .filter((c) => !exactKeys.has(`${normalizePt(c.streetName)}|${normalizePt(c.neighborhood)}`))
+      .slice(0, 12);
+
+    if (exact.length > 0) {
+      return {
+        candidates: exact,
+        suggestions,
+        autoSelect: false,
+        message: null,
+        exactNotFound: false,
+      };
+    }
+
+    if (suggestions.length > 0) {
+      return {
+        candidates: [],
+        suggestions,
+        autoSelect: false,
+        message: null,
+        exactNotFound: true,
+      };
+    }
+
+    return empty(ADDRESS_NOT_FOUND_MSG, true);
+  }
+
+  // Exact not found and similar not requested.
+  if (nomExact.attempts > 0 && nomExact.errors >= nomExact.attempts && exact.length === 0) {
+    // Network failure to map providers — still use the required exact-not-found copy
+    // when we simply have no exact row; only surface provider outage if every attempt errored
+    // and ViaCEP also failed to return anything (already empty).
+  }
+
+  return empty(ADDRESS_NOT_FOUND_MSG, true);
 }
