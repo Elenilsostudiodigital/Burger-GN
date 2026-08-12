@@ -9,6 +9,7 @@ import { logger } from "./lib/logger";
 import { ensureCompanySchema } from "./lib/ensureCompanySchema";
 import { ensureClubeSchema } from "./lib/ensureClubeSchema";
 import { ensureDeliveryStreetsSchema } from "./lib/ensureDeliveryStreetsSchema";
+import { ensureDeliveryAreasSchema } from "./lib/ensureDeliveryAreasSchema";
 
 const app: Express = express();
 
@@ -68,6 +69,24 @@ app.use("/api", async (req, res, next) => {
   } catch (err) {
     logger.error({ err }, "Failed to ensure delivery streets schema");
     res.status(500).json({ error: "Falha ao preparar o banco de ruas de entrega." });
+  }
+});
+
+/** Ensures delivery areas tables before area/fee handlers. */
+app.use("/api", async (req, res, next) => {
+  const p = req.path || "";
+  const needsAreas =
+    p.startsWith("/delivery/resolve-area") ||
+    p.startsWith("/admin/delivery-areas") ||
+    p === "/orders" ||
+    p.startsWith("/orders/");
+  if (!needsAreas) return next();
+  try {
+    await ensureDeliveryAreasSchema();
+    next();
+  } catch (err) {
+    logger.error({ err }, "Failed to ensure delivery areas schema");
+    res.status(500).json({ error: "Falha ao preparar o banco de áreas de entrega." });
   }
 });
 

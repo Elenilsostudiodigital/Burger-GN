@@ -5,7 +5,7 @@ import { PageTransition } from '../components/PageTransition';
 import {
   createOrder, validateCoupon, getDeliveryZones, getDeliveryFee, getKmDeliveryConfig,
   geocodeAddress, reverseGeocode, haversineKm, findKmTier, getPaymentSettings,
-  checkDeliveryStreet,
+  checkDeliveryStreet, resolveDeliveryArea,
   ValidateCouponResult, DeliveryZone, KmDeliveryConfig, PaymentSettingsPublic,
 } from '../lib/api';
 import { saveMyOrder } from '../lib/myOrder';
@@ -87,6 +87,8 @@ export default function Checkout() {
 
   const [kmConfig, setKmConfig] = useState<KmDeliveryConfig | null>(null);
   const kmEnabled = !!kmConfig?.enabled;
+  const areasEnabled = !!kmConfig?.areasEnabled;
+  const needsCoordsFee = kmEnabled || areasEnabled;
   const [customerCoords, setCustomerCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [distanceKm, setDistanceKm] = useState<number | null>(null);
   const [gpsLoading, setGpsLoading] = useState(false);
@@ -102,7 +104,7 @@ export default function Checkout() {
   const [fidelityRedeem, setFidelityRedeem] = useState<FidelityRedeemSelection | null>(null);
 
   const isDelivery = orderType === 'delivery';
-  const usingKm = isDelivery && kmEnabled && customerCoords !== null;
+  const usingKm = isDelivery && needsCoordsFee && customerCoords !== null;
   const couponDiscount = appliedCoupon?.discountAmount ?? 0;
   const fidelityDiscount = fidelityRedeem
     ? Math.min(subtotal, Number(fidelityRedeem.product.price) || 0)
@@ -145,6 +147,46 @@ export default function Checkout() {
       if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
       setCustomerCoords({ lat, lng });
       setGpsError('');
+
+      // Áreas de Entrega take priority when enabled
+      if (kmConfig?.areasEnabled) {
+        setFeeLoading(true);
+        void resolveDeliveryArea(lat, lng)
+          .then((result) => {
+            if (result.status === "allowed" && result.fee != null) {
+              setDeliveryFee(result.fee);
+              setFeeFound(true);
+              setFeeMessage(
+                result.area?.name
+                  ? `Área: ${result.area.name}`
+                  : "",
+              );
+              if (result.distanceKm != null) setDistanceKm(result.distanceKm);
+              return;
+            }
+            if (result.status === "blocked") {
+              setDeliveryFee(0);
+              setFeeFound(false);
+              setFeeMessage(result.message || "Não entregamos nesta área.");
+              return;
+            }
+            if (result.status === "outside") {
+              setDeliveryFee(0);
+              setFeeFound(false);
+              setFeeMessage(result.message || "Não entregamos nesta região.");
+              return;
+            }
+            // areasEnabled false unexpectedly — fall through below not possible in then
+            setFeeFound(false);
+            setFeeMessage("Não foi possível verificar a área de entrega.");
+          })
+          .catch(() => {
+            setFeeFound(false);
+            setFeeMessage("Não foi possível verificar a área de entrega.");
+          })
+          .finally(() => setFeeLoading(false));
+        return;
+      }
 
       if (!kmConfig?.enabled) {
         // Neighborhood fee is resolved after reverse-geocode fills `bairro`.
@@ -203,7 +245,7 @@ export default function Checkout() {
       }
       return;
     }
-    if (kmEnabled) return;
+    if (needsCoordsFee) return;
 
     clearTimeout(feeDebounce.current);
     feeDebounce.current = setTimeout(async () => {
@@ -226,11 +268,11 @@ export default function Checkout() {
       }
     }, 400);
     return () => clearTimeout(feeDebounce.current);
-  }, [form.bairro, isDelivery, customerCoords, kmEnabled, step]);
+  }, [form.bairro, isDelivery, customerCoords, needsCoordsFee, step]);
 
-  // Geocode manual address once fields are complete (KM mode)
+  // Geocode manual address once fields are complete (KM / áreas mode)
   useEffect(() => {
-    if (step !== 'manual' || !kmEnabled || !isDelivery) return;
+    if (step !== 'manual' || !needsCoordsFee || !isDelivery) return;
     if (!form.endereco?.trim() || !form.numero?.trim() || !form.bairro?.trim() || form.bairro === '__outro__') return;
 
     clearTimeout(feeDebounce.current);
@@ -255,7 +297,7 @@ export default function Checkout() {
       }
     }, 900);
     return () => clearTimeout(feeDebounce.current);
-  }, [form.endereco, form.numero, form.bairro, kmEnabled, isDelivery, step, applyCoordinates]);
+  }, [form.endereco, form.numero, form.bairro, needsCoordsFee, isDelivery, step, applyCoordinates]);
 
   // Street registry check (learning module) — reuses lat/lng already calculated.
   useEffect(() => {

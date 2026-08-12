@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { ordersTable, orderItemsTable, couponsTable, deliveryZonesTable, kmDeliveryConfigTable, kmDeliveryTiersTable, paymentSettingsTable, productsTable, categoriesTable, clubeMembersTable, deliveryStreetsTable, deliveryStreetRequestsTable } from "@workspace/db";
+import { ordersTable, orderItemsTable, couponsTable, deliveryZonesTable, kmDeliveryConfigTable, kmDeliveryTiersTable, paymentSettingsTable, productsTable, categoriesTable, clubeMembersTable, deliveryStreetsTable, deliveryStreetRequestsTable, deliveryAreasTable } from "@workspace/db";
 import { eq, and, desc, sql, asc, inArray, ne } from "drizzle-orm";
 import { requireCompanyAuth } from "../middlewares/auth";
 import { resolvePublicCompany } from "../middlewares/company";
@@ -8,6 +8,7 @@ import { addSSEClient, removeSSEClient, broadcastSSE } from "../lib/sse";
 import { calcDiscount } from "./coupons";
 import { haversineKm, findKmTier } from "./km_delivery";
 import { normalizeStreetKey } from "../lib/deliveryStreets";
+import { resolvePointInAreas } from "../lib/deliveryAreas";
 import {
   parseOrderNotes, serializeOrderNotes, appendHistory, resolveWorkflow, WORKFLOW_TO_STATUS,
   buildCustomerNotifyMessage, buildPostDeliverySurveyMessage,
@@ -211,9 +212,54 @@ router.post("/orders", resolvePublicCompany, async (req, res) => {
     let customerDistanceKm: number | null = null;
 
     if (body.orderType === "delivery") {
+      // Áreas de Entrega (map polygons) — when enabled, they own coverage + fee.
+      const [kmConfigForAreas] = await db
+        .select()
+        .from(kmDeliveryConfigTable)
+        .where(eq(kmDeliveryConfigTable.companyId, companyId))
+        .limit(1);
+      if (kmConfigForAreas?.areasEnabled) {
+        if (!body.customerLat || !body.customerLng) {
+          res.status(400).json({
+            error: "Informe sua localização para calcular a área de entrega.",
+          });
+          return;
+        }
+        const areas = await db
+          .select()
+          .from(deliveryAreasTable)
+          .where(eq(deliveryAreasTable.companyId, companyId));
+        const resolved = resolvePointInAreas({
+          areasEnabled: true,
+          areas,
+          lat: body.customerLat,
+          lng: body.customerLng,
+          baseLat: parseFloat(String(kmConfigForAreas.baseLat ?? 0)),
+          baseLng: parseFloat(String(kmConfigForAreas.baseLng ?? 0)),
+        });
+        if (resolved.status === "blocked") {
+          res.status(400).json({
+            error: resolved.message || "Não entregamos nesta área.",
+            areaStatus: "blocked",
+            area: resolved.area,
+          });
+          return;
+        }
+        if (resolved.status === "outside" || resolved.fee == null) {
+          res.status(400).json({
+            error: resolved.message || "Não entregamos nesta região.",
+            areaStatus: "outside",
+          });
+          return;
+        }
+        deliveryFee = resolved.fee;
+        deliveryFeeResolved = true;
+        if (resolved.distanceKm != null) customerDistanceKm = resolved.distanceKm;
+      }
+
       // Priority: approved street registry (learned streets) — exact key match.
       const streetKey = normalizeStreetKey(body.address || "");
-      if (streetKey) {
+      if (!deliveryFeeResolved && streetKey) {
         const [knownStreetAny] = await db
           .select()
           .from(deliveryStreetsTable)

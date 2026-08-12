@@ -121,6 +121,7 @@ router.put("/admin/km-delivery", requireCompanyAuth, async (req, res) => {
       enabled?: boolean; baseAddress?: string;
       baseLat?: string; baseLng?: string;
       minFee?: string; feePerKm?: string; maxDistanceKm?: string;
+      areasEnabled?: boolean;
     };
     const [existing] = await db.select().from(kmDeliveryConfigTable).where(eq(kmDeliveryConfigTable.companyId, req.companyId!));
     if (existing) {
