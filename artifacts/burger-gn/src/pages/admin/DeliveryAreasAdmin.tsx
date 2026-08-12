@@ -701,12 +701,17 @@ export default function DeliveryAreasAdmin({ active = true }: { active?: boolean
           onClick={() => void handleSave()}
           className="w-full h-11 rounded-xl bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold"
         >
-          <span className={saving ? "inline-flex items-center" : "hidden"}>
-            <Loader2 className="animate-spin mr-2" size={16} /> Salvando…
-          </span>
-          <span className={saving ? "hidden" : "inline-flex items-center"}>
-            <Check size={16} className="mr-1" /> Salvar Área
-          </span>
+          {saving ? (
+            <>
+              <Loader2 className="animate-spin" size={16} />
+              Salvando…
+            </>
+          ) : (
+            <>
+              <Check size={16} />
+              Salvar Área
+            </>
+          )}
         </Button>
       </section>
 
