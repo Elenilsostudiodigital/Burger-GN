@@ -4,7 +4,7 @@ import { z } from "zod/v4";
 import { companiesTable } from "./company";
 
 export const orderStatusEnum = pgEnum("order_status", [
-  "new", "preparing", "delivery", "done", "cancelled",
+  "new", "preparing", "delivery", "done", "cancelled", "finalized",
 ]);
 export const orderTypeEnum = pgEnum("order_type", ["delivery", "pickup", "local"]);
 export const paymentMethodEnum = pgEnum("payment_method", ["pix", "cash", "card"]);

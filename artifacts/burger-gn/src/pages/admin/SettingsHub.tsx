@@ -54,6 +54,7 @@ function PrepTimeTab() {
   const [saving, setSaving] = useState(false);
   const [prepTimeMin, setPrepTimeMin] = useState('35');
   const [prepTimeMax, setPrepTimeMax] = useState('45');
+  const [autoFinalize, setAutoFinalize] = useState(true);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState('');
 
@@ -64,6 +65,7 @@ function PrepTimeTab() {
         const s = await getAdminPaymentSettings();
         setPrepTimeMin(String(s.prepTimeMin ?? 35));
         setPrepTimeMax(String(s.prepTimeMax ?? 45));
+        setAutoFinalize(s.autoFinalizeOnDelivered !== false);
       } catch {
         setError('Não foi possível carregar o tempo de preparo');
       } finally {
@@ -78,13 +80,15 @@ function PrepTimeTab() {
       const updated = await updatePaymentSettings({
         prepTimeMin: Number(prepTimeMin) || 35,
         prepTimeMax: Number(prepTimeMax) || 45,
+        autoFinalizeOnDelivered: autoFinalize,
       });
       setPrepTimeMin(String(updated.prepTimeMin ?? 35));
       setPrepTimeMax(String(updated.prepTimeMax ?? 45));
+      setAutoFinalize(updated.autoFinalizeOnDelivered !== false);
       setSuccess(true);
       setTimeout(() => setSuccess(false), 3000);
     } catch {
-      setError('Erro ao salvar tempo de preparo');
+      setError('Erro ao salvar configurações');
     } finally {
       setSaving(false);
     }
@@ -124,12 +128,31 @@ function PrepTimeTab() {
         <p className="text-zinc-600 text-xs">Padrão: 35 a 45 minutos. Aviso amarelo nos últimos 10 minutos.</p>
       </div>
 
-      {success && <p className="text-green-400 text-sm px-1 flex items-center gap-2"><Check size={16} /> Tempo de preparo salvo!</p>}
+      <div className={`rounded-2xl p-5 border transition-all ${
+        autoFinalize ? 'bg-emerald-500/10 border-emerald-500/30' : 'bg-zinc-900 border-zinc-800'
+      }`}>
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h3 className="text-white font-black uppercase tracking-wide text-sm">Finalizar automaticamente após Entregue</h3>
+            <p className="text-zinc-500 text-xs mt-0.5 leading-relaxed">
+              {autoFinalize
+                ? 'Ao marcar Entregue, o pedido vai para Finalizado e sai do painel operacional.'
+                : 'Entregue permanece no painel até a conferência manual (botão Finalizar).'}
+            </p>
+          </div>
+          <button type="button" onClick={() => setAutoFinalize(!autoFinalize)}
+            className={`transition-colors shrink-0 ${autoFinalize ? 'text-emerald-400' : 'text-zinc-600'}`}>
+            {autoFinalize ? <ToggleRight size={34} /> : <ToggleLeft size={34} />}
+          </button>
+        </div>
+      </div>
+
+      {success && <p className="text-green-400 text-sm px-1 flex items-center gap-2"><Check size={16} /> Configurações salvas!</p>}
       {error && <p className="text-red-400 text-sm px-1 flex items-center gap-2"><X size={16} /> {error}</p>}
 
       <Button onClick={handleSave} disabled={saving}
         className="w-full h-12 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold rounded-xl flex items-center justify-center gap-2">
-        {saving ? <Loader2 size={18} className="animate-spin" /> : <Check size={18} />} Salvar Tempo de Preparo
+        {saving ? <Loader2 size={18} className="animate-spin" /> : <Check size={18} />} Salvar Configurações
       </Button>
     </div>
   );

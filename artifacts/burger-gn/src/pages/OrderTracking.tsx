@@ -44,7 +44,7 @@ const TIMELINE: Array<{ key: TimelineKey; label: string; emoji: string }> = [
 function resolveTimelineIndex(order: Order): number {
   if (order.status === 'cancelled') return -1;
   const wf = order.workflow === 'accepted' ? 'preparing' : order.workflow;
-  if (wf === 'done' || order.status === 'done') return 5;
+  if (wf === 'done' || wf === 'finalized' || order.status === 'done' || order.status === 'finalized') return 5;
   if (wf === 'out' || order.status === 'delivery') return 4;
   if (wf === 'ready') return 3;
   if (wf === 'preparing') return 2;
@@ -167,7 +167,7 @@ function OrderTimelineView({ trackingId }: { trackingId: string }) {
         lastWorkflow.current = String(wf);
         lastPaymentKey.current = payKey;
 
-        if (data.status === 'done') {
+        if (data.status === 'done' || data.status === 'finalized') {
           // Survey copy stays in-app (avaliação). External WhatsApp queue gated off.
           void sendPostDeliverySurveyWhenReady({
             phone: data.phone,
@@ -336,7 +336,7 @@ function OrderTimelineView({ trackingId }: { trackingId: string }) {
   const cancelled = order.status === 'cancelled';
   const current = resolveTimelineIndex(order);
   const acceptedOrFurther = current >= 2 && current < 5;
-  const delivered = order.status === 'done';
+  const delivered = order.status === 'done' || order.status === 'finalized';
   const inKitchen = current === 2; // Em preparo
   const displayPrepMin = order.prepTimeMin ?? prepMin;
   const displayPrepMax = order.prepTimeMax ?? prepMax;

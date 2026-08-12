@@ -7,10 +7,9 @@ import { phoneIdentityKey } from "../lib/clientMeta";
 
 const router = Router();
 
-// Revenue metrics only count "done" (fulfilled) orders — pending/cancelled orders
-// are not realized revenue. Counts of orders by status (total/delivered/cancelled/pending)
-// use all orders in the period regardless of status.
-const DONE = "done" as const;
+// Revenue metrics only count "finalized" orders — operational/pending/cancelled
+// are not realized revenue. Counts of orders by status use all orders in the period.
+const DONE = "finalized" as const;
 
 function parseDate(value: unknown, fallback: Date): Date {
   if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
@@ -76,9 +75,9 @@ router.get("/admin/financial-report", requireCompanyAuth, async (req, res) => {
     const [countRow] = await db
       .select({
         total: sql<number>`COUNT(*)`,
-        delivered: sql<number>`COUNT(*) FILTER (WHERE ${ordersTable.status} = 'done')`,
+        delivered: sql<number>`COUNT(*) FILTER (WHERE ${ordersTable.status} = 'finalized')`,
         cancelled: sql<number>`COUNT(*) FILTER (WHERE ${ordersTable.status} = 'cancelled')`,
-        pending: sql<number>`COUNT(*) FILTER (WHERE ${ordersTable.status} IN ('new', 'preparing', 'delivery'))`,
+        pending: sql<number>`COUNT(*) FILTER (WHERE ${ordersTable.status} IN ('new', 'preparing', 'delivery', 'done'))`,
       })
       .from(ordersTable)
       .where(periodFilter);

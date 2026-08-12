@@ -78,6 +78,7 @@ function canAcceptOrder(order: Order): boolean {
 
 /** Pix without receipt stays off the board until the customer sends proof. */
 function isVisibleOnBoard(order: Order): boolean {
+  if (order.status === 'finalized' || order.workflow === 'finalized') return false;
   if (order.status === 'cancelled') return true;
   if (order.paymentMethod === 'pix' && order.workflow === 'awaiting_payment' && !order.receiptDataUrl) {
     return false;
@@ -107,6 +108,7 @@ function playBeep() {
 
 function getBoardColumn(order: Order): ColumnKey | 'cancelled' {
   if (order.status === 'cancelled') return 'cancelled';
+  if (order.status === 'finalized' || order.workflow === 'finalized') return 'done';
   const wf = order.workflow === 'accepted' ? 'preparing' : order.workflow;
   if (wf === 'awaiting_payment') return 'new';
   if (wf === 'preparing' || wf === 'ready' || wf === 'out' || wf === 'done' || wf === 'new') return wf;
@@ -163,18 +165,20 @@ function buildReceiptHTML(order: Order): string {
   </body></html>`;
 }
 
-function OrderCard({ order, highlight, dragging, onAccept, onRefuse, onAdvance, onBack, onConfirmPayment, onRefuseReceipt }: {
+function OrderCard({ order, highlight, dragging, onAccept, onRefuse, onAdvance, onBack, onFinalize, onConfirmPayment, onRefuseReceipt }: {
   order: Order; highlight: boolean; dragging?: boolean;
   onAccept: (order: Order) => void;
   onRefuse: (order: Order) => void;
-  onAdvance: (order: Order, workflow: ColumnKey) => void;
+  onAdvance: (order: Order, workflow: ColumnKey, opts?: { deliveryPersonName?: string }) => void;
   onBack: (order: Order, workflow: ColumnKey) => void;
+  onFinalize: (order: Order) => void;
   onConfirmPayment: (order: Order) => void;
   onRefuseReceipt: (order: Order) => void;
 }) {
   const [updating, setUpdating] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [showReceipt, setShowReceipt] = useState(false);
+  const [courierName, setCourierName] = useState(order.deliveryPersonName || '');
   const [tick, setTick] = useState(() => Date.now());
   const column = getBoardColumn(order);
   const colIndex = column === 'cancelled' ? -1 : COLUMN_ORDER.indexOf(column);
@@ -429,12 +433,40 @@ function OrderCard({ order, highlight, dragging, onAccept, onRefuse, onAdvance, 
             </button>
           )}
           {nextStatus && (
-            <button onClick={() => run(() => onAdvance(order, nextStatus))} disabled={updating}
+            <button
+              onClick={() => run(() => onAdvance(
+                order,
+                nextStatus,
+                nextStatus === 'out' || nextStatus === 'done'
+                  ? { deliveryPersonName: courierName.trim() || undefined }
+                  : undefined,
+              ))}
+              disabled={updating}
               className={`px-2.5 py-2 rounded-lg font-bold text-xs uppercase tracking-wide flex items-center gap-1 ${COLUMNS.find(c => c.key === nextStatus)?.btnClass ?? 'bg-amber-500 text-zinc-950'}`}
               title={WORKFLOW_LABELS[nextStatus]}>
               {WORKFLOW_LABELS[nextStatus].split(' ')[0]} <ChevronRight size={14} />
             </button>
           )}
+          {column === 'done' && !nextStatus && (
+            <button
+              onClick={() => run(() => onFinalize(order))}
+              disabled={updating}
+              className="px-2.5 py-2 rounded-lg font-bold text-xs uppercase tracking-wide bg-emerald-500 text-zinc-950"
+              title="Finalizado">
+              Finalizar
+            </button>
+          )}
+        </div>
+      )}
+
+      {(column === 'out' || column === 'done') && !isPending && (
+        <div className="px-3 pb-3">
+          <input
+            value={courierName}
+            onChange={(e) => setCourierName(e.target.value)}
+            placeholder="Nome do entregador (opcional)"
+            className="w-full h-9 rounded-lg bg-zinc-950 border border-zinc-800 px-2.5 text-xs text-white placeholder:text-zinc-600 focus:border-amber-500 focus:outline-none"
+          />
         </div>
       )}
 
@@ -497,12 +529,13 @@ function OrderCard({ order, highlight, dragging, onAccept, onRefuse, onAdvance, 
   );
 }
 
-function Column({ col, orders, newOrderIds, onAccept, onRefuse, onAdvance, onBack, onConfirmPayment, onRefuseReceipt }: {
+function Column({ col, orders, newOrderIds, onAccept, onRefuse, onAdvance, onBack, onFinalize, onConfirmPayment, onRefuseReceipt }: {
   col: ColumnDef; orders: Order[]; newOrderIds: Set<number>;
   onAccept: (order: Order) => void;
   onRefuse: (order: Order) => void;
-  onAdvance: (order: Order, workflow: ColumnKey) => void;
+  onAdvance: (order: Order, workflow: ColumnKey, opts?: { deliveryPersonName?: string }) => void;
   onBack: (order: Order, workflow: ColumnKey) => void;
+  onFinalize: (order: Order) => void;
   onConfirmPayment: (order: Order) => void;
   onRefuseReceipt: (order: Order) => void;
 }) {
@@ -525,6 +558,7 @@ function Column({ col, orders, newOrderIds, onAccept, onRefuse, onAdvance, onBac
           ) : orders.map(order => (
             <OrderCard key={order.id} order={order} highlight={newOrderIds.has(order.id)}
               onAccept={onAccept} onRefuse={onRefuse} onAdvance={onAdvance} onBack={onBack}
+              onFinalize={onFinalize}
               onConfirmPayment={onConfirmPayment} onRefuseReceipt={onRefuseReceipt} />
           ))}
         </AnimatePresence>
@@ -608,7 +642,7 @@ export default function AdminDashboard() {
       fetchOrders();
       try {
         const data = JSON.parse((e as MessageEvent).data) as {
-          workflow?: string; id?: number; orderNumber?: number;
+          workflow?: string; id?: number; orderNumber?: number; status?: string;
         };
         const wf = data.workflow;
         if (wf === 'ready') setNotification('🔔 Pedido pronto para entrega');
@@ -617,6 +651,10 @@ export default function AdminDashboard() {
         else if (wf === 'new') setNotification('🔔 Pedido aguardando confirmação');
         else if (wf === 'cancelled') setNotification('🔔 Pedido recusado');
         else if (wf === 'done') setNotification('🔔 Pedido entregue');
+        else if (wf === 'finalized') setNotification('🔔 Pedido finalizado');
+        if (wf === 'finalized' || data.status === 'finalized') {
+          setOrders(prev => prev.filter(o => o.id !== data.id));
+        }
         if (wf) setTimeout(() => setNotification(null), 5000);
       } catch { /* ignore */ }
     });
@@ -702,11 +740,22 @@ export default function AdminDashboard() {
     }
   };
 
-  const handleAdvance = async (order: Order, workflow: ColumnKey) => {
+  const handleAdvance = async (order: Order, workflow: ColumnKey, opts?: { deliveryPersonName?: string }) => {
     try {
-      const updated = await updateOrderWorkflow(order.id, workflow);
-      applyUpdated(order.id, updated);
-      notifyCustomer(order, workflow, null, updated.customerNotifyMessage);
+      const updated = await updateOrderWorkflow(order.id, workflow, opts);
+      if (updated.status === 'finalized' || updated.workflow === 'finalized') {
+        setOrders(prev => prev.filter(o => o.id !== order.id));
+        setNotification(`Pedido #${order.orderNumber} finalizado`);
+        setTimeout(() => setNotification(null), 4000);
+      } else {
+        applyUpdated(order.id, updated);
+      }
+      notifyCustomer(
+        order,
+        updated.workflow === 'finalized' ? 'done' : workflow,
+        null,
+        updated.customerNotifyMessage,
+      );
       if (workflow === 'ready') {
         void fetchPrepStats();
         if (updated.prepEarlyFinish && typeof updated.prepDurationSeconds === 'number') {
@@ -717,6 +766,20 @@ export default function AdminDashboard() {
           setTimeout(() => setPrepCelebration(null), 6500);
         }
       }
+    } catch {
+      fetchOrders();
+    }
+  };
+
+  const handleFinalize = async (order: Order) => {
+    try {
+      const updated = await updateOrderWorkflow(order.id, 'finalized', {
+        deliveryPersonName: order.deliveryPersonName || undefined,
+      });
+      setOrders(prev => prev.filter(o => o.id !== order.id));
+      setNotification(`Pedido #${order.orderNumber} finalizado`);
+      setTimeout(() => setNotification(null), 4000);
+      notifyCustomer(order, 'done', null, updated.customerNotifyMessage);
     } catch {
       fetchOrders();
     }
@@ -798,7 +861,10 @@ export default function AdminDashboard() {
   }, [orders]);
 
   const cancelledOrders = useMemo(() => orders.filter(o => o.status === 'cancelled'), [orders]);
-  const activeCount = orders.filter(o => o.status !== 'cancelled' && o.status !== 'done').length;
+  const activeCount = orders.filter(o =>
+    o.status !== 'cancelled' && o.status !== 'done' && o.status !== 'finalized'
+    && o.workflow !== 'finalized'
+  ).length;
   const newCount = ordersByColumn.new.length;
   const receiptPending = orders.filter(o => o.receiptDataUrl && o.paymentStatus !== 'paid').length;
   const visibleColumns = filter === 'all' ? COLUMNS : COLUMNS.filter(c => c.key === filter);
@@ -867,6 +933,9 @@ export default function AdminDashboard() {
           </div>
 
           <div className="flex items-center gap-1 shrink-0">
+            <Link href="/admin/pedidos/finalizados" className="p-2 text-zinc-400 hover:text-emerald-400" title="Finalizados">
+              <CheckCircle2 size={20} />
+            </Link>
             <button onClick={() => setShowCancelled(true)} className="p-2 text-zinc-400 hover:text-red-400 relative" title="Recusados">
               <XCircle size={20} />
               {cancelledOrders.length > 0 && (
@@ -940,6 +1009,7 @@ export default function AdminDashboard() {
               {visibleColumns.map(col => (
                 <Column key={col.key} col={col} orders={ordersByColumn[col.key]} newOrderIds={newOrderIds}
                   onAccept={handleAccept} onRefuse={openRefuse} onAdvance={handleAdvance} onBack={handleBack}
+                  onFinalize={handleFinalize}
                   onConfirmPayment={handleConfirmPayment} onRefuseReceipt={openRefuseReceipt} />
               ))}
             </div>
@@ -948,6 +1018,7 @@ export default function AdminDashboard() {
                 <div className="w-[300px] rotate-2">
                   <OrderCard order={activeDragOrder} highlight={false} dragging
                     onAccept={handleAccept} onRefuse={openRefuse} onAdvance={handleAdvance} onBack={handleBack}
+                    onFinalize={handleFinalize}
                     onConfirmPayment={handleConfirmPayment} onRefuseReceipt={openRefuseReceipt} />
                 </div>
               )}
@@ -1083,6 +1154,7 @@ export default function AdminDashboard() {
                 <div key={order.id} className="mb-3">
                   <OrderCard order={order} highlight={false}
                     onAccept={handleAccept} onRefuse={openRefuse} onAdvance={handleAdvance} onBack={handleBack}
+                    onFinalize={handleFinalize}
                     onConfirmPayment={handleConfirmPayment} onRefuseReceipt={openRefuseReceipt} />
                 </div>
               ))}

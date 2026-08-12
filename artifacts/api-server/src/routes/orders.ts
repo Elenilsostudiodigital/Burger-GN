@@ -11,10 +11,11 @@ import { normalizeStreetKey } from "../lib/deliveryStreets";
 import { resolvePointInAreas } from "../lib/deliveryAreas";
 import {
   parseOrderNotes, serializeOrderNotes, appendHistory, resolveWorkflow, WORKFLOW_TO_STATUS,
-  buildCustomerNotifyMessage, buildPostDeliverySurveyMessage,
+  buildCustomerNotifyMessage, buildPostDeliverySurveyMessage, deliveryDurationSeconds,
   type WorkflowStage, type CardType, type OrderMeta, type OrderReview,
 } from "../lib/orderMeta";
 import { buildStaticPixPayload, decodePixSettings, normalizePixKey } from "../lib/staticPix";
+import { ensureOrderFlowSchema } from "../lib/ensureOrderFlowSchema";
 import { syncClubeMemberOnOrder } from "../lib/clubeClientSync";
 import {
   isFidelityFreeBurgerProduct,
@@ -38,7 +39,7 @@ import crypto from "node:crypto";
 const router = Router();
 
 const WORKFLOW_VALUES: WorkflowStage[] = [
-  "awaiting_payment", "new", "accepted", "preparing", "ready", "out", "done",
+  "awaiting_payment", "new", "accepted", "preparing", "ready", "out", "done", "finalized",
 ];
 
 const RECEIPT_MIME_RE = /^data:image\/(png|jpe?g|webp);base64,/i;
@@ -47,6 +48,7 @@ function enrichOrder<T extends { notes: string; status: string }>(order: T) {
   const { publicNotes, meta } = parseOrderNotes(order.notes);
   const workflow = resolveWorkflow(order.status, meta);
   const durationSec = prepDurationSeconds(meta);
+  const deliverySec = deliveryDurationSeconds(meta);
   return {
     ...order,
     notes: publicNotes,
@@ -61,12 +63,16 @@ function enrichOrder<T extends { notes: string; status: string }>(order: T) {
     rejectReason: meta.rejectReason ?? null,
     review: meta.review ?? null,
     deliveredAt: meta.deliveredAt ?? null,
+    outAt: meta.outAt ?? null,
+    finalizedAt: meta.finalizedAt ?? null,
+    deliveryPersonName: meta.deliveryPersonName ?? null,
     history: meta.history ?? [],
     prepStartedAt: meta.prepStartedAt ?? null,
     prepFinishedAt: meta.prepFinishedAt ?? null,
     prepTimeMin: meta.prepTimeMin ?? null,
     prepTimeMax: meta.prepTimeMax ?? null,
     prepDurationSeconds: durationSec,
+    deliveryDurationSeconds: deliverySec,
     prepEarlyFinish: isPrepEarlyFinish(meta),
     stampsAwarded: meta.stampsAwarded ?? false,
     stampSkipped: meta.stampSkipped ?? false,
@@ -77,6 +83,16 @@ function enrichOrder<T extends { notes: string; status: string }>(order: T) {
     fidelityRewardTitle: meta.fidelityRewardTitle ?? null,
     fidelityRewardId: meta.fidelityRewardId ?? null,
   };
+}
+
+async function getAutoFinalize(companyId: number): Promise<boolean> {
+  await ensureOrderFlowSchema();
+  const [settings] = await db
+    .select()
+    .from(paymentSettingsTable)
+    .where(eq(paymentSettingsTable.companyId, companyId));
+  // Default true when column/row missing
+  return settings?.autoFinalizeOnDelivered !== false;
 }
 
 async function getOrderWithItems(orderId: number) {
@@ -639,11 +655,17 @@ router.post("/orders", resolvePublicCompany, async (req, res) => {
   }
 });
 
-// Get all orders (admin)
+// Get operational orders (admin) — excludes Finalizados by default
 router.get("/orders", requireCompanyAuth, async (req, res) => {
   try {
+    await ensureOrderFlowSchema();
+    const includeFinalized = String(req.query["includeFinalized"] || "") === "1";
     const orders = await db.select().from(ordersTable)
-      .where(eq(ordersTable.companyId, req.companyId!))
+      .where(
+        includeFinalized
+          ? eq(ordersTable.companyId, req.companyId!)
+          : and(eq(ordersTable.companyId, req.companyId!), ne(ordersTable.status, "finalized")),
+      )
       .orderBy(desc(ordersTable.createdAt));
     const ids = orders.map(o => o.id);
     if (ids.length === 0) { res.json([]); return; }
@@ -654,6 +676,30 @@ router.get("/orders", requireCompanyAuth, async (req, res) => {
     })));
   } catch (err) {
     req.log.error({ err }, "Failed to list orders");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+/** Admin history: Finalizados only. */
+router.get("/admin/orders/finalized", requireCompanyAuth, async (req, res) => {
+  try {
+    await ensureOrderFlowSchema();
+    const companyId = req.companyId!;
+    const limit = Math.min(500, Math.max(1, Number(req.query["limit"]) || 200));
+    const orders = await db.select().from(ordersTable)
+      .where(and(eq(ordersTable.companyId, companyId), eq(ordersTable.status, "finalized")))
+      .orderBy(desc(ordersTable.updatedAt))
+      .limit(limit);
+    const ids = orders.map((o) => o.id);
+    const items = ids.length
+      ? await db.select().from(orderItemsTable).where(inArray(orderItemsTable.orderId, ids))
+      : [];
+    res.json(orders.map((o) => ({
+      ...enrichOrder(o),
+      items: items.filter((i) => i.orderId === o.id),
+    })));
+  } catch (err) {
+    req.log.error({ err }, "Failed to list finalized orders");
     res.status(500).json({ error: "Internal server error" });
   }
 });
@@ -690,12 +736,15 @@ router.get("/orders/track/:trackingId", async (req, res) => {
 // Update order status / workflow (admin)
 router.patch("/orders/:id/status", requireCompanyAuth, async (req, res) => {
   try {
+    await ensureOrderFlowSchema();
     const id = Number(req.params["id"]);
     const body = req.body as {
-      status?: "new" | "preparing" | "delivery" | "done" | "cancelled";
+      status?: "new" | "preparing" | "delivery" | "done" | "cancelled" | "finalized";
       workflow?: WorkflowStage | "cancelled";
       /** Required when refusing / cancelling. */
       rejectReason?: string;
+      /** Optional courier name when sending out / delivering. */
+      deliveryPersonName?: string;
     };
 
     const [existing] = await db.select().from(ordersTable)
@@ -703,9 +752,14 @@ router.patch("/orders/:id/status", requireCompanyAuth, async (req, res) => {
     if (!existing) { res.status(404).json({ error: "Not found" }); return; }
 
     const { publicNotes, meta } = parseOrderNotes(existing.notes);
-    let nextStatus = existing.status as "new" | "preparing" | "delivery" | "done" | "cancelled";
+    let nextStatus = existing.status as "new" | "preparing" | "delivery" | "done" | "cancelled" | "finalized";
     let nextMeta = { ...meta };
     let notifyStage: WorkflowStage | "cancelled" | null = null;
+
+    if (typeof body.deliveryPersonName === "string") {
+      const name = body.deliveryPersonName.trim().slice(0, 120);
+      if (name) nextMeta.deliveryPersonName = name;
+    }
 
     // Accepting a pending order jumps straight to "Em preparo" (no auto-accept on create).
     let requestedWorkflow = body.workflow;
@@ -719,9 +773,11 @@ router.patch("/orders/:id/status", requireCompanyAuth, async (req, res) => {
       requestedWorkflow === "ready" ||
       requestedWorkflow === "out" ||
       requestedWorkflow === "done" ||
+      requestedWorkflow === "finalized" ||
       body.status === "preparing" ||
       body.status === "delivery" ||
-      body.status === "done";
+      body.status === "done" ||
+      body.status === "finalized";
     if (
       advancingToKitchen &&
       existing.paymentMethod === "pix" &&
@@ -747,45 +803,81 @@ router.patch("/orders/:id/status", requireCompanyAuth, async (req, res) => {
       res.status(400).json({ error: "Status inválido para alteração manual." });
       return;
     } else if (requestedWorkflow && WORKFLOW_VALUES.includes(requestedWorkflow)) {
-      const wf = requestedWorkflow as WorkflowStage;
+      let wf = requestedWorkflow as WorkflowStage;
+
+      // Entregue → optionally auto Finalizado
+      if (wf === "done") {
+        const auto = await getAutoFinalize(req.companyId!);
+        if (auto) wf = "finalized";
+      }
+
       nextStatus = WORKFLOW_TO_STATUS[wf];
-      nextMeta = appendHistory(nextMeta, wf);
+      nextMeta = appendHistory(nextMeta, wf === "finalized" && requestedWorkflow === "done" ? "done" : wf);
+      if (wf === "finalized" && requestedWorkflow === "done") {
+        // Record both Entregue and Finalizado in history when auto-finalizing
+        nextMeta = appendHistory(nextMeta, "finalized");
+      }
       nextMeta.workflow = wf;
-      notifyStage = wf;
-      if (wf === "done" && !nextMeta.deliveredAt) {
+      notifyStage = wf === "finalized" ? "done" : wf;
+
+      if ((wf === "done" || wf === "finalized") && !nextMeta.deliveredAt) {
         nextMeta.deliveredAt = new Date().toISOString();
+      }
+      if (wf === "finalized" && !nextMeta.finalizedAt) {
+        nextMeta.finalizedAt = new Date().toISOString();
+      }
+      if (wf === "out" && !nextMeta.outAt) {
+        nextMeta.outAt = new Date().toISOString();
       }
       if (wf === "preparing") {
         const times = await loadCompanyPrepTimes(req.companyId!);
         nextMeta = startPrepTimer(nextMeta, times);
       }
-      if (wf === "ready" || wf === "out" || wf === "done") {
+      if (wf === "ready" || wf === "out" || wf === "done" || wf === "finalized") {
         nextMeta = finishPrepTimer(nextMeta);
       }
-    } else if (body.status && ["new", "preparing", "delivery", "done"].includes(body.status)) {
-      nextStatus = body.status;
-      const mapped: WorkflowStage =
+    } else if (body.status && ["new", "preparing", "delivery", "done", "finalized"].includes(body.status)) {
+      let mapped: WorkflowStage =
         body.status === "new" ? "new" :
         body.status === "preparing" ? "preparing" :
-        body.status === "delivery" ? "out" : "done";
-      nextMeta = appendHistory(nextMeta, mapped);
-      notifyStage = mapped;
-      if (mapped === "done" && !nextMeta.deliveredAt) {
+        body.status === "delivery" ? "out" :
+        body.status === "finalized" ? "finalized" : "done";
+
+      if (mapped === "done") {
+        const auto = await getAutoFinalize(req.companyId!);
+        if (auto) mapped = "finalized";
+      }
+
+      nextStatus = WORKFLOW_TO_STATUS[mapped];
+      if (mapped === "finalized" && body.status === "done") {
+        nextMeta = appendHistory(nextMeta, "done");
+        nextMeta = appendHistory(nextMeta, "finalized");
+      } else {
+        nextMeta = appendHistory(nextMeta, mapped);
+      }
+      notifyStage = mapped === "finalized" ? "done" : mapped;
+      if ((mapped === "done" || mapped === "finalized") && !nextMeta.deliveredAt) {
         nextMeta.deliveredAt = new Date().toISOString();
+      }
+      if (mapped === "finalized" && !nextMeta.finalizedAt) {
+        nextMeta.finalizedAt = new Date().toISOString();
+      }
+      if (mapped === "out" && !nextMeta.outAt) {
+        nextMeta.outAt = new Date().toISOString();
       }
       if (mapped === "preparing") {
         const times = await loadCompanyPrepTimes(req.companyId!);
         nextMeta = startPrepTimer(nextMeta, times);
       }
-      if (mapped === "out" || mapped === "done") {
+      if (mapped === "out" || mapped === "done" || mapped === "finalized") {
         nextMeta = finishPrepTimer(nextMeta);
       }
     } else {
       res.status(400).json({ error: "Invalid status" }); return;
     }
 
-    // Automatic fidelity + cashback when order reaches done (idempotent).
-    if (nextStatus === "done") {
+    // Automatic fidelity + cashback when order is delivered/finalized (idempotent).
+    if (nextStatus === "done" || nextStatus === "finalized") {
       try {
         const rewardResult = await applyOrderCompletionRewards(
           {
@@ -827,7 +919,7 @@ router.patch("/orders/:id/status", requireCompanyAuth, async (req, res) => {
 
     // Future WhatsApp: post-delivery survey message is prepared but NOT sent (no API yet).
     const futureWhatsappSurvey =
-      notifyStage === "done"
+      notifyStage === "done" || nextStatus === "finalized"
         ? buildPostDeliverySurveyMessage(order.orderNumber, order.customerName)
         : null;
 
@@ -864,7 +956,7 @@ router.post("/orders/track/:trackingId/review", async (req, res) => {
 
     const [existing] = await db.select().from(ordersTable).where(eq(ordersTable.trackingId, trackingId));
     if (!existing) { res.status(404).json({ error: "Order not found" }); return; }
-    if (existing.status !== "done") {
+    if (existing.status !== "done" && existing.status !== "finalized") {
       res.status(400).json({ error: "Avaliação disponível apenas após a entrega." }); return;
     }
 
