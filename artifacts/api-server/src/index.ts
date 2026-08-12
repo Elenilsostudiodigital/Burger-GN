@@ -1,6 +1,7 @@
 import app from "./app";
 import { logger } from "./lib/logger";
 import { runSeed } from "./lib/seed";
+import { ensureCompanySchema } from "./lib/ensureCompanySchema";
 import { ensureClubeSchema } from "./lib/ensureClubeSchema";
 import { ensureDeliveryStreetsSchema } from "./lib/ensureDeliveryStreetsSchema";
 
@@ -8,6 +9,7 @@ import { ensureDeliveryStreetsSchema } from "./lib/ensureDeliveryStreetsSchema";
 const isServerless = Boolean(process.env["VERCEL"] || process.env["AWS_LAMBDA_FUNCTION_NAME"]);
 
 async function bootstrapData() {
+  await ensureCompanySchema();
   await ensureClubeSchema();
   await ensureDeliveryStreetsSchema();
   await runSeed();

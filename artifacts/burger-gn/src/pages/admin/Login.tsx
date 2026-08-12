@@ -24,8 +24,20 @@ export default function AdminLogin() {
     try {
       await login(email.trim(), password);
       setLocation('/admin');
-    } catch {
-      setError('E-mail ou senha incorretos. Tente novamente.');
+    } catch (err) {
+      const message = err instanceof Error ? err.message.trim() : '';
+      // Never mask server/DB failures as "wrong password".
+      if (
+        !message ||
+        /e-mail ou senha incorretos/i.test(message) ||
+        /informe e-mail e senha/i.test(message)
+      ) {
+        setError(message || 'E-mail ou senha incorretos. Tente novamente.');
+      } else if (/<!DOCTYPE|<html/i.test(message)) {
+        setError('Falha interna no servidor ao autenticar. Tente novamente em instantes.');
+      } else {
+        setError(message);
+      }
     } finally {
       setLoading(false);
     }
