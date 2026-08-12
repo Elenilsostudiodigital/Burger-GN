@@ -1,40 +1,68 @@
 /**
- * Contract test: Localizar map host must not swap <iframe> with a spinner sibling.
- * The old ternary (geoLoading ? Loader : iframe) caused:
- *   NotFoundError: Failed to execute 'insertBefore' on 'Node'
+ * Contract: StreetMapPreview must keep a fixed React child tree (no iframe mount/unmount).
  * Usage: node scripts/localizar-map-dom-selftest.mjs
  */
 import fs from "node:fs";
 import path from "node:path";
 
-const file = path.resolve("artifacts/burger-gn/src/pages/admin/RuasEntrega.tsx");
-const src = fs.readFileSync(file, "utf8");
+const previewPath = path.resolve("artifacts/burger-gn/src/components/StreetMapPreview.tsx");
+const pagePath = path.resolve("artifacts/burger-gn/src/pages/admin/RuasEntrega.tsx");
+const preview = fs.readFileSync(previewPath, "utf8");
+const page = fs.readFileSync(pagePath, "utf8");
+
+// Strip block/line comments before DOM-API checks so docstrings don't false-fail.
+const codeOnly = preview
+  .replace(/\/\*[\s\S]*?\*\//g, "")
+  .replace(/^\s*\/\/.*$/gm, "");
 
 const checks = [
   {
-    name: "StreetMapPreview component exists",
-    ok: src.includes("function StreetMapPreview"),
+    name: "StreetMapPreview module exists",
+    ok: fs.existsSync(previewPath),
   },
   {
-    name: "loading is an overlay (absolute), not a ternary replacement for iframe",
-    ok: src.includes("absolute inset-0") && src.includes("StreetMapPreview"),
+    name: "RuasEntrega imports StreetMapPreview module",
+    ok: page.includes("from '../../components/StreetMapPreview'"),
   },
   {
-    name: "create form uses StreetMapPreview (not inline iframe ternary)",
-    ok: src.includes("<StreetMapPreview") && !src.match(/geoLoading\s*\?\s*\(\s*<Loader2[\s\S]*iframe/),
+    name: "iframe is always rendered (no conditional iframe branch)",
+    ok: codeOnly.includes("<iframe") && !codeOnly.match(/\?\s*\(\s*<iframe/),
   },
   {
-    name: "locate does not clear createCoords (keeps iframe mounted)",
+    name: "placeholder/loading use CSS visibility, not conditional null",
     ok:
-      src.includes("Keep previous map iframe mounted") &&
-      !src.match(/setGeoLoading\(true\);[\s\S]{0,200}setCreateCoords\(null\)/),
+      codeOnly.includes("invisible pointer-events-none") &&
+      !codeOnly.match(/\{loading\s*\?\s*\(/) &&
+      !codeOnly.match(/loading\s*\?\s*[\s\S]{0,80}:\s*null/),
   },
   {
-    name: "no leaflet / react-leaflet import in this screen",
+    name: "uses about:blank when no coords (keeps iframe node)",
+    ok: codeOnly.includes("about:blank"),
+  },
+  {
+    name: "no Leaflet / react-leaflet imports or MapContainer/L.map",
     ok:
-      !src.match(/from\s+['"]react-leaflet['"]/) &&
-      !src.match(/from\s+['"]leaflet['"]/) &&
-      !src.includes("MapContainer"),
+      !codeOnly.match(/from\s+['"]react-leaflet['"]/) &&
+      !codeOnly.match(/from\s+['"]leaflet['"]/) &&
+      !codeOnly.includes("MapContainer") &&
+      !codeOnly.includes("L.map") &&
+      !page.match(/from\s+['"]react-leaflet['"]/),
+  },
+  {
+    name: "no direct DOM APIs in code (appendChild/removeChild/innerHTML/insertBefore)",
+    ok:
+      !codeOnly.includes("appendChild") &&
+      !codeOnly.includes("removeChild") &&
+      !codeOnly.includes("innerHTML") &&
+      !codeOnly.includes("insertBefore"),
+  },
+  {
+    name: "no useEffect/useMemo/useRef remounting map instance",
+    ok: !codeOnly.includes("useEffect") && !codeOnly.includes("useMemo") && !codeOnly.includes("useRef"),
+  },
+  {
+    name: "page does not clear createCoords at start of locate",
+    ok: !page.match(/setGeoLoading\(true\);[\s\S]{0,220}setCreateCoords\(null\)/),
   },
 ];
 
