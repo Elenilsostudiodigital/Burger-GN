@@ -23,10 +23,13 @@ app.use("/api", async (req, res, next) => {
     logger.error({ err }, "Failed to ensure company schema");
     const detail = err instanceof Error ? err.message : String(err);
     const missingRelation = /relation .* does not exist/i.test(detail);
+    const noUrl = !process.env["DATABASE_URL"];
     res.status(500).json({
-      error: missingRelation
-        ? "Banco de dados incompleto: tabelas da empresa ausentes. Tente novamente em instantes."
-        : "Falha ao conectar ou preparar o banco de dados da loja.",
+      error: noUrl
+        ? "DATABASE_URL não configurada no servidor."
+        : missingRelation
+          ? "Banco de dados incompleto: tabelas da empresa ausentes. Tente novamente em instantes."
+          : `Falha ao conectar ou preparar o banco de dados da loja. (${detail.slice(0, 180)})`,
     });
   }
 });
