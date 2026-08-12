@@ -55,6 +55,54 @@ function fmtCoord(value: number): string {
   return n == null ? '—' : n.toFixed(5);
 }
 
+/**
+ * Stable map host for OSM embed.
+ * Avoids React NotFoundError (insertBefore) caused by swapping <iframe> ↔ spinner
+ * in the same DOM slot while the browser still owns the iframe document.
+ * No Leaflet / react-leaflet — plain OpenStreetMap export embed only.
+ */
+function StreetMapPreview({
+  lat,
+  lng,
+  loading,
+}: {
+  lat: number | null;
+  lng: number | null;
+  loading: boolean;
+}) {
+  const hasCoords = lat != null && lng != null;
+  const src = hasCoords ? mapEmbedUrl(lat, lng) : null;
+
+  return (
+    <div className="relative rounded-xl border border-zinc-800 overflow-hidden bg-zinc-950 min-h-[220px]">
+      {src ? (
+        <iframe
+          title="Mapa da rua"
+          src={src}
+          className="block w-full h-[220px] border-0 bg-zinc-950"
+          referrerPolicy="no-referrer-when-downgrade"
+        />
+      ) : (
+        <div className="flex h-[220px] items-center justify-center px-4 text-center text-zinc-600 text-sm">
+          <div>
+            <MapPin className="mx-auto mb-2 opacity-50" size={28} />
+            Clique em &quot;Localizar Endereço&quot; e escolha um resultado
+          </div>
+        </div>
+      )}
+      {loading ? (
+        <div
+          className="absolute inset-0 z-10 flex items-center justify-center bg-zinc-950/75"
+          aria-busy="true"
+          aria-live="polite"
+        >
+          <Loader2 className="animate-spin text-amber-500" />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 const ORIGIN_LABEL: Record<DeliveryStreetOrigin, string> = {
   manual: 'Manual',
   pedido: 'Aprovada por Pedido',
@@ -200,7 +248,9 @@ export default function AdminRuasEntrega() {
     setGeoMessage('');
     setGeoCandidates([]);
     setSelectedCandidateId(null);
-    setCreateCoords(null);
+    // Keep previous map iframe mounted under the loading overlay.
+    // Clearing createCoords here forced React to unmount <iframe> mid-reconcile
+    // (NotFoundError: Failed to execute 'insertBefore' on 'Node').
     setCreateDistanceKm(null);
     setSuggestedFee(null);
 
@@ -555,23 +605,11 @@ export default function AdminRuasEntrega() {
               </div>
 
               <div className="space-y-3">
-                <div className="rounded-xl border border-zinc-800 overflow-hidden bg-zinc-950 min-h-[220px] flex items-center justify-center">
-                  {geoLoading ? (
-                    <Loader2 className="animate-spin text-amber-500" />
-                  ) : createCoords ? (
-                    <iframe
-                      title="Mapa da rua"
-                      src={mapEmbedUrl(createCoords.lat, createCoords.lng)}
-                      className="w-full h-[220px] border-0"
-                      loading="lazy"
-                    />
-                  ) : (
-                    <div className="text-center px-4 py-8 text-zinc-600 text-sm">
-                      <MapPin className="mx-auto mb-2 opacity-50" size={28} />
-                      Clique em &quot;Localizar Endereço&quot; e escolha um resultado
-                    </div>
-                  )}
-                </div>
+                <StreetMapPreview
+                  lat={createCoords?.lat ?? null}
+                  lng={createCoords?.lng ?? null}
+                  loading={geoLoading}
+                />
 
                 {geoCandidates.length > 0 ? (
                   <div className="rounded-xl border border-amber-500/30 bg-zinc-950/80 p-3 space-y-2">
