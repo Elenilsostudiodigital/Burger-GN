@@ -1,6 +1,6 @@
 /**
  * Shared CSV client-import types.
- * Reusable for future export / other CRM systems.
+ * Used only by Clientes → Importação (not Importar Cardápio).
  */
 
 export type CsvImportSource = "anota_ai" | "excel" | "outro";
@@ -14,12 +14,11 @@ export type CsvTargetField =
   | "stamps"
   | "clubPoints"
   | "birthDate"
+  | "notes"
   | "ignore";
 
 export interface CsvColumnMapping {
-  /** Original header from file */
   header: string;
-  /** Mapped target field */
   target: CsvTargetField;
 }
 
@@ -50,6 +49,7 @@ export interface MappedClientRow {
   stamps?: string | null;
   clubPoints?: string | null;
   birthDate?: string | null;
+  notes?: string | null;
 }
 
 export interface CsvImportError {
@@ -63,6 +63,13 @@ export interface CsvImportSummary {
   updated: number;
   skipped: number;
   errors: CsvImportError[];
+}
+
+export interface CsvImportPreview {
+  newCount: number;
+  updateCount: number;
+  invalidCount: number;
+  invalid: CsvImportError[];
 }
 
 export const DEFAULT_CSV_IMPORT_OPTIONS: CsvImportOptions = {
@@ -80,11 +87,12 @@ export const CSV_TARGET_LABELS: Record<CsvTargetField, string> = {
   name: "Nome",
   phone: "Telefone",
   celular: "Celular",
-  email: "Email",
-  cashback: "Cashback / Saldo",
-  stamps: "Selos",
-  clubPoints: "Pontos",
-  birthDate: "Nascimento",
+  email: "E-mail",
+  cashback: "Cashback",
+  stamps: "Selos/Pontos",
+  clubPoints: "Pontos (extra)",
+  birthDate: "Data de nascimento",
+  notes: "Observações",
   ignore: "Ignorar",
 };
 

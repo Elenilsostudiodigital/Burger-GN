@@ -1764,6 +1764,7 @@ export interface CsvImportRowPayload {
   stamps?: string | number | null;
   clubPoints?: string | number | null;
   birthDate?: string | null;
+  notes?: string | null;
 }
 
 export interface CsvImportErrorApi {

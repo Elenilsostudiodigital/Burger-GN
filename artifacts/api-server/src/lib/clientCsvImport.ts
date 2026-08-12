@@ -39,6 +39,7 @@ export interface CsvImportRow {
   stamps?: string | number | null;
   clubPoints?: string | number | null;
   birthDate?: string | null;
+  notes?: string | null;
 }
 
 export interface CsvImportError {
@@ -208,12 +209,25 @@ export async function processCsvImportBatch(opts: {
 
       const name = String(row.name || "").trim() || "Cliente";
       const email = String(row.email || "").trim().slice(0, 200);
+      const rowNotes = String(row.notes || "").trim().slice(0, 2000);
       const cashback = options.importCashback ? parseMoney(row.cashback) : null;
+      // Selos/Pontos: prefer stamps column; fall back to clubPoints when stamps empty
+      const stampsRaw =
+        row.stamps != null && String(row.stamps).trim() !== ""
+          ? row.stamps
+          : row.clubPoints;
       const stamps = options.importStamps
-        ? Math.min(500, parseIntSafe(row.stamps))
+        ? Math.min(500, parseIntSafe(stampsRaw))
         : null;
       const clubPoints = options.importClubPoints
-        ? Math.min(1_000_000, parseIntSafe(row.clubPoints))
+        ? Math.min(
+            1_000_000,
+            parseIntSafe(
+              row.clubPoints != null && String(row.clubPoints).trim() !== ""
+                ? row.clubPoints
+                : row.stamps,
+            ),
+          )
         : null;
       const birthDate =
         options.importBirthDate ? parseBirthDate(row.birthDate) : undefined;
@@ -274,7 +288,8 @@ export async function processCsvImportBatch(opts: {
           patch["importedAt"] = now;
         }
 
-        patch["notes"] = serializeClientNotes(current.publicNotes, nextMeta);
+        const publicNotes = rowNotes || current.publicNotes;
+        patch["notes"] = serializeClientNotes(publicNotes, nextMeta);
 
         const [saved] = await db
           .update(clubeMembersTable)
@@ -315,7 +330,7 @@ export async function processCsvImportBatch(opts: {
           importedAt: now,
           lastImport: now,
           active: true,
-          notes: serializeClientNotes("", { origin: "importacao_manual" }),
+          notes: serializeClientNotes(rowNotes, { origin: "importacao_manual" }),
         })
         .returning();
 

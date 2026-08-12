@@ -1,6 +1,6 @@
 /**
- * Automatic column mapping for client CSV imports.
- * Presets: Anota AI, Excel, generic Portuguese headers.
+ * Automatic column mapping for client CSV/Excel imports.
+ * Independent from Importar Cardápio.
  */
 
 import type {
@@ -19,7 +19,6 @@ function normalizeHeader(h: string): string {
     .trim();
 }
 
-/** Ordered matchers: first match wins per header. */
 const MATCHERS: { target: CsvTargetField; patterns: RegExp[] }[] = [
   {
     target: "name",
@@ -51,7 +50,6 @@ const MATCHERS: { target: CsvTargetField; patterns: RegExp[] }[] = [
       /^cell$/,
       /^telefone 2$/,
       /^telefone celular$/,
-      /^whats ?app$/,
     ],
   },
   {
@@ -79,17 +77,15 @@ const MATCHERS: { target: CsvTargetField; patterns: RegExp[] }[] = [
       /^fidelidade$/,
       /^qtd selos$/,
       /^quantidade de selos$/,
+      /^selos? ?\/? ?pontos?$/,
+      /^pontos?$/,
+      /^points?$/,
+      /^pontuacao$/,
     ],
   },
   {
     target: "clubPoints",
-    patterns: [
-      /^pontos?$/,
-      /^points?$/,
-      /^pontos clube$/,
-      /^club points?$/,
-      /^pontuacao$/,
-    ],
+    patterns: [/^pontos clube$/, /^club points?$/],
   },
   {
     target: "birthDate",
@@ -102,9 +98,19 @@ const MATCHERS: { target: CsvTargetField; patterns: RegExp[] }[] = [
       /^aniversario$/,
     ],
   },
+  {
+    target: "notes",
+    patterns: [
+      /^observacoes?$/,
+      /^obs$/,
+      /^notes?$/,
+      /^comentario$/,
+      /^anotacoes?$/,
+      /^obs cliente$/,
+    ],
+  },
 ];
 
-/** Extra Anota AI aliases commonly seen in Relatórios exports. */
 const ANOTA_ALIASES: Record<string, CsvTargetField> = {
   "nome do cliente": "name",
   "telefone do cliente": "phone",
@@ -120,11 +126,7 @@ export function guessTargetForHeader(
 ): CsvTargetField {
   const norm = normalizeHeader(header);
   if (!norm) return "ignore";
-
-  if (source === "anota_ai" && ANOTA_ALIASES[norm]) {
-    return ANOTA_ALIASES[norm]!;
-  }
-
+  if (source === "anota_ai" && ANOTA_ALIASES[norm]) return ANOTA_ALIASES[norm]!;
   for (const m of MATCHERS) {
     if (m.patterns.some((re) => re.test(norm))) return m.target;
   }
@@ -140,9 +142,12 @@ export function autoMapColumns(
     let target = guessTargetForHeader(header, source);
     if (target !== "ignore") {
       if (used.has(target)) {
-        // Prefer first phone; second phone-like → celular
         if (target === "phone" && !used.has("celular")) {
           target = "celular";
+          used.add("celular");
+        } else if (target === "stamps" && !used.has("clubPoints")) {
+          target = "clubPoints";
+          used.add("clubPoints");
         } else {
           target = "ignore";
         }
@@ -174,7 +179,7 @@ export function applyMapping(
   };
 
   return rows.map((row, i) => ({
-    line: i + 2, // 1-based with header on line 1
+    line: i + 2,
     name: cell(row, "name"),
     phone: cell(row, "phone"),
     celular: cell(row, "celular"),
@@ -183,10 +188,10 @@ export function applyMapping(
     stamps: cell(row, "stamps"),
     clubPoints: cell(row, "clubPoints"),
     birthDate: cell(row, "birthDate"),
+    notes: cell(row, "notes"),
   }));
 }
 
-/** Ensure header length stays aligned when remapping manually. */
 export function syncMappingHeaders(
   headers: string[],
   mapping: CsvColumnMapping[],

@@ -199,6 +199,7 @@ router.post("/admin/clientes/import/csv/batch", requireCompanyAuth, async (req, 
         stamps: row["stamps"] as string | number | null | undefined,
         clubPoints: row["clubPoints"] as string | number | null | undefined,
         birthDate: row["birthDate"] != null ? String(row["birthDate"]) : null,
+        notes: row["notes"] != null ? String(row["notes"]) : null,
       };
     });
 
