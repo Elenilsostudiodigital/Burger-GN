@@ -36,6 +36,8 @@ export interface OrderMeta {
   history?: StatusHistoryEntry[];
   pixCopyPaste?: string;
   pixKey?: string;
+  /** How this Pix was issued: Mercado Pago (online) vs store key (manual backup). */
+  pixMode?: "online" | "manual";
   /** Present when the order was refused by an attendant. */
   rejectReason?: string;
   /** Customer review after delivery confirmation. */
@@ -124,6 +126,7 @@ export function serializeOrderNotes(publicNotes: string, meta: OrderMeta): strin
   if (meta.history?.length) cleanMeta.history = meta.history;
   if (meta.pixCopyPaste) cleanMeta.pixCopyPaste = meta.pixCopyPaste;
   if (meta.pixKey) cleanMeta.pixKey = meta.pixKey;
+  if (meta.pixMode === "online" || meta.pixMode === "manual") cleanMeta.pixMode = meta.pixMode;
   if (meta.rejectReason) cleanMeta.rejectReason = meta.rejectReason;
   if (meta.review) cleanMeta.review = meta.review;
   if (meta.deliveredAt) cleanMeta.deliveredAt = meta.deliveredAt;

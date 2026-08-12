@@ -8,9 +8,9 @@ import {
 import { PageTransition } from '../components/PageTransition';
 import { useCart } from '../context/CartContext';
 import {
-  ORDER_TYPE_LABELS, PAYMENT_METHOD_LABELS, CARD_TYPE_LABELS,
+  ORDER_TYPE_LABELS, formatPaymentMethod,
   PaymentStatus, PixPaymentResult, uploadOrderReceipt, trackOrder,
-  CardType, WorkflowStage, isAllowedReceiptFile, RECEIPT_ACCEPT,
+  CardType, WorkflowStage, PixMode, isAllowedReceiptFile, RECEIPT_ACCEPT,
 } from '../lib/api';
 import { saveMyOrder } from '../lib/myOrder';
 import { saveClubePhone } from '../lib/clubeCliente';
@@ -21,6 +21,7 @@ interface StoredOrder {
   customerName: string; phone: string;
   orderType: 'delivery' | 'pickup' | 'local';
   paymentMethod: 'pix' | 'cash' | 'card';
+  pixMode?: PixMode | null;
   paymentStatus: PaymentStatus;
   workflow?: WorkflowStage;
   cardType: CardType | null;
@@ -110,22 +111,26 @@ export default function Confirmation() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Poll Pix payment conference result after receipt sent
+  const isPixOnline = order?.paymentMethod === 'pix' && order.pixMode === 'online';
+
+  // Poll Pix: Mercado Pago auto-confirm from the pay screen; manual after receipt sent.
   useEffect(() => {
     if (!order?.trackingId || order.paymentMethod !== 'pix') return;
-    if (pixStep !== 'sent' && pixStep !== 'upload') return;
+    if (pixStep === 'confirmed') return;
+    if (isPixOnline && pixStep !== 'pay') return;
+    if (!isPixOnline && pixStep !== 'sent' && pixStep !== 'upload') return;
 
     let alive = true;
     const poll = async () => {
       try {
         const live = await trackOrder(order.trackingId);
         if (!alive) return;
-        if (live.paymentStatus === 'paid' || live.workflow === 'new') {
+        if (live.paymentStatus === 'paid') {
           setPixStep('confirmed');
           setRejectReason(null);
           return;
         }
-        if (live.paymentStatus === 'failed' || live.receiptRejectReason) {
+        if (!isPixOnline && (live.paymentStatus === 'failed' || live.receiptRejectReason)) {
           setRejectReason(live.receiptRejectReason || 'Comprovante recusado');
           setPixStep('upload');
           setReceiptPreview(null);
@@ -133,9 +138,9 @@ export default function Confirmation() {
       } catch { /* ignore */ }
     };
     poll();
-    const id = setInterval(poll, 6000);
+    const id = setInterval(poll, isPixOnline ? 4000 : 6000);
     return () => { alive = false; clearInterval(id); };
-  }, [order?.trackingId, order?.paymentMethod, pixStep]);
+  }, [order?.trackingId, order?.paymentMethod, order?.pixMode, pixStep, isPixOnline]);
 
   const handleCopyPix = async () => {
     if (!hasValidPixQr(order?.pixPayment)) return;
@@ -186,11 +191,7 @@ export default function Confirmation() {
     }
   };
 
-  const paymentLabel = order
-    ? order.paymentMethod === 'card' && order.cardType
-      ? `Cartão (${CARD_TYPE_LABELS[order.cardType]})`
-      : PAYMENT_METHOD_LABELS[order.paymentMethod]
-    : '';
+  const paymentLabel = order ? formatPaymentMethod(order) : '';
 
   const showPixQr = hasValidPixQr(order?.pixPayment);
   const showPixMissing = order?.paymentMethod === 'pix' && !showPixQr;
@@ -307,8 +308,15 @@ export default function Confirmation() {
             className="w-full max-w-sm bg-zinc-900 border border-zinc-800 rounded-2xl p-5 mb-4 text-left space-y-4">
             <div className="flex items-center gap-2 justify-center">
               <QrCode size={18} className="text-amber-500" />
-              <h3 className="text-white font-black uppercase tracking-wide text-sm">Pague com Pix</h3>
+              <h3 className="text-white font-black uppercase tracking-wide text-sm">
+                {isPixOnline ? 'PIX Online — Mercado Pago' : 'Pague com Pix'}
+              </h3>
             </div>
+            {isPixOnline && (
+              <p className="text-zinc-400 text-xs text-center">
+                Pague via PIX do Mercado Pago. Aprovação automática.
+              </p>
+            )}
 
             <div className="flex justify-center">
               {order.pixPayment.qrCodeBase64 ? (
@@ -354,10 +362,17 @@ export default function Confirmation() {
               </div>
             </div>
 
-            <button type="button" onClick={() => setPixStep('upload')}
-              className="w-full h-12 rounded-xl bg-amber-500 hover:bg-amber-400 text-zinc-950 font-black text-sm uppercase tracking-wide flex items-center justify-center gap-2">
-              <Upload size={16} /> Já realizei o pagamento
-            </button>
+            {!isPixOnline && (
+              <button type="button" onClick={() => setPixStep('upload')}
+                className="w-full h-12 rounded-xl bg-amber-500 hover:bg-amber-400 text-zinc-950 font-black text-sm uppercase tracking-wide flex items-center justify-center gap-2">
+                <Upload size={16} /> Já realizei o pagamento
+              </button>
+            )}
+            {isPixOnline && (
+              <p className="text-zinc-500 text-xs text-center leading-relaxed">
+                Aguardando confirmação automática do Mercado Pago. Esta tela atualiza sozinha quando o pagamento for aprovado.
+              </p>
+            )}
           </motion.div>
         )}
 

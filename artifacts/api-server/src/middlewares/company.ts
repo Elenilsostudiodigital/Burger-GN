@@ -27,6 +27,7 @@ export async function resolvePublicCompany(req: Request, res: Response, next: Ne
     }
 
     req.companyId = company.id;
+    req.companySlug = company.slug;
     next();
   } catch (err) {
     req.log.error({ err }, "Failed to resolve public company");

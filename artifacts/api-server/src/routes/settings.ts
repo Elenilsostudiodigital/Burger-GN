@@ -5,6 +5,7 @@ import { eq, asc, and } from "drizzle-orm";
 import { requireCompanyAuth } from "../middlewares/auth";
 import { resolvePublicCompany } from "../middlewares/company";
 import { decodePixSettings, decodeGatewayConfig, encodePixSettings } from "../lib/staticPix";
+import { ensurePaymentSettingsSchema } from "../lib/ensurePaymentSettingsSchema";
 
 const router = Router();
 const DEFAULT_WHATSAPP_NUMBER = "5571996981707";
@@ -22,6 +23,7 @@ function maskPixKey(key: string): string {
 }
 
 async function getOrCreatePaymentSettings(companyId: number) {
+  await ensurePaymentSettingsSchema();
   const [existing] = await db.select().from(paymentSettingsTable).where(eq(paymentSettingsTable.companyId, companyId));
   if (existing) return existing;
   const [created] = await db.insert(paymentSettingsTable).values({ companyId }).returning();
@@ -43,8 +45,15 @@ router.get("/payment-settings", resolvePublicCompany, async (req, res) => {
     const mercadoPagoConfigured = !!settings.mercadoPagoAccessToken;
     const storeCfg = decodeGatewayConfig(settings.gatewayProvider);
     const pixCfg = decodePixSettings(settings.gatewayProvider);
+    const pixManualEnabled = settings.pixManualEnabled !== false;
+    const pixOnlineEnabled = !!settings.onlinePaymentEnabled;
+    const pixOnlineAvailable = pixOnlineEnabled && mercadoPagoConfigured;
     res.json({
-      onlinePaymentEnabled: false, // Mercado Pago reserved for future — static Pix is active
+      onlinePaymentEnabled: pixOnlineEnabled,
+      pixOnlineEnabled,
+      pixOnlineAvailable,
+      pixManualEnabled,
+      cardOnlineEnabled: false,
       cashOnDeliveryEnabled: settings.cashOnDeliveryEnabled,
       pixConfigured: !!pixCfg?.key,
       pixKeyPreview: pixCfg?.key ? maskPixKey(pixCfg.key) : "",
@@ -97,6 +106,8 @@ function toAdminPaymentSettings(settings: typeof paymentSettingsTable.$inferSele
     pixMerchantName: storeCfg.name ?? "THE BURGER GN",
     pixMerchantCity: storeCfg.city ?? "LAURO DE FREITAS",
     pixConfigured: !!pixCfg?.key,
+    pixManualEnabled: settings.pixManualEnabled !== false,
+    pixOnlineEnabled: !!settings.onlinePaymentEnabled,
     prepTimeMin: storeCfg.prepTimeMin,
     prepTimeMax: storeCfg.prepTimeMax,
   };
@@ -115,16 +126,26 @@ router.get("/admin/payment-settings", requireCompanyAuth, async (req, res) => {
 router.put("/admin/payment-settings", requireCompanyAuth, async (req, res) => {
   try {
     const body = req.body as {
-      onlinePaymentEnabled?: boolean; gatewayProvider?: string; cashOnDeliveryEnabled?: boolean;
+      onlinePaymentEnabled?: boolean; pixManualEnabled?: boolean;
+      gatewayProvider?: string; cashOnDeliveryEnabled?: boolean;
       mercadoPagoAccessToken?: string; mercadoPagoPublicKey?: string; clearMercadoPagoCredentials?: boolean;
       pixKey?: string; pixMerchantName?: string; pixMerchantCity?: string;
       prepTimeMin?: number; prepTimeMax?: number;
     };
     const settings = await getOrCreatePaymentSettings(req.companyId!);
     const existingCfg = decodeGatewayConfig(settings.gatewayProvider);
+
+    const nextToken = body.clearMercadoPagoCredentials
+      ? null
+      : (body.mercadoPagoAccessToken?.trim() || settings.mercadoPagoAccessToken);
+    if (body.onlinePaymentEnabled === true && !nextToken) {
+      res.status(400).json({ error: "Salve as credenciais do Mercado Pago para ativar o PIX Online." });
+      return;
+    }
+
     const patch: Record<string, unknown> = {
-      // Keep MP toggle stored, but storefront uses static Pix until MP is intentionally enabled later.
       onlinePaymentEnabled: body.onlinePaymentEnabled,
+      pixManualEnabled: body.pixManualEnabled,
       cashOnDeliveryEnabled: body.cashOnDeliveryEnabled,
       updatedAt: new Date(),
     };

@@ -10,6 +10,7 @@ import { ensureCompanySchema } from "./lib/ensureCompanySchema";
 import { ensureClubeSchema } from "./lib/ensureClubeSchema";
 import { ensureDeliveryStreetsSchema } from "./lib/ensureDeliveryStreetsSchema";
 import { ensureDeliveryAreasSchema } from "./lib/ensureDeliveryAreasSchema";
+import { ensurePaymentSettingsSchema } from "./lib/ensurePaymentSettingsSchema";
 
 const app: Express = express();
 
@@ -87,6 +88,25 @@ app.use("/api", async (req, res, next) => {
   } catch (err) {
     logger.error({ err }, "Failed to ensure delivery areas schema");
     res.status(500).json({ error: "Falha ao preparar o banco de áreas de entrega." });
+  }
+});
+
+/** Ensures payment settings columns (PIX Online / PIX Manual) before payment handlers. */
+app.use("/api", async (req, res, next) => {
+  const p = req.path || "";
+  const needsPayment =
+    p.startsWith("/payment-settings") ||
+    p.startsWith("/admin/payment-settings") ||
+    p.startsWith("/payments/") ||
+    p === "/orders" ||
+    p.startsWith("/orders/");
+  if (!needsPayment) return next();
+  try {
+    await ensurePaymentSettingsSchema();
+    next();
+  } catch (err) {
+    logger.error({ err }, "Failed to ensure payment settings schema");
+    res.status(500).json({ error: "Falha ao preparar o banco de pagamentos." });
   }
 });
 
