@@ -644,6 +644,7 @@ router.post("/admin/delivery-streets/geocode", requireCompanyAuth, async (req, r
       cep?: string;
       state?: string;
       number?: string;
+      similar?: boolean;
     };
     const street = String(body.street || "").trim();
     const neighborhood = String(body.neighborhood || "").trim();
@@ -662,6 +663,7 @@ router.post("/admin/delivery-streets/geocode", requireCompanyAuth, async (req, r
       cep: String(body.cep || "").trim(),
       state: String(body.state || "Bahia").trim() || "Bahia",
       number: String(body.number || "").trim(),
+      similar: body.similar === true,
     });
     res.json(result);
   } catch (err) {
@@ -669,7 +671,9 @@ router.post("/admin/delivery-streets/geocode", requireCompanyAuth, async (req, r
     res.status(502).json({
       error: "Não foi possível localizar o endereço agora. Tente novamente em instantes.",
       candidates: [],
+      suggestions: [],
       autoSelect: false,
+      exactNotFound: false,
       message: "Não foi possível localizar o endereço agora. Tente novamente em instantes.",
     });
   }

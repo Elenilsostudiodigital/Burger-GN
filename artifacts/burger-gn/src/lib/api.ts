@@ -271,10 +271,14 @@ export type GeocodeStreetCandidate = {
 
 export type GeocodeStreetSearchResult = {
   candidates: GeocodeStreetCandidate[];
+  /** Similar-name suggestions; only when the user requested `similar: true`. */
+  suggestions: GeocodeStreetCandidate[];
   /** Kept for compatibility; always false — seleção é manual no formulário. */
   autoSelect: boolean;
-  /** Set when no suggestions inside Lauro de Freitas. */
+  /** Exact-match miss → "Endereço não encontrado". */
   message: string | null;
+  /** True when exact search found nothing (UI may offer "ver semelhantes"). */
+  exactNotFound: boolean;
 };
 
 type NominatimAddress = {
@@ -544,8 +548,8 @@ function normalizeGeocodeCandidate(raw: unknown): GeocodeStreetCandidate | null 
 
 /**
  * Busca de endereços para Ruas de Entrega.
- * Usa a API do servidor (Nominatim server-side) — evita CORS no navegador.
- * Pesquisa sob demanda; sem seleção automática; não altera texto digitado.
+ * Usa a API do servidor (Nominatim/ViaCEP server-side) — evita CORS no navegador.
+ * Correspondência exata por padrão; passe `similar: true` só quando o usuário pedir.
  * Não altera o checkout (`geocodeAddress`).
  */
 export async function geocodeStreetLocation(parts: {
@@ -555,6 +559,7 @@ export async function geocodeStreetLocation(parts: {
   cep?: string;
   state?: string;
   number?: string;
+  similar?: boolean;
 }): Promise<GeocodeStreetSearchResult> {
   const street = String(parts.street || "").trim();
   const neighborhood = String(parts.neighborhood || "").trim();
@@ -563,12 +568,19 @@ export async function geocodeStreetLocation(parts: {
   const number = String(parts.number || "").trim();
   const cep = String(parts.cep || "").replace(/\D/g, "").slice(0, 8);
   const failMsg = "Não foi possível localizar o endereço agora. Tente novamente em instantes.";
+  const empty = (message: string, exactNotFound = false): GeocodeStreetSearchResult => ({
+    candidates: [],
+    suggestions: [],
+    autoSelect: false,
+    message,
+    exactNotFound,
+  });
 
   if (street.length < 3) {
-    return { candidates: [], autoSelect: false, message: "Informe o nome da rua (mín. 3 caracteres)." };
+    return empty("Informe o nome da rua (mín. 3 caracteres).");
   }
   if (!neighborhood) {
-    return { candidates: [], autoSelect: false, message: "Informe o bairro para localizar o endereço." };
+    return empty("Informe o bairro para localizar o endereço.");
   }
 
   try {
@@ -579,18 +591,24 @@ export async function geocodeStreetLocation(parts: {
       state,
       number,
       cep,
+      similar: parts.similar === true,
     })) as GeocodeStreetSearchResult;
     const candidates = (Array.isArray(result?.candidates) ? result.candidates : [])
       .map(normalizeGeocodeCandidate)
       .filter((c): c is GeocodeStreetCandidate => c != null);
+    const suggestions = (Array.isArray(result?.suggestions) ? result.suggestions : [])
+      .map(normalizeGeocodeCandidate)
+      .filter((c): c is GeocodeStreetCandidate => c != null);
     return {
       candidates,
+      suggestions,
       autoSelect: false,
       message: typeof result?.message === "string" ? result.message : null,
+      exactNotFound: result?.exactNotFound === true,
     };
   } catch (err) {
     const msg = err instanceof Error && err.message ? err.message : failMsg;
-    return { candidates: [], autoSelect: false, message: msg || failMsg };
+    return empty(msg || failMsg);
   }
 }
 

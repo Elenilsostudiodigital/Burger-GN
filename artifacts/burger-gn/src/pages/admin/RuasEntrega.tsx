@@ -101,6 +101,8 @@ export default function AdminRuasEntrega() {
   const [distanceKm, setDistanceKm] = useState<number | null>(null);
   const [suggestedFee, setSuggestedFee] = useState<number | null>(null);
   const [candidates, setCandidates] = useState<GeocodeStreetCandidate[]>([]);
+  const [suggestions, setSuggestions] = useState<GeocodeStreetCandidate[]>([]);
+  const [exactNotFound, setExactNotFound] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [geoLoading, setGeoLoading] = useState(false);
   const [geoStatus, setGeoStatus] = useState('');
@@ -143,6 +145,8 @@ export default function AdminRuasEntrega() {
     setDistanceKm(null);
     setSuggestedFee(null);
     setCandidates([]);
+    setSuggestions([]);
+    setExactNotFound(false);
     setSelectedId(null);
     setGeoLoading(false);
     setGeoStatus('');
@@ -195,7 +199,7 @@ export default function AdminRuasEntrega() {
     patchForm({ fee: String(fee), eta: String(eta) });
   };
 
-  const handleLocate = async () => {
+  const handleLocate = async (similar = false) => {
     const street = form.streetName.trim();
     const neighborhood = form.neighborhood.trim();
     const city = form.city.trim() || 'Lauro de Freitas';
@@ -211,8 +215,12 @@ export default function AdminRuasEntrega() {
 
     setFormError('');
     setGeoLoading(true);
-    setGeoStatus('Buscando endereços…');
-    setCandidates([]);
+    setGeoStatus(similar ? 'Buscando sugestões semelhantes…' : 'Buscando endereços…');
+    if (!similar) {
+      setCandidates([]);
+      setSuggestions([]);
+      setExactNotFound(false);
+    }
     setSelectedId(null);
     // Keep previous coords/map image until the admin picks a new result.
 
@@ -223,23 +231,40 @@ export default function AdminRuasEntrega() {
         city,
         cep: form.cep,
         state: 'Bahia',
+        similar,
       });
-      if (!result.candidates.length) {
-        const msg =
-          result.message ||
-          'Nenhum endereço encontrado. Verifique rua, bairro e cidade.';
-        setGeoStatus(msg);
-        setFormError(msg);
+
+      if (result.candidates.length > 0) {
+        setCandidates(result.candidates);
+        setSuggestions(similar ? result.suggestions : []);
+        setExactNotFound(false);
+        setGeoStatus(`Encontrados ${result.candidates.length} resultado(s). Selecione o correto.`);
         return;
       }
-      setCandidates(result.candidates);
-      setGeoStatus(`Encontrados ${result.candidates.length} resultado(s). Selecione o correto.`);
+
+      if (similar && result.suggestions.length > 0) {
+        setCandidates([]);
+        setSuggestions(result.suggestions);
+        setExactNotFound(true);
+        setGeoStatus('Endereço não encontrado. Sugestões semelhantes abaixo.');
+        setFormError('Endereço não encontrado');
+        return;
+      }
+
+      const msg = result.message || 'Endereço não encontrado';
+      setCandidates([]);
+      setSuggestions([]);
+      setExactNotFound(result.exactNotFound || msg === 'Endereço não encontrado');
+      setGeoStatus(msg);
+      setFormError(msg);
     } catch (err) {
       const msg =
         err instanceof Error && err.message
           ? err.message
           : 'Não foi possível localizar o endereço. Tente novamente.';
       setCandidates([]);
+      setSuggestions([]);
+      setExactNotFound(false);
       setGeoStatus(msg);
       setFormError(msg);
     } finally {
@@ -356,13 +381,17 @@ export default function AdminRuasEntrega() {
   const showEmptyList = !listLoading && list.length === 0;
   const showList = !listLoading && list.length > 0;
   const hasCandidates = candidates.length > 0;
+  const hasSuggestions = suggestions.length > 0;
+  const showSimilarCta = exactNotFound && !hasSuggestions && !geoLoading;
   const feeLabel =
     suggestedFee != null ? `Taxa (sugerida ${fmtMoney(suggestedFee)})` : 'Taxa';
   const resultsTitle = geoLoading
     ? 'Buscando…'
     : hasCandidates
       ? `Resultados (${candidates.length})`
-      : 'Resultados';
+      : hasSuggestions
+        ? `Sugestões semelhantes (${suggestions.length})`
+        : 'Resultados';
 
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-white pb-24">
@@ -487,7 +516,7 @@ export default function AdminRuasEntrega() {
               <Button
                 type="button"
                 disabled={geoLoading}
-                onClick={() => void handleLocate()}
+                onClick={() => void handleLocate(false)}
                 className="w-full h-11 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-white font-bold border border-zinc-700"
               >
                 <span className={`inline-flex items-center ${geoLoading ? '' : 'hidden'}`}>
@@ -551,10 +580,20 @@ export default function AdminRuasEntrega() {
               <div className="rounded-xl border border-zinc-800 bg-zinc-950/80 p-3 min-h-[8rem]">
                 <p className="text-amber-300 text-xs font-bold mb-2">{resultsTitle}</p>
                 <p
-                  className={`text-zinc-600 text-xs ${hasCandidates ? 'hidden' : ''}`}
+                  className={`text-zinc-600 text-xs ${hasCandidates || hasSuggestions ? 'hidden' : ''}`}
                 >
                   {geoStatus || 'Nenhum resultado ainda.'}
                 </p>
+                <button
+                  type="button"
+                  disabled={geoLoading}
+                  onClick={() => void handleLocate(true)}
+                  className={`w-full mb-2 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-left text-xs font-bold text-amber-400 hover:border-amber-500/50 ${
+                    showSimilarCta ? '' : 'hidden'
+                  }`}
+                >
+                  Ver sugestões semelhantes
+                </button>
                 <div
                   className={`space-y-1.5 max-h-56 overflow-y-auto ${hasCandidates ? '' : 'hidden'}`}
                 >
@@ -564,6 +603,33 @@ export default function AdminRuasEntrega() {
                     return (
                       <button
                         key={String(c.id)}
+                        type="button"
+                        onClick={() => applyCandidate(c)}
+                        className={`w-full text-left rounded-lg border px-3 py-2.5 transition-colors ${
+                          active
+                            ? 'border-amber-500 bg-amber-500/10'
+                            : 'border-zinc-800 bg-zinc-900/60 hover:border-zinc-600'
+                        }`}
+                      >
+                        <p className="text-white text-sm font-bold">{label}</p>
+                        <p className="text-zinc-500 text-[11px] mt-0.5 truncate">
+                          {String(c.displayName ?? '')}
+                        </p>
+                      </button>
+                    );
+                  })}
+                </div>
+                <div
+                  className={`space-y-1.5 max-h-56 overflow-y-auto ${
+                    !hasCandidates && hasSuggestions ? '' : 'hidden'
+                  }`}
+                >
+                  {suggestions.map((c) => {
+                    const active = selectedId === String(c.id);
+                    const label = [c.streetName, c.neighborhood || c.city].filter(Boolean).join(' — ');
+                    return (
+                      <button
+                        key={`sug-${String(c.id)}`}
                         type="button"
                         onClick={() => applyCandidate(c)}
                         className={`w-full text-left rounded-lg border px-3 py-2.5 transition-colors ${
