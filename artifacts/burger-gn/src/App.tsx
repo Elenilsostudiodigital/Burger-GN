@@ -64,6 +64,14 @@ function ProtectedAdminRoute({ component: Component }: { component: React.Compon
   return <Component />;
 }
 
+/** Stable route wrappers — avoid anonymous `() => <ProtectedAdminRoute…/>` remounting the page fiber. */
+function AdminRuasEntregaRoute() {
+  return <ProtectedAdminRoute component={AdminRuasEntrega} />;
+}
+function AdminNovasRuasRoute() {
+  return <ProtectedAdminRoute component={AdminNovasRuas} />;
+}
+
 function Router() {
   return (
     <>
@@ -91,8 +99,8 @@ function Router() {
         <Route path="/admin/clientes" component={() => <ProtectedAdminRoute component={AdminClientsList} />} />
         <Route path="/admin/avaliacoes" component={() => <ProtectedAdminRoute component={AdminReviews} />} />
         <Route path="/admin/taxas" component={() => <ProtectedAdminRoute component={AdminDeliveryZones} />} />
-        <Route path="/admin/novas-ruas" component={() => <ProtectedAdminRoute component={AdminNovasRuas} />} />
-        <Route path="/admin/ruas-entrega" component={() => <ProtectedAdminRoute component={AdminRuasEntrega} />} />
+        <Route path="/admin/novas-ruas" component={AdminNovasRuasRoute} />
+        <Route path="/admin/ruas-entrega" component={AdminRuasEntregaRoute} />
         <Route path="/admin/entrega-km" component={() => <ProtectedAdminRoute component={AdminKmDelivery} />} />
         <Route path="/admin/config" component={() => <ProtectedAdminRoute component={AdminSettingsHub} />} />
         <Route path="/admin/importar" component={() => <ProtectedAdminRoute component={AdminImportMenu} />} />
