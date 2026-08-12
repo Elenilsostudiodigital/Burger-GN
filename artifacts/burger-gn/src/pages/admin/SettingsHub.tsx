@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useLocation } from 'wouter';
-import { motion, AnimatePresence } from 'framer-motion';
 import {
   getAdminPaymentSettings, updatePaymentSettings, PaymentSettingsAdmin,
   getAdminExternalLinks, createExternalLink, updateExternalLink, deleteExternalLink, ExternalLink,
@@ -16,6 +15,70 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+
+/**
+ * Root cause (reproduced locally, full component stack):
+ * Clicking "Salvar Configurações" sets `saving` and React commitPlacement does
+ * insertBefore(Loader2 SVG, text node " Salvar Configurações") on the <button>.
+ * Chrome Translate / similar tools wrap that text in <font>, so the text node is
+ * no longer a child of the button → NotFoundError insertBefore.
+ * Fiber: LoaderCircle (lucide Loader2) → Button → PaymentTab.
+ *
+ * Contract: the button has exactly one element child; the label lives in a <span>
+ * (never a raw text sibling); both icons stay mounted and toggle via CSS.
+ */
+function SaveGlyph({ saving }: { saving: boolean }) {
+  return (
+    <span className="relative inline-flex h-[18px] w-[18px] shrink-0 items-center justify-center">
+      <Loader2
+        size={18}
+        className={`absolute animate-spin ${saving ? 'opacity-100' : 'opacity-0'}`}
+        aria-hidden={!saving}
+      />
+      <Check
+        size={18}
+        className={saving ? 'opacity-0' : 'opacity-100'}
+        aria-hidden={saving}
+      />
+    </span>
+  );
+}
+
+function SaveActionButton({
+  saving,
+  onClick,
+  label,
+  className = 'w-full h-12 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold rounded-xl',
+}: {
+  saving: boolean;
+  onClick: () => void;
+  label: string;
+  className?: string;
+}) {
+  return (
+    <Button
+      type="button"
+      onClick={onClick}
+      disabled={saving}
+      translate="no"
+      className={`${className} notranslate flex items-center justify-center`}
+    >
+      <span className="flex items-center justify-center gap-2">
+        <SaveGlyph saving={saving} />
+        <span>{label}</span>
+      </span>
+    </Button>
+  );
+}
+
+function ToggleGlyph({ on, size = 34 }: { on: boolean; size?: number }) {
+  return (
+    <span className="relative inline-flex items-center justify-center" style={{ width: size, height: size }}>
+      <ToggleRight size={size} className={`absolute ${on ? 'opacity-100' : 'opacity-0'}`} aria-hidden={!on} />
+      <ToggleLeft size={size} className={on ? 'opacity-0' : 'opacity-100'} aria-hidden={on} />
+    </span>
+  );
+}
 
 function AdminNav({ active }: { active: string }) {
   const items = [
@@ -124,13 +187,14 @@ function PrepTimeTab() {
         <p className="text-zinc-600 text-xs">Padrão: 35 a 45 minutos. Aviso amarelo nos últimos 10 minutos.</p>
       </div>
 
-      {success && <p className="text-green-400 text-sm px-1 flex items-center gap-2"><Check size={16} /> Tempo de preparo salvo!</p>}
-      {error && <p className="text-red-400 text-sm px-1 flex items-center gap-2"><X size={16} /> {error}</p>}
+      <p className={`text-green-400 text-sm px-1 flex items-center gap-2 ${success ? '' : 'hidden'}`}>
+        <Check size={16} /> <span>Tempo de preparo salvo!</span>
+      </p>
+      <p className={`text-red-400 text-sm px-1 flex items-center gap-2 ${error ? '' : 'hidden'}`}>
+        <X size={16} /> <span>{error || 'Erro'}</span>
+      </p>
 
-      <Button onClick={handleSave} disabled={saving}
-        className="w-full h-12 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold rounded-xl flex items-center justify-center gap-2">
-        {saving ? <Loader2 size={18} className="animate-spin" /> : <Check size={18} />} Salvar Tempo de Preparo
-      </Button>
+      <SaveActionButton saving={saving} onClick={() => void handleSave()} label="Salvar Tempo de Preparo" />
     </div>
   );
 }
@@ -203,15 +267,17 @@ function PaymentTab() {
   }
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-5 notranslate" translate="no">
       {/* Static Pix — active now */}
       <div className={`rounded-2xl p-5 border flex items-start gap-3 ${settings.pixConfigured ? 'bg-green-900/10 border-green-800/40' : 'bg-amber-900/10 border-amber-800/40'}`}>
-        {settings.pixConfigured
-          ? <ShieldCheck size={22} className="text-green-400 mt-0.5 shrink-0" />
-          : <ShieldAlert size={22} className="text-amber-400 mt-0.5 shrink-0" />}
+        <span className="relative mt-0.5 inline-flex h-[22px] w-[22px] shrink-0">
+          <ShieldCheck size={22} className={`absolute text-green-400 ${settings.pixConfigured ? 'opacity-100' : 'opacity-0'}`} />
+          <ShieldAlert size={22} className={`text-amber-400 ${settings.pixConfigured ? 'opacity-0' : 'opacity-100'}`} />
+        </span>
         <div>
           <p className={`font-bold text-sm ${settings.pixConfigured ? 'text-green-400' : 'text-amber-400'}`}>
-            {settings.pixConfigured ? 'Pix manual ativo' : 'Configure a chave Pix'}
+            <span className={settings.pixConfigured ? '' : 'hidden'}>Pix manual ativo</span>
+            <span className={settings.pixConfigured ? 'hidden' : ''}>Configure a chave Pix</span>
           </p>
           <p className="text-zinc-500 text-xs mt-1 leading-relaxed">
             Gera QR Code e Copia e Cola automaticamente no pedido. Comprovantes enviados pelo cliente aparecem no painel.
@@ -255,8 +321,14 @@ function PaymentTab() {
       <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-3">
         <Label className="text-zinc-400 text-xs uppercase font-bold">Credenciais do Mercado Pago (futuro)</Label>
         <div className="space-y-1.5">
-          <Label className="text-zinc-500 text-xs">Access Token {settings.mercadoPagoConfigured && <span className="text-zinc-600">(atual: {settings.mercadoPagoAccessTokenPreview})</span>}</Label>
+          <Label className="text-zinc-500 text-xs">
+            Access Token{' '}
+            <span className={`text-zinc-600 ${settings.mercadoPagoConfigured ? '' : 'hidden'}`}>
+              (atual: {settings.mercadoPagoAccessTokenPreview || '••••'})
+            </span>
+          </Label>
           <Input type="password" value={accessToken} onChange={e => setAccessToken(e.target.value)}
+            autoComplete="off"
             placeholder={settings.mercadoPagoConfigured ? 'Deixe em branco para manter o token atual' : 'APP_USR-...'}
             className="bg-zinc-950 border-zinc-800 text-white h-11 text-sm focus:border-amber-500 font-mono" />
         </div>
@@ -268,12 +340,10 @@ function PaymentTab() {
         <p className="text-zinc-600 text-xs leading-relaxed">
           Encontre essas chaves em: Painel do Mercado Pago → Seu negócio → Configurações → Credenciais. As notificações de pagamento (webhook) são configuradas automaticamente, não é preciso cadastrar nada no painel do Mercado Pago.
         </p>
-        {settings.mercadoPagoConfigured && (
-          <button type="button" onClick={handleDisconnect} disabled={saving}
-            className="text-red-400 text-xs font-bold hover:underline">
-            Remover credenciais
-          </button>
-        )}
+        <button type="button" onClick={handleDisconnect} disabled={saving}
+          className={`text-red-400 text-xs font-bold hover:underline ${settings.mercadoPagoConfigured ? '' : 'invisible pointer-events-none h-0 overflow-hidden'}`}>
+          Remover credenciais
+        </button>
       </div>
 
       {/* Online payment toggle */}
@@ -287,7 +357,7 @@ function PaymentTab() {
           </div>
           <button type="button" disabled={!settings.mercadoPagoConfigured} onClick={() => setOnline(!online)}
             className={`transition-colors ${!settings.mercadoPagoConfigured ? 'text-zinc-700 cursor-not-allowed' : online ? 'text-amber-500' : 'text-zinc-600'}`}>
-            {online ? <ToggleRight size={34} /> : <ToggleLeft size={34} />}
+            <ToggleGlyph on={online} />
           </button>
         </div>
       </div>
@@ -305,20 +375,21 @@ function PaymentTab() {
           </div>
           <button type="button" onClick={() => setCashOnDelivery(!cashOnDelivery)}
             className={`transition-colors ${cashOnDelivery ? 'text-amber-500' : 'text-zinc-600'}`}>
-            {cashOnDelivery ? <ToggleRight size={34} /> : <ToggleLeft size={34} />}
+            <ToggleGlyph on={cashOnDelivery} />
           </button>
         </div>
       </div>
 
       {/* Estimated prep time lives in Configurações > Tempo de Preparo */}
 
-      {success && <p className="text-green-400 text-sm px-1 flex items-center gap-2"><Check size={16} /> Configurações salvas!</p>}
-      {error && <p className="text-red-400 text-sm px-1 flex items-center gap-2"><X size={16} /> {error}</p>}
+      <p className={`text-green-400 text-sm px-1 flex items-center gap-2 ${success ? '' : 'hidden'}`}>
+        <Check size={16} /> <span>Configurações salvas!</span>
+      </p>
+      <p className={`text-red-400 text-sm px-1 flex items-center gap-2 ${error ? '' : 'hidden'}`}>
+        <X size={16} /> <span>{error || 'Erro'}</span>
+      </p>
 
-      <Button onClick={handleSave} disabled={saving}
-        className="w-full h-12 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold rounded-xl flex items-center justify-center gap-2">
-        {saving ? <Loader2 size={18} className="animate-spin" /> : <Check size={18} />} Salvar Configurações
-      </Button>
+      <SaveActionButton saving={saving} onClick={() => void handleSave()} label="Salvar Configurações" />
     </div>
   );
 }
@@ -376,9 +447,7 @@ function LinksTab() {
         </p>
       </div>
 
-      {showForm && (
-        <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
-          className="bg-zinc-900 border border-amber-500/30 rounded-xl p-4 space-y-3">
+      <div className={`bg-zinc-900 border border-amber-500/30 rounded-xl p-4 space-y-3 ${showForm ? '' : 'hidden'}`}>
           <h4 className="text-white font-bold text-sm">{editLink ? 'Editar Link' : 'Novo Link'}</h4>
           <div className="space-y-1.5">
             <Label className="text-zinc-400 text-xs">Nome do botão</Label>
@@ -390,24 +459,24 @@ function LinksTab() {
             <Input value={url} onChange={e => setUrl(e.target.value)} placeholder="https://..."
               className="bg-zinc-950 border-zinc-800 text-white h-10 text-sm focus:border-amber-500" />
           </div>
-          {error && <p className="text-red-400 text-xs">{error}</p>}
+          <p className={`text-red-400 text-xs ${error ? '' : 'hidden'}`}>{error || 'Erro'}</p>
           <div className="flex gap-2">
-            <Button onClick={handleSave} disabled={saving}
-              className="flex-1 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold rounded-xl h-9 text-sm flex gap-1.5">
-              {saving ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />} Salvar
-            </Button>
-            <Button variant="outline" onClick={() => setShowForm(false)}
+            <SaveActionButton
+              saving={saving}
+              onClick={() => void handleSave()}
+              label="Salvar"
+              className="flex-1 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold rounded-xl h-9 text-sm"
+            />
+            <Button type="button" variant="outline" onClick={() => setShowForm(false)}
               className="flex-1 border-zinc-700 text-zinc-400 hover:bg-zinc-800 rounded-xl h-9 text-sm flex gap-1.5">
-              <X size={14} /> Cancelar
+              <X size={14} /> <span>Cancelar</span>
             </Button>
           </div>
-        </motion.div>
-      )}
+      </div>
 
       <div className="space-y-2">
-        <AnimatePresence>
           {links.map(l => (
-            <motion.div key={l.id} layout initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            <div key={l.id}
               className="bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 flex items-center justify-between gap-2">
               <div className="flex items-center gap-3 min-w-0">
                 <LinkIcon size={16} className="text-amber-500 shrink-0" />
@@ -417,26 +486,24 @@ function LinksTab() {
                 </div>
               </div>
               <div className="flex gap-1.5 shrink-0">
-                <button onClick={() => handleToggleActive(l)} className={`transition-colors ${l.active ? 'text-amber-500' : 'text-zinc-600'}`}>
-                  {l.active ? <ToggleRight size={22} /> : <ToggleLeft size={22} />}
+                <button type="button" onClick={() => void handleToggleActive(l)} className={`transition-colors ${l.active ? 'text-amber-500' : 'text-zinc-600'}`}>
+                  <ToggleGlyph on={l.active} size={22} />
                 </button>
-                <button onClick={() => openEdit(l)} className="p-1.5 text-zinc-400 bg-zinc-800 hover:bg-zinc-700 rounded-lg">
+                <button type="button" onClick={() => openEdit(l)} className="p-1.5 text-zinc-400 bg-zinc-800 hover:bg-zinc-700 rounded-lg">
                   <Pencil size={14} />
                 </button>
-                <button onClick={() => handleDelete(l.id)} className="p-1.5 text-red-500 bg-red-900/20 hover:bg-red-900/40 rounded-lg">
+                <button type="button" onClick={() => void handleDelete(l.id)} className="p-1.5 text-red-500 bg-red-900/20 hover:bg-red-900/40 rounded-lg">
                   <Trash2 size={14} />
                 </button>
               </div>
-            </motion.div>
+            </div>
           ))}
-        </AnimatePresence>
       </div>
 
-      {!showForm && (
-        <Button onClick={openNew} variant="outline" className="w-full h-10 border-zinc-700 text-zinc-400 hover:bg-zinc-800 rounded-xl text-sm flex gap-2">
-          <Plus size={16} /> Adicionar Link
-        </Button>
-      )}
+      <Button type="button" onClick={openNew} variant="outline"
+        className={`w-full h-10 border-zinc-700 text-zinc-400 hover:bg-zinc-800 rounded-xl text-sm flex gap-2 ${showForm ? 'hidden' : ''}`}>
+        <Plus size={16} /> <span>Adicionar Link</span>
+      </Button>
     </div>
   );
 }
@@ -494,13 +561,14 @@ function WhatsappTab() {
         </div>
       </div>
 
-      {success && <p className="text-green-400 text-sm px-1 flex items-center gap-2"><Check size={16} /> Número salvo!</p>}
-      {error && <p className="text-red-400 text-sm px-1 flex items-center gap-2"><X size={16} /> {error}</p>}
+      <p className={`text-green-400 text-sm px-1 flex items-center gap-2 ${success ? '' : 'hidden'}`}>
+        <Check size={16} /> <span>Número salvo!</span>
+      </p>
+      <p className={`text-red-400 text-sm px-1 flex items-center gap-2 ${error ? '' : 'hidden'}`}>
+        <X size={16} /> <span>{error || 'Erro'}</span>
+      </p>
 
-      <Button onClick={handleSave} disabled={saving}
-        className="w-full h-12 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold rounded-xl flex items-center justify-center gap-2">
-        {saving ? <Loader2 size={18} className="animate-spin" /> : <Check size={18} />} Salvar Número
-      </Button>
+      <SaveActionButton saving={saving} onClick={() => void handleSave()} label="Salvar Número" />
     </div>
   );
 }
