@@ -202,13 +202,26 @@ export const deleteAdminDeliveryStreet = (id: number) =>
 
 // ── KM Delivery ───────────────────────────────────────────────────────────────
 export interface KmDeliveryTier { id: number; fromKm: string; toKm: string | null; fee: string | null; displayOrder: number; createdAt: string; }
-export interface KmDeliveryConfig { id: number; enabled: boolean; baseAddress: string; baseLat: string; baseLng: string; minFee: string; feePerKm: string; maxDistanceKm: string; updatedAt: string; tiers: KmDeliveryTier[]; }
+export interface KmDeliveryConfig {
+  id: number;
+  enabled: boolean;
+  baseAddress: string;
+  baseLat: string;
+  baseLng: string;
+  minFee: string;
+  feePerKm: string;
+  maxDistanceKm: string;
+  areasEnabled?: boolean;
+  updatedAt: string;
+  tiers: KmDeliveryTier[];
+}
 export interface KmFeeResult { enabled: boolean; distanceKm?: number; fee: number | null; consult?: boolean; message?: string; }
 
 export const getKmDeliveryConfig = () =>
   api.get("/delivery/km-config").then((cfg: KmDeliveryConfig) => ({
     ...cfg,
     enabled: !!cfg?.enabled,
+    areasEnabled: !!cfg?.areasEnabled,
     baseLat: cfg?.baseLat ?? "0",
     baseLng: cfg?.baseLng ?? "0",
     maxDistanceKm: cfg?.maxDistanceKm ?? "0",
@@ -220,6 +233,68 @@ export const updateKmDeliveryConfig = (d: Partial<KmDeliveryConfig>) => api.put(
 export const createKmTier = (d: { fromKm: string; toKm?: string | null; fee?: string | null; displayOrder?: number }) => api.post("/admin/km-delivery/tiers", d) as Promise<KmDeliveryTier>;
 export const updateKmTier = (id: number, d: Partial<KmDeliveryTier>) => api.put(`/admin/km-delivery/tiers/${id}`, d) as Promise<KmDeliveryTier>;
 export const deleteKmTier = (id: number) => api.delete(`/admin/km-delivery/tiers/${id}`);
+
+// ── Delivery Areas (map polygons) ─────────────────────────────────────────────
+export type DeliveryAreaPolygon =
+  | { type: "Polygon"; coordinates: number[][][] }
+  | { type: "MultiPolygon"; coordinates: number[][][][] };
+
+export interface DeliveryArea {
+  id: number;
+  companyId: number;
+  city: string;
+  name: string;
+  color: string;
+  status: "active" | "blocked" | string;
+  enabled: boolean;
+  blockReason: string;
+  minFee: string;
+  feePerKm: string;
+  maxDistanceKm: string | null;
+  notes: string;
+  priority: number;
+  polygon: DeliveryAreaPolygon;
+  bbox: [number, number, number, number] | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type ResolveAreaResult = {
+  status: "disabled" | "outside" | "blocked" | "allowed";
+  areasEnabled: boolean;
+  message: string | null;
+  area: {
+    id: number;
+    name: string;
+    color: string;
+    status: string;
+    blockReason: string;
+    notes: string;
+  } | null;
+  fee: number | null;
+  distanceKm: number | null;
+};
+
+export const resolveDeliveryArea = (lat: number, lng: number) =>
+  api.post("/delivery/resolve-area", { lat, lng }) as Promise<ResolveAreaResult>;
+export const getAdminDeliveryAreasSettings = () =>
+  api.get("/admin/delivery-areas/settings") as Promise<{
+    areasEnabled: boolean;
+    baseLat: number;
+    baseLng: number;
+  }>;
+export const updateAdminDeliveryAreasSettings = (areasEnabled: boolean) =>
+  api.put("/admin/delivery-areas/settings", { areasEnabled }) as Promise<{ areasEnabled: boolean }>;
+export const listAdminDeliveryAreas = () =>
+  api.get("/admin/delivery-areas") as Promise<DeliveryArea[]>;
+export const createAdminDeliveryArea = (d: Partial<DeliveryArea> & { name: string; polygon: DeliveryAreaPolygon }) =>
+  api.post("/admin/delivery-areas", d) as Promise<DeliveryArea>;
+export const updateAdminDeliveryArea = (id: number, d: Partial<DeliveryArea>) =>
+  api.put(`/admin/delivery-areas/${id}`, d) as Promise<DeliveryArea>;
+export const toggleAdminDeliveryArea = (id: number, enabled: boolean) =>
+  api.patch(`/admin/delivery-areas/${id}/enabled`, { enabled }) as Promise<DeliveryArea>;
+export const deleteAdminDeliveryArea = (id: number) =>
+  api.delete(`/admin/delivery-areas/${id}`);
 
 // ── Import Cardápio ────────────────────────────────────────────────────────────
 export interface ImportDraftCategory { name: string; slug: string; }

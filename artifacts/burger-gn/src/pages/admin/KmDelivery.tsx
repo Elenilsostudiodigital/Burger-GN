@@ -9,11 +9,12 @@ import { useAdmin } from '../../context/AdminContext';
 import {
   LayoutDashboard, UtensilsCrossed, Tag, MapPin, Navigation, Settings,
   LogOut, Plus, Pencil, Trash2, Check, X, ToggleLeft, ToggleRight,
-  Loader2, Locate, AlertCircle, Route, Info, Upload, TrendingUp, Crown,
+  Loader2, Locate, AlertCircle, Route, Info, Upload, TrendingUp, Crown, Shapes,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import DeliveryAreasAdmin from './DeliveryAreasAdmin';
 
 function AdminNav({ active }: { active: string }) {
   const items = [
@@ -50,6 +51,7 @@ const emptyTierForm = (): TierForm => ({ fromKm: '', toKm: '', fee: '', consult:
 export default function KmDelivery() {
   const { logout } = useAdmin();
   const [, setLocation] = useLocation();
+  const [tab, setTab] = useState<'config' | 'areas'>('config');
 
   const [config, setConfig] = useState<KmDeliveryConfig | null>(null);
   const [tiers, setTiers] = useState<KmDeliveryTier[]>([]);
@@ -163,7 +165,7 @@ export default function KmDelivery() {
             <Navigation size={20} className="text-amber-500" />
             <div>
               <h1 className="text-white font-black uppercase text-base leading-none">Entrega por KM</h1>
-              <p className="text-zinc-600 text-xs">Taxa baseada em distância • Haversine</p>
+              <p className="text-zinc-600 text-xs">Configuração · Áreas de Entrega</p>
             </div>
           </div>
           <button onClick={handleLogout} className="p-2 text-zinc-400 hover:text-red-400 transition-colors">
@@ -176,6 +178,32 @@ export default function KmDelivery() {
         <div className="flex justify-center py-20"><div className="w-8 h-8 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" /></div>
       ) : (
         <main className="max-w-2xl mx-auto px-4 py-5 space-y-5">
+
+          <div className="flex gap-1 p-1 rounded-xl bg-zinc-900 border border-zinc-800">
+            <button
+              type="button"
+              onClick={() => setTab('config')}
+              className={`flex-1 h-10 rounded-lg text-xs font-bold uppercase tracking-wide transition-colors ${
+                tab === 'config' ? 'bg-amber-500 text-zinc-950' : 'text-zinc-400 hover:text-white'
+              }`}
+            >
+              Configuração
+            </button>
+            <button
+              type="button"
+              onClick={() => setTab('areas')}
+              className={`flex-1 h-10 rounded-lg text-xs font-bold uppercase tracking-wide transition-colors inline-flex items-center justify-center gap-1.5 ${
+                tab === 'areas' ? 'bg-amber-500 text-zinc-950' : 'text-zinc-400 hover:text-white'
+              }`}
+            >
+              <Shapes size={14} /> Áreas de Entrega
+            </button>
+          </div>
+
+          {tab === 'areas' ? (
+            <DeliveryAreasAdmin />
+          ) : (
+          <>
 
           {/* Enable toggle */}
           <div className={`rounded-2xl p-5 border transition-all ${cfEnabled ? 'bg-amber-500/10 border-amber-500/30' : 'bg-zinc-900 border-zinc-800'}`}>
@@ -372,6 +400,8 @@ export default function KmDelivery() {
               </Button>
             )}
           </section>
+          </>
+          )}
         </main>
       )}
 

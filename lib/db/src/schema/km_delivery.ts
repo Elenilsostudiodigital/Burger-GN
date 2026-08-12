@@ -11,6 +11,8 @@ export const kmDeliveryConfigTable = pgTable("km_delivery_config", {
   minFee: numeric("min_fee", { precision: 10, scale: 2 }).notNull().default("5.00"),
   feePerKm: numeric("fee_per_km", { precision: 10, scale: 2 }).notNull().default("2.00"),
   maxDistanceKm: numeric("max_distance_km", { precision: 10, scale: 2 }).notNull().default("10.00"),
+  /** When true, checkout resolves fee/coverage via drawn delivery areas first. */
+  areasEnabled: boolean("areas_enabled").notNull().default(false),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
