@@ -570,7 +570,7 @@ export default function Checkout() {
               numero: resolved.numero || prev.numero || 'S/N',
               bairro: nextBairro,
             }));
-            if (!kmConfig?.enabled) await resolveNeighborhoodFee(nextBairro);
+            if (!kmConfig?.enabled && !kmConfig?.areasEnabled) await resolveNeighborhoodFee(nextBairro);
           } else {
             setLocationLabel(`${lat.toFixed(5)}, ${lng.toFixed(5)}`);
             setForm(prev => ({
@@ -579,7 +579,7 @@ export default function Checkout() {
               numero: prev.numero || 'S/N',
               bairro: prev.bairro || 'GPS',
             }));
-            if (!kmConfig?.enabled) {
+            if (!kmConfig?.enabled && !kmConfig?.areasEnabled) {
               setFeeFound(false);
               setFeeMessage('Não foi possível identificar o bairro. Digite o endereço ou Consulte a taxa com a loja.');
             }
