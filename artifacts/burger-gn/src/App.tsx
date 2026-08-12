@@ -5,6 +5,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { CartProvider } from "./context/CartContext";
 import { AdminProvider, useAdmin } from "./context/AdminContext";
+import { StoreProvider } from "./context/StoreContext";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import NotFound from "@/pages/not-found";
 
@@ -120,12 +121,14 @@ function App() {
       <QueryClientProvider client={queryClient}>
         <TooltipProvider>
           <AdminProvider>
-            <CartProvider>
-              <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
-                <Router />
-              </WouterRouter>
-              <Toaster />
-            </CartProvider>
+            <StoreProvider>
+              <CartProvider>
+                <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
+                  <Router />
+                </WouterRouter>
+                <Toaster />
+              </CartProvider>
+            </StoreProvider>
           </AdminProvider>
         </TooltipProvider>
       </QueryClientProvider>

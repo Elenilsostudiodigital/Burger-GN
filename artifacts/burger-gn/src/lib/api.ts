@@ -897,6 +897,62 @@ export const createExternalLink = (d: Partial<ExternalLink>) => api.post("/admin
 export const updateExternalLink = (id: number, d: Partial<ExternalLink>) => api.put(`/admin/external-links/${id}`, d) as Promise<ExternalLink>;
 export const deleteExternalLink = (id: number) => api.delete(`/admin/external-links/${id}`);
 
+// ── Store / Establishment ─────────────────────────────────────────────────────
+export interface DayHours {
+  day: number;
+  enabled: boolean;
+  open: string;
+  close: string;
+}
+export interface StoreSettingsPublic {
+  storeName: string;
+  description: string;
+  logoUrl: string;
+  bannerUrl: string;
+  phone: string;
+  whatsapp: string;
+  instagram: string;
+  email: string;
+  address: string;
+  city: string;
+  state: string;
+  zipCode: string;
+  openingHours: DayHours[];
+  useAutomaticSchedule: boolean;
+  isOpen: boolean;
+  closedReason: "manual" | "schedule" | null;
+  nextOpenTime: string | null;
+  statusMessage: string;
+  blockOrdersMessage: string | null;
+}
+export interface StoreSettingsAdmin extends StoreSettingsPublic {
+  id: number;
+  companyId: number;
+  manualOpen: boolean;
+  updatedAt: string;
+}
+export const getStoreSettings = () => api.get("/store-settings") as Promise<StoreSettingsPublic>;
+export const getAdminStoreSettings = () => api.get("/admin/store-settings") as Promise<StoreSettingsAdmin>;
+export const updateAdminStoreSettings = (d: Partial<{
+  openingHours: DayHours[];
+  manualOpen: boolean;
+  useAutomaticSchedule: boolean;
+  logoUrl: string;
+  bannerUrl: string;
+  storeName: string;
+  description: string;
+  phone: string;
+  whatsapp: string;
+  instagram: string;
+  email: string;
+  address: string;
+  city: string;
+  state: string;
+  zipCode: string;
+}>) => api.put("/admin/store-settings", d) as Promise<StoreSettingsAdmin>;
+export const setAdminStoreOpenStatus = (open: boolean) =>
+  api.post("/admin/store-settings/status", { open }) as Promise<StoreSettingsAdmin>;
+
 // ── Admin Auth ────────────────────────────────────────────────────────────────
 export const adminLogin = (email: string, password: string) =>
   api.post("/admin/login", { email, password });

@@ -11,6 +11,8 @@ import { ProductDetailModal } from '../components/ProductDetailModal';
 import { ProductRowCard } from '../components/ProductRowCard';
 import { ClubeHomeCard } from '../components/ClubeHomeCard';
 import { Button } from '@/components/ui/button';
+import { useStore } from '../context/StoreContext';
+import { StoreBrandMark, StoreOpenBadge } from '../components/StoreBrand';
 
 export default function Home() {
   const [categories, setCategories] = useState<Category[]>([]);
@@ -20,6 +22,7 @@ export default function Home() {
   const [search, setSearch] = useState('');
   const [detailProduct, setDetailProduct] = useState<Product | null>(null);
   const { cartItems, addItem, updateQuantity, totalItems } = useCart();
+  const { store } = useStore();
 
   useEffect(() => {
     Promise.all([getCategories(), getProducts(), getPopularProducts().catch(() => [])])
@@ -86,13 +89,16 @@ export default function Home() {
     <PageTransition className="bg-[#0a0a0a]">
       <header className="sticky top-0 z-40 bg-zinc-950 border-b border-zinc-800/80 px-4 py-3">
         <div className="max-w-md mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 border-2 border-amber-500 rounded-full flex items-center justify-center shadow-[0_0_18px_rgba(245,158,11,0.25)]">
-              <span className="text-amber-500 font-black text-xs tracking-tight">GN</span>
+          <div className="flex items-center gap-2.5 min-w-0">
+            <StoreBrandMark size={36} className="shadow-[0_0_18px_rgba(245,158,11,0.25)]" />
+            <div className="min-w-0">
+              <span className="text-white font-black uppercase tracking-tight text-sm block truncate">
+                {store.storeName || 'The Burger GN'}
+              </span>
+              <StoreOpenBadge className="mt-0.5" />
             </div>
-            <span className="text-white font-black uppercase tracking-tight text-sm">The Burger GN</span>
           </div>
-          <Link href="/carrinho" className="relative p-2 text-zinc-300 hover:text-amber-500 transition-colors">
+          <Link href="/carrinho" className="relative p-2 text-zinc-300 hover:text-amber-500 transition-colors shrink-0">
             <ShoppingCart size={22} />
             {totalItems > 0 && (
               <motion.div
@@ -115,7 +121,9 @@ export default function Home() {
       <section className="relative overflow-hidden">
         <div
           className="absolute inset-0 bg-cover bg-center scale-105"
-          style={{ backgroundImage: "url('https://images.unsplash.com/photo-1550547660-d9450f859349?w=1200&h=800&fit=crop')" }}
+          style={{
+            backgroundImage: `url('${store.bannerUrl || "https://images.unsplash.com/photo-1550547660-d9450f859349?w=1200&h=800&fit=crop"}')`,
+          }}
         />
         <div className="absolute inset-0 bg-gradient-to-b from-black/55 via-[#0a0a0a]/85 to-[#0a0a0a]" />
         <div className="relative max-w-md mx-auto px-5 pt-10 pb-8">
@@ -126,15 +134,22 @@ export default function Home() {
             className="space-y-4"
           >
             <p className="text-amber-500 text-xs font-bold uppercase tracking-[0.22em]">
-              The Burger GN
+              {store.storeName || 'The Burger GN'}
             </p>
             <h1 className="font-display text-white text-[2.65rem] sm:text-5xl leading-[0.95] tracking-wide uppercase">
               Muito mais que um hambúrguer.
               <span className="block text-amber-500 mt-1">Uma experiência de verdade.</span>
             </h1>
             <p className="text-zinc-400 text-sm leading-relaxed max-w-[300px]">
-              Sabores artesanais, apresentação impecável e o padrão que o pedido merece.
+              {store.description || 'Sabores artesanais, apresentação impecável e o padrão que o pedido merece.'}
             </p>
+            {!store.isOpen && (
+              <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+                {store.closedReason === 'manual'
+                  ? 'Estabelecimento fechado no momento.'
+                  : store.statusMessage}
+              </div>
+            )}
             <div className="flex gap-3 pt-2">
               <Link href="/cardapio" className="flex-1">
                 <Button size="lg" className="w-full h-12 rounded-xl font-bold tracking-wider shadow-lg shadow-amber-500/20">

@@ -15,6 +15,7 @@ import {
   type WorkflowStage, type CardType, type OrderMeta, type OrderReview,
 } from "../lib/orderMeta";
 import { buildStaticPixPayload, decodePixSettings, normalizePixKey } from "../lib/staticPix";
+import { assertStoreAcceptsOrders } from "./store";
 import { syncClubeMemberOnOrder } from "../lib/clubeClientSync";
 import {
   isFidelityFreeBurgerProduct,
@@ -151,6 +152,12 @@ router.post("/orders", resolvePublicCompany, async (req, res) => {
     if (!body.customerName || !body.phone || !body.orderType || !body.paymentMethod || !body.items?.length) {
       res.status(400).json({ error: "Missing required fields" }); return;
     }
+
+    const storeGate = await assertStoreAcceptsOrders(companyId);
+    if (!storeGate.ok) {
+      res.status(403).json({ error: storeGate.error }); return;
+    }
+
     if (body.items.some(i => !i.quantity || i.quantity <= 0)) {
       res.status(400).json({ error: "Invalid item quantity" }); return;
     }
