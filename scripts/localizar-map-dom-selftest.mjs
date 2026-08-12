@@ -1,5 +1,5 @@
 /**
- * Contract: StreetMapPreview must keep a fixed React child tree (no iframe mount/unmount).
+ * Contract: StreetMapPreview must keep a fixed React child tree (no iframe).
  * Usage: node scripts/localizar-map-dom-selftest.mjs
  */
 import fs from "node:fs";
@@ -7,11 +7,16 @@ import path from "node:path";
 
 const previewPath = path.resolve("artifacts/burger-gn/src/components/StreetMapPreview.tsx");
 const pagePath = path.resolve("artifacts/burger-gn/src/pages/admin/RuasEntrega.tsx");
+const appPath = path.resolve("artifacts/burger-gn/src/App.tsx");
 const preview = fs.readFileSync(previewPath, "utf8");
 const page = fs.readFileSync(pagePath, "utf8");
+const app = fs.readFileSync(appPath, "utf8");
 
 // Strip block/line comments before DOM-API checks so docstrings don't false-fail.
 const codeOnly = preview
+  .replace(/\/\*[\s\S]*?\*\//g, "")
+  .replace(/^\s*\/\/.*$/gm, "");
+const pageCode = page
   .replace(/\/\*[\s\S]*?\*\//g, "")
   .replace(/^\s*\/\/.*$/gm, "");
 
@@ -25,19 +30,19 @@ const checks = [
     ok: page.includes("from '../../components/StreetMapPreview'"),
   },
   {
-    name: "iframe is always rendered (no conditional iframe branch)",
-    ok: codeOnly.includes("<iframe") && !codeOnly.match(/\?\s*\(\s*<iframe/),
+    name: "no iframe in StreetMapPreview (static img map only)",
+    ok: !codeOnly.includes("<iframe") && codeOnly.includes("<img"),
   },
   {
-    name: "placeholder/loading use CSS visibility, not conditional null",
+    name: "no iframe in RuasEntrega page",
+    ok: !pageCode.includes("<iframe"),
+  },
+  {
+    name: "placeholder/loading use CSS visibility, not conditional null siblings",
     ok:
       codeOnly.includes("invisible pointer-events-none") &&
-      !codeOnly.match(/\{loading\s*\?\s*\(/) &&
+      !codeOnly.match(/loading\s*\?\s*\(/) &&
       !codeOnly.match(/loading\s*\?\s*[\s\S]{0,80}:\s*null/),
-  },
-  {
-    name: "uses about:blank when no coords (keeps iframe node)",
-    ok: codeOnly.includes("about:blank"),
   },
   {
     name: "no Leaflet / react-leaflet imports or MapContainer/L.map",
@@ -61,8 +66,21 @@ const checks = [
     ok: !codeOnly.includes("useEffect") && !codeOnly.includes("useMemo") && !codeOnly.includes("useRef"),
   },
   {
-    name: "page does not clear createCoords at start of locate",
-    ok: !page.match(/setGeoLoading\(true\);[\s\S]{0,220}setCreateCoords\(null\)/),
+    name: "page does not clear coords at start of locate",
+    ok:
+      !page.match(/setGeoLoading\(true\);[\s\S]{0,220}setCoords\(null\)/) &&
+      !page.match(/setGeoLoading\(true\);[\s\S]{0,220}setCreateCoords\(null\)/),
+  },
+  {
+    name: "create form toggled via CSS hidden (not conditional unmount of map)",
+    ok: pageCode.includes("showForm ? '' : 'hidden'") || pageCode.includes('showForm ? "" : "hidden"'),
+  },
+  {
+    name: "App uses stable AdminRuasEntregaRoute (no anonymous arrow wrapper)",
+    ok:
+      app.includes("function AdminRuasEntregaRoute") &&
+      app.includes('path="/admin/ruas-entrega" component={AdminRuasEntregaRoute}') &&
+      !app.match(/path="\/admin\/ruas-entrega"\s+component=\{\(\)\s*=>/),
   },
 ];
 
