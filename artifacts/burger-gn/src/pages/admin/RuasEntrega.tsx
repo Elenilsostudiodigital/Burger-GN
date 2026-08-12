@@ -15,7 +15,8 @@ import {
   GeocodeStreetCandidate,
 } from '../../lib/api';
 import { AdminBottomNav } from '../../components/AdminBottomNav';
-import { ArrowLeft, Loader2, Pencil, Plus, Trash2, ToggleLeft, ToggleRight, Search, MapPin } from 'lucide-react';
+import { StreetMapPreview } from '../../components/StreetMapPreview';
+import { ArrowLeft, Loader2, MapPin, Pencil, Plus, Trash2, ToggleLeft, ToggleRight, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -40,10 +41,6 @@ function suggestFee(distanceKm: number, tiers: KmDeliveryConfig['tiers']): numbe
   return 18;
 }
 
-function mapEmbedUrl(lat: number, lng: number) {
-  return `https://www.openstreetmap.org/export/embed.html?bbox=${lng - 0.012}%2C${lat - 0.012}%2C${lng + 0.012}%2C${lat + 0.012}&layer=mapnik&marker=${lat}%2C${lng}`;
-}
-
 /** Coerce API/JSON values to finite numbers — strings break `.toFixed()` in render. */
 function toFiniteNumber(value: unknown): number | null {
   const n = typeof value === 'number' ? value : parseFloat(String(value ?? ''));
@@ -53,54 +50,6 @@ function toFiniteNumber(value: unknown): number | null {
 function fmtCoord(value: number): string {
   const n = toFiniteNumber(value);
   return n == null ? '—' : n.toFixed(5);
-}
-
-/**
- * Stable map host for OSM embed.
- * Avoids React NotFoundError (insertBefore) caused by swapping <iframe> ↔ spinner
- * in the same DOM slot while the browser still owns the iframe document.
- * No Leaflet / react-leaflet — plain OpenStreetMap export embed only.
- */
-function StreetMapPreview({
-  lat,
-  lng,
-  loading,
-}: {
-  lat: number | null;
-  lng: number | null;
-  loading: boolean;
-}) {
-  const hasCoords = lat != null && lng != null;
-  const src = hasCoords ? mapEmbedUrl(lat, lng) : null;
-
-  return (
-    <div className="relative rounded-xl border border-zinc-800 overflow-hidden bg-zinc-950 min-h-[220px]">
-      {src ? (
-        <iframe
-          title="Mapa da rua"
-          src={src}
-          className="block w-full h-[220px] border-0 bg-zinc-950"
-          referrerPolicy="no-referrer-when-downgrade"
-        />
-      ) : (
-        <div className="flex h-[220px] items-center justify-center px-4 text-center text-zinc-600 text-sm">
-          <div>
-            <MapPin className="mx-auto mb-2 opacity-50" size={28} />
-            Clique em &quot;Localizar Endereço&quot; e escolha um resultado
-          </div>
-        </div>
-      )}
-      {loading ? (
-        <div
-          className="absolute inset-0 z-10 flex items-center justify-center bg-zinc-950/75"
-          aria-busy="true"
-          aria-live="polite"
-        >
-          <Loader2 className="animate-spin text-amber-500" />
-        </div>
-      ) : null}
-    </div>
-  );
 }
 
 const ORIGIN_LABEL: Record<DeliveryStreetOrigin, string> = {
