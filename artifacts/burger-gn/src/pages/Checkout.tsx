@@ -410,8 +410,7 @@ export default function Checkout() {
     ) : null;
 
   useEffect(() => {
-    setAreaRequestState('idle');
-    setAreaRequestError('');
+    setAreaRequestState((prev) => (prev === 'sent' || prev === 'sending' ? prev : 'idle'));
   }, [form.endereco, form.numero, form.bairro, customerCoords?.lat, customerCoords?.lng]);
 
   const handleRequestAreaAnalysis = async () => {
