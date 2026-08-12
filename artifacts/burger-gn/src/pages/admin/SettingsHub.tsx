@@ -561,11 +561,16 @@ export default function SettingsHub() {
           <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-5 space-y-3">
             <h3 className="text-white font-black uppercase text-sm">Clientes</h3>
             <p className="text-zinc-400 text-sm leading-relaxed">
-              Gerencie a base de clientes e importe CSV do Anota AI, Excel ou outros sistemas.
+              Cadastros e Importar Clientes (CSV/Excel). Independente do Importar Cardápio.
             </p>
-            <Link href="/admin/config/clientes">
+            <Link href="/admin/config/clientes/importar">
               <Button className="w-full h-11 rounded-xl font-bold bg-amber-500 text-zinc-950 hover:bg-amber-400">
-                Abrir Clientes e Importar CSV
+                Importar Clientes
+              </Button>
+            </Link>
+            <Link href="/admin/config/clientes">
+              <Button variant="outline" className="w-full h-11 rounded-xl font-bold border-zinc-700">
+                Abrir módulo Clientes
               </Button>
             </Link>
             <Link href="/admin/clientes">

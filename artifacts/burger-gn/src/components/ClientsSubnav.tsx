@@ -1,12 +1,17 @@
 import { Link } from 'wouter';
 import { List, UserPlus, Flame, FileSpreadsheet } from 'lucide-react';
 
-type Tab = 'lista' | 'importar' | 'importar-csv' | 'recuperacao';
+type Tab = 'lista' | 'importar' | 'importar-clientes' | 'recuperacao';
 
 const TABS: { id: Tab; href: string; label: string; icon: typeof List }[] = [
   { id: 'lista', href: '/admin/clientes', label: 'Lista', icon: List },
   { id: 'importar', href: '/admin/clientes/importar', label: 'Manual', icon: UserPlus },
-  { id: 'importar-csv', href: '/admin/config/clientes', label: 'CSV', icon: FileSpreadsheet },
+  {
+    id: 'importar-clientes',
+    href: '/admin/config/clientes/importar',
+    label: 'Importar',
+    icon: FileSpreadsheet,
+  },
   { id: 'recuperacao', href: '/admin/clientes/recuperacao', label: 'Recuperação', icon: Flame },
 ];
 

@@ -7,7 +7,8 @@ interface CsvUploadZoneProps {
   onFile: (file: File) => void;
 }
 
-const ACCEPT = ".csv,.txt,.tsv,text/csv,text/plain,application/vnd.ms-excel";
+const ACCEPT =
+  ".csv,.txt,.tsv,.xlsx,.xls,text/csv,text/plain,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
 export function CsvUploadZone({ disabled, fileName, onFile }: CsvUploadZoneProps) {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -16,10 +17,6 @@ export function CsvUploadZone({ disabled, fileName, onFile }: CsvUploadZoneProps
   const pick = useCallback(
     (file: File | undefined | null) => {
       if (!file || disabled) return;
-      const lower = file.name.toLowerCase();
-      if (!lower.endsWith(".csv") && !lower.endsWith(".txt") && !lower.endsWith(".tsv")) {
-        // still allow — Excel often exports .csv; accept any text-ish
-      }
       onFile(file);
     },
     [disabled, onFile],
@@ -77,10 +74,10 @@ export function CsvUploadZone({ disabled, fileName, onFile }: CsvUploadZoneProps
         </div>
         <div>
           <p className="text-white font-bold text-sm">
-            {fileName ? fileName : "Arraste o CSV aqui"}
+            {fileName ? fileName : "Arraste CSV ou Excel aqui"}
           </p>
           <p className="text-zinc-500 text-xs mt-1">
-            ou clique para selecionar · .csv / .tsv / .txt
+            ou clique para selecionar · .csv / .xlsx / .xls
           </p>
         </div>
         <span className="inline-flex h-10 px-4 items-center rounded-xl bg-amber-500 text-zinc-950 text-xs font-black uppercase tracking-wide">

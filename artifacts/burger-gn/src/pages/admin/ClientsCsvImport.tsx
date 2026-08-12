@@ -12,8 +12,7 @@ import {
   autoMapColumns,
   CSV_SOURCE_LABELS,
   DEFAULT_CSV_IMPORT_OPTIONS,
-  parseCsv,
-  readFileAsText,
+  readClientImportFile,
   syncMappingHeaders,
   type CsvColumnMapping,
   type CsvImportOptions,
@@ -35,10 +34,15 @@ const PREVIEW_ROWS = 5;
 const SOURCES: CsvImportSource[] = ["anota_ai", "excel", "outro"];
 
 interface ClientsCsvImportProps {
-  /** When embedded under Configurações > Clientes */
+  /** When embedded under Configurações → Clientes → Importar Clientes */
   embedded?: boolean;
 }
 
+/**
+ * Importar Clientes — tela exclusiva de CSV/Excel de clientes.
+ * Independente de /admin/importar (Importar Cardápio). Não compartilha
+ * componentes nem lógica com ImportMenu.
+ */
 export default function ClientsCsvImport({ embedded = false }: ClientsCsvImportProps) {
   const { logout } = useAdmin();
   const [, setLocation] = useLocation();
@@ -72,10 +76,9 @@ export default function ClientsCsvImport({ embedded = false }: ClientsCsvImportP
     async (file: File) => {
       resetResult();
       try {
-        const text = await readFileAsText(file);
-        const parsed = parseCsv(text);
+        const parsed = await readClientImportFile(file);
         if (!parsed.headers.length) {
-          setError("Arquivo CSV sem cabeçalho.");
+          setError("Arquivo sem cabeçalho. Use CSV ou Excel de clientes.");
           setFileName(null);
           setHeaders([]);
           setRawRows([]);
@@ -85,7 +88,15 @@ export default function ClientsCsvImport({ embedded = false }: ClientsCsvImportP
         setFileName(file.name);
         setHeaders(parsed.headers);
         setRawRows(parsed.rows);
-        setMapping(autoMapColumns(parsed.headers, source));
+        const nextSource: CsvImportSource =
+          file.name.toLowerCase().endsWith(".xlsx") ||
+          file.name.toLowerCase().endsWith(".xls")
+            ? source === "outro"
+              ? "excel"
+              : source
+            : source;
+        if (nextSource !== source) setSource(nextSource);
+        setMapping(autoMapColumns(parsed.headers, nextSource));
       } catch (err) {
         setError(err instanceof Error ? err.message : "Falha ao ler o arquivo.");
         setFileName(null);
@@ -161,7 +172,7 @@ export default function ClientsCsvImport({ embedded = false }: ClientsCsvImportP
           options,
         });
       } catch {
-        // Import succeeded; log failure should not keep spinner
+        // Import succeeded; log failure must not keep loading state
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Falha na importação.");
@@ -179,29 +190,15 @@ export default function ClientsCsvImport({ embedded = false }: ClientsCsvImportP
       });
     } finally {
       setImporting(false);
-      setProgress((p) => (p < 100 && !error ? p : p));
     }
   };
 
   const body = (
     <div className="space-y-5">
-      {!embedded && (
-        <div className="flex gap-2">
-          <Link href="/admin/config/clientes" className="flex-1">
-            <div className="h-11 rounded-xl font-bold text-[11px] uppercase flex items-center justify-center gap-1.5 bg-zinc-900 border border-zinc-800 text-zinc-400 hover:border-amber-500/40">
-              <Users size={15} /> Clientes
-            </div>
-          </Link>
-          <div className="flex-1 h-11 rounded-xl font-bold text-[11px] uppercase flex items-center justify-center gap-1.5 bg-amber-500 text-zinc-950">
-            <FileSpreadsheet size={15} /> Importar CSV
-          </div>
-        </div>
-      )}
-
       <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
         <p className="text-zinc-500 text-xs leading-relaxed">
-          Importe clientes de exportações do Anota AI, Excel ou qualquer CSV.
-          O telefone é a chave única — nunca gera cadastro duplicado.
+          Tela exclusiva para importar clientes (nome, telefone, cashback, fidelidade, etc.).
+          Independente do Importar Cardápio. O telefone é a chave única — nunca gera cadastro duplicado.
         </p>
       </div>
 
@@ -330,9 +327,9 @@ export default function ClientsCsvImport({ embedded = false }: ClientsCsvImportP
             <FileSpreadsheet size={20} className="text-amber-500" />
             <div>
               <h1 className="text-white font-black uppercase text-base leading-none">
-                Importar CSV
+                Importar Clientes
               </h1>
-              <p className="text-zinc-600 text-xs">Clientes · Anota AI e outros</p>
+              <p className="text-zinc-600 text-xs">CSV / Excel · exclusivo de clientes</p>
             </div>
           </div>
           <button
@@ -347,7 +344,19 @@ export default function ClientsCsvImport({ embedded = false }: ClientsCsvImportP
           </button>
         </div>
       </header>
-      <main className="max-w-2xl mx-auto px-4 py-5">{body}</main>
+      <main className="max-w-2xl mx-auto px-4 py-5 space-y-5">
+        <div className="flex gap-2">
+          <Link href="/admin/config/clientes" className="flex-1">
+            <div className="h-11 rounded-xl font-bold text-[11px] uppercase flex items-center justify-center gap-1.5 bg-zinc-900 border border-zinc-800 text-zinc-400 hover:border-amber-500/40">
+              <Users size={15} /> Clientes
+            </div>
+          </Link>
+          <div className="flex-1 h-11 rounded-xl font-bold text-[11px] uppercase flex items-center justify-center gap-1.5 bg-amber-500 text-zinc-950">
+            <FileSpreadsheet size={15} /> Importar Clientes
+          </div>
+        </div>
+        {body}
+      </main>
     </div>
   );
 }
