@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useLocation } from "wouter";
 import {
   Check,
+  ChevronDown,
+  ChevronUp,
   FileSpreadsheet,
   Loader2,
   LogOut,
@@ -61,15 +63,14 @@ function formatPhone(v: string) {
 }
 
 /**
- * Clientes → Importação (rota existente /admin/clientes/importar).
- * Importador CSV/Excel + importação manual — sem rotas novas,
- * sem reutilizar Importar Cardápio.
+ * Clientes → Importação (/admin/clientes/importar).
+ * UI de upload CSV/Excel VISÍVEL nesta aba — sem rota nova.
  */
 export default function ClientsImport() {
   const { logout } = useAdmin();
   const [, setLocation] = useLocation();
 
-  // ── Manual (existing) ────────────────────────────────────────────────────
+  const [showManual, setShowManual] = useState(false);
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [stamps, setStamps] = useState("0");
@@ -81,7 +82,6 @@ export default function ClientsImport() {
   const [manualError, setManualError] = useState("");
   const [existing, setExisting] = useState<ClubClient | null>(null);
 
-  // ── CSV / Excel ──────────────────────────────────────────────────────────
   const [source, setSource] = useState<CsvImportSource>("anota_ai");
   const [fileName, setFileName] = useState<string | null>(null);
   const [headers, setHeaders] = useState<string[]>([]);
@@ -133,13 +133,14 @@ export default function ClientsImport() {
           setMapping([]);
           return;
         }
-        const nextSource: CsvImportSource =
+        const isExcel =
           file.name.toLowerCase().endsWith(".xlsx") ||
-          file.name.toLowerCase().endsWith(".xls")
-            ? source === "outro"
-              ? "excel"
-              : source
-            : source;
+          file.name.toLowerCase().endsWith(".xls");
+        const nextSource: CsvImportSource = isExcel
+          ? source === "outro"
+            ? "excel"
+            : source
+          : source;
         setFileName(file.name);
         setHeaders(parsed.headers);
         setRawRows(parsed.rows);
@@ -155,12 +156,6 @@ export default function ClientsImport() {
     },
     [source],
   );
-
-  const handleSourceChange = (next: CsvImportSource) => {
-    setSource(next);
-    resetFileResult();
-    if (headers.length) setMapping(autoMapColumns(headers, next));
-  };
 
   const handleImportFile = async () => {
     if (!mappedRows.length || importing) return;
@@ -216,10 +211,9 @@ export default function ClientsImport() {
           options,
         });
       } catch {
-        /* log failure must not keep loading */
+        /* ignore log errors */
       }
 
-      // Refresh phones for next preview
       try {
         const data = await getClients();
         setExistingPhones(data.clients.map((c) => c.phone));
@@ -286,7 +280,7 @@ export default function ClientsImport() {
   };
 
   return (
-    <div className="min-h-screen bg-[#0a0a0a] pb-24">
+    <div className="min-h-screen bg-[#0a0a0a] pb-24" data-testid="clientes-importacao-page">
       <header className="sticky top-0 z-40 bg-zinc-950/95 border-b border-zinc-800 px-4 py-3">
         <div className="max-w-2xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -295,7 +289,7 @@ export default function ClientsImport() {
               <h1 className="text-white font-black uppercase text-base leading-none">
                 Importação
               </h1>
-              <p className="text-zinc-600 text-xs">Clientes · CSV, Excel e manual</p>
+              <p className="text-zinc-600 text-xs">Clientes · CSV e Excel</p>
             </div>
           </div>
           <button
@@ -314,46 +308,69 @@ export default function ClientsImport() {
       <main className="max-w-2xl mx-auto px-4 py-5 space-y-5">
         <ClientsSubnav active="importar" />
 
-        {/* ── CSV / Excel (principal) ─────────────────────────────────────── */}
-        <div className="space-y-5">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
-            <p className="text-zinc-500 text-xs leading-relaxed">
-              Importe clientes via CSV ou Excel (Anota AI e outros). Telefone é a chave
-              principal — números iguais nunca geram duplicata. Independente do Importar Cardápio.
+        {/* ═══ IMPORTADOR CSV/EXCEL — interface principal da aba ═══ */}
+        <section className="space-y-4" data-testid="clientes-csv-importer">
+          <div>
+            <h2 className="text-white font-black uppercase text-sm flex items-center gap-2">
+              <FileSpreadsheet size={16} className="text-amber-500" />
+              Importar clientes (CSV / Excel)
+            </h2>
+            <p className="text-zinc-500 text-xs mt-1 leading-relaxed">
+              Selecione um arquivo do computador. Aceita CSV, XLS e XLSX.
+              Telefone é a chave — sem duplicatas.
             </p>
           </div>
 
-          <div className="space-y-2">
-            <Label className="text-zinc-400 text-xs uppercase font-bold">Origem</Label>
-            <div className="grid grid-cols-3 gap-2">
-              {SOURCES.map((s) => (
-                <button
-                  key={s}
-                  type="button"
-                  disabled={importing}
-                  onClick={() => handleSourceChange(s)}
-                  className={`h-11 rounded-xl text-[11px] font-bold uppercase ${
-                    source === s
-                      ? "bg-amber-500 text-zinc-950"
-                      : "bg-zinc-900 border border-zinc-800 text-zinc-400"
-                  }`}
-                >
-                  {CSV_SOURCE_LABELS[s]}
-                </button>
-              ))}
-            </div>
+          <div className="grid grid-cols-3 gap-2">
+            {SOURCES.map((s) => (
+              <button
+                key={s}
+                type="button"
+                disabled={importing}
+                onClick={() => {
+                  setSource(s);
+                  resetFileResult();
+                  if (headers.length) setMapping(autoMapColumns(headers, s));
+                }}
+                className={`h-10 rounded-xl text-[11px] font-bold uppercase ${
+                  source === s
+                    ? "bg-amber-500 text-zinc-950"
+                    : "bg-zinc-900 border border-zinc-800 text-zinc-400"
+                }`}
+              >
+                {CSV_SOURCE_LABELS[s]}
+              </button>
+            ))}
           </div>
 
           <CsvUploadZone
             disabled={importing}
             fileName={fileName}
+            clientCount={fileName ? rawRows.length : null}
             onFile={(f) => void handleFile(f)}
           />
 
+          {fileError && (
+            <p className="text-red-400 text-sm" data-testid="clientes-csv-error">
+              {fileError}
+            </p>
+          )}
+
           {headers.length > 0 && (
-            <>
+            <div className="space-y-4" data-testid="clientes-csv-preview-block">
+              <div className="rounded-xl border border-zinc-800 bg-zinc-900/80 p-4 space-y-1">
+                <p className="text-zinc-400 text-xs uppercase font-bold">Arquivo</p>
+                <p className="text-white font-bold text-sm break-all">{fileName}</p>
+                <p className="text-amber-400 text-sm font-bold">
+                  {rawRows.length} cliente{rawRows.length === 1 ? "" : "s"} encontrado
+                  {rawRows.length === 1 ? "" : "s"}
+                </p>
+              </div>
+
               <div className="space-y-2">
-                <h3 className="text-white font-black uppercase text-sm">Pré-visualização</h3>
+                <h3 className="text-white font-black uppercase text-sm">
+                  Pré-visualização
+                </h3>
                 <div className="overflow-x-auto rounded-xl border border-zinc-800">
                   <table className="min-w-full text-xs">
                     <thead>
@@ -385,10 +402,6 @@ export default function ClientsImport() {
                     </tbody>
                   </table>
                 </div>
-                <p className="text-zinc-600 text-[11px]">
-                  {rawRows.length} linha{rawRows.length === 1 ? "" : "s"} · mostrando{" "}
-                  {Math.min(PREVIEW_ROWS, rawRows.length)}
-                </p>
               </div>
 
               <ColumnMappingForm
@@ -415,15 +428,24 @@ export default function ClientsImport() {
                   totalRows={mappedRows.length}
                 />
               )}
-            </>
+            </div>
           )}
 
-          {importing && <ImportProgress percent={progress} />}
-          {summary && !importing && <ImportResult summary={summary} />}
-          {fileError && <p className="text-red-400 text-sm">{fileError}</p>}
+          {importing && (
+            <div data-testid="clientes-csv-progress">
+              <ImportProgress percent={progress} />
+            </div>
+          )}
+
+          {summary && !importing && (
+            <div data-testid="clientes-csv-result">
+              <ImportResult summary={summary} />
+            </div>
+          )}
 
           <Button
             type="button"
+            data-testid="clientes-csv-import-btn"
             onClick={() => void handleImportFile()}
             disabled={
               importing ||
@@ -432,158 +454,153 @@ export default function ClientsImport() {
                 importPreview.newCount === 0 &&
                 importPreview.updateCount === 0)
             }
-            className="w-full h-12 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold rounded-xl flex items-center justify-center gap-2"
+            className="w-full h-14 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-black uppercase rounded-xl flex items-center justify-center gap-2 text-sm"
           >
             {importing ? (
               <>
-                <Loader2 size={18} className="animate-spin" />
+                <Loader2 size={20} className="animate-spin" />
                 Importando...
               </>
             ) : (
               <>
-                <FileSpreadsheet size={18} />
+                <FileSpreadsheet size={20} />
                 Importar Clientes
               </>
             )}
           </Button>
-        </div>
+        </section>
 
-        {/* ── Manual (existente) ──────────────────────────────────────────── */}
-        <div className="pt-2 border-t border-zinc-800 space-y-4">
-          <div>
-            <h2 className="text-white font-black uppercase text-sm">Importação manual</h2>
-            <p className="text-zinc-500 text-xs mt-1">
-              Cadastro um a um — selos e cashback de outro sistema.
-            </p>
-          </div>
-
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-4">
-            <div className="space-y-1.5">
-              <Label className="text-zinc-400 text-xs">Nome completo *</Label>
-              <Input
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Nome do cliente"
-                className="bg-zinc-950 border-zinc-800 text-white h-11 focus:border-amber-500"
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <Label className="text-zinc-400 text-xs">WhatsApp *</Label>
-              <Input
-                value={phone}
-                onChange={(e) => setPhone(formatPhone(e.target.value))}
-                placeholder="+55 (71) 99999-0000"
-                className="bg-zinc-950 border-zinc-800 text-white h-11 focus:border-amber-500 font-mono"
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label className="text-zinc-400 text-xs">Quantidade de selos</Label>
-                <Input
-                  type="number"
-                  min={0}
-                  value={stamps}
-                  onChange={(e) => setStamps(e.target.value)}
-                  className="bg-zinc-950 border-zinc-800 text-white h-11 focus:border-amber-500"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-zinc-400 text-xs">Saldo de Cashback (R$)</Label>
-                <Input
-                  type="number"
-                  min={0}
-                  step="0.01"
-                  value={cashback}
-                  onChange={(e) => setCashback(e.target.value)}
-                  className="bg-zinc-950 border-zinc-800 text-white h-11 focus:border-amber-500"
-                />
-              </div>
-            </div>
-
-            <div className="space-y-1.5">
-              <Label className="text-zinc-400 text-xs">Origem do cadastro *</Label>
-              <div className="grid grid-cols-2 gap-2">
-                {CLIENT_ORIGIN_OPTIONS.map((o) => (
-                  <button
-                    key={o.id}
-                    type="button"
-                    onClick={() => setOrigin(o.id)}
-                    className={`h-11 rounded-xl text-[11px] font-bold uppercase px-1 ${
-                      origin === o.id
-                        ? "bg-amber-500 text-zinc-950"
-                        : "bg-zinc-950 border border-zinc-800 text-zinc-400"
-                    }`}
-                  >
-                    {o.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="space-y-1.5">
-              <Label className="text-zinc-400 text-xs">Observações (opcional)</Label>
-              <Input
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                placeholder="Ex.: Importado do Anota Aí"
-                className="bg-zinc-950 border-zinc-800 text-white h-11 focus:border-amber-500"
-              />
-            </div>
-
-            {success && (
-              <p className="text-green-400 text-sm flex items-center gap-2">
-                <Check size={16} /> {success}
-              </p>
+        {/* ═══ Manual (secundário, recolhido) ═══ */}
+        <div className="pt-2 border-t border-zinc-800">
+          <button
+            type="button"
+            onClick={() => setShowManual((v) => !v)}
+            className="w-full flex items-center justify-between py-3 text-left"
+          >
+            <span>
+              <span className="text-zinc-300 font-bold text-sm uppercase">
+                Importação manual
+              </span>
+              <span className="block text-zinc-600 text-xs mt-0.5">
+                Cadastro um a um (opcional)
+              </span>
+            </span>
+            {showManual ? (
+              <ChevronUp size={18} className="text-zinc-500" />
+            ) : (
+              <ChevronDown size={18} className="text-zinc-500" />
             )}
-            {manualError && <p className="text-red-400 text-sm">{manualError}</p>}
+          </button>
 
-            {existing && (
-              <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 space-y-2">
-                <p className="text-amber-400 text-xs font-bold uppercase">Cliente existente</p>
-                <p className="text-white text-sm font-bold">{existing.name}</p>
-                <p className="text-zinc-400 text-xs font-mono">{existing.phone}</p>
-                <p className="text-zinc-500 text-xs">
-                  {existing.stamps} selos · R${" "}
-                  {parseFloat(existing.cashbackBalance || "0")
-                    .toFixed(2)
-                    .replace(".", ",")}{" "}
-                  cashback · {existing.orderCount} pedidos
+          {showManual && (
+            <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-4 mb-2">
+              <div className="space-y-1.5">
+                <Label className="text-zinc-400 text-xs">Nome completo *</Label>
+                <Input
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="Nome do cliente"
+                  className="bg-zinc-950 border-zinc-800 text-white h-11 focus:border-amber-500"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-zinc-400 text-xs">WhatsApp *</Label>
+                <Input
+                  value={phone}
+                  onChange={(e) => setPhone(formatPhone(e.target.value))}
+                  placeholder="+55 (71) 99999-0000"
+                  className="bg-zinc-950 border-zinc-800 text-white h-11 focus:border-amber-500 font-mono"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label className="text-zinc-400 text-xs">Selos</Label>
+                  <Input
+                    type="number"
+                    min={0}
+                    value={stamps}
+                    onChange={(e) => setStamps(e.target.value)}
+                    className="bg-zinc-950 border-zinc-800 text-white h-11 focus:border-amber-500"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-zinc-400 text-xs">Cashback (R$)</Label>
+                  <Input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={cashback}
+                    onChange={(e) => setCashback(e.target.value)}
+                    className="bg-zinc-950 border-zinc-800 text-white h-11 focus:border-amber-500"
+                  />
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-zinc-400 text-xs">Origem *</Label>
+                <div className="grid grid-cols-2 gap-2">
+                  {CLIENT_ORIGIN_OPTIONS.map((o) => (
+                    <button
+                      key={o.id}
+                      type="button"
+                      onClick={() => setOrigin(o.id)}
+                      className={`h-11 rounded-xl text-[11px] font-bold uppercase px-1 ${
+                        origin === o.id
+                          ? "bg-amber-500 text-zinc-950"
+                          : "bg-zinc-950 border border-zinc-800 text-zinc-400"
+                      }`}
+                    >
+                      {o.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-zinc-400 text-xs">Observações</Label>
+                <Input
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  placeholder="Ex.: Importado do Anota Aí"
+                  className="bg-zinc-950 border-zinc-800 text-white h-11 focus:border-amber-500"
+                />
+              </div>
+              {success && (
+                <p className="text-green-400 text-sm flex items-center gap-2">
+                  <Check size={16} /> {success}
                 </p>
-                <div className="flex gap-2">
+              )}
+              {manualError && <p className="text-red-400 text-sm">{manualError}</p>}
+              {existing && (
+                <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 space-y-2">
+                  <p className="text-amber-400 text-xs font-bold uppercase">
+                    Cliente existente
+                  </p>
+                  <p className="text-white text-sm font-bold">{existing.name}</p>
                   <Button
                     type="button"
                     onClick={() => void handleSaveManual(true)}
                     disabled={saving}
-                    className="flex-1 h-10 bg-amber-500 text-zinc-950 font-bold rounded-xl text-xs"
+                    className="w-full h-10 bg-amber-500 text-zinc-950 font-bold rounded-xl text-xs"
                   >
                     <RefreshCw size={14} className="mr-1" /> Atualizar existente
                   </Button>
-                  <Link href={`/admin/clientes/${existing.id}`} className="flex-1">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="w-full h-10 border-zinc-700 text-zinc-300 font-bold rounded-xl text-xs"
-                    >
-                      Ver histórico
-                    </Button>
-                  </Link>
                 </div>
-              </div>
-            )}
-
-            <Button
-              onClick={() => void handleSaveManual(false)}
-              disabled={
-                saving || !name.trim() || phone.replace(/\D/g, "").length < 10
-              }
-              className="w-full h-12 bg-zinc-800 hover:bg-zinc-700 text-white font-bold rounded-xl flex items-center justify-center gap-2"
-            >
-              {saving ? <Loader2 size={18} className="animate-spin" /> : <Plus size={18} />}
-              Salvar Cliente
-            </Button>
-          </div>
+              )}
+              <Button
+                onClick={() => void handleSaveManual(false)}
+                disabled={
+                  saving || !name.trim() || phone.replace(/\D/g, "").length < 10
+                }
+                className="w-full h-12 bg-zinc-800 hover:bg-zinc-700 text-white font-bold rounded-xl flex items-center justify-center gap-2"
+              >
+                {saving ? (
+                  <Loader2 size={18} className="animate-spin" />
+                ) : (
+                  <Plus size={18} />
+                )}
+                Salvar Cliente
+              </Button>
+            </div>
+          )}
         </div>
 
         <Link
