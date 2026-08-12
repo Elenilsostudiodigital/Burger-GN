@@ -65,8 +65,10 @@ export default defineConfig({
     allowedHosts: true,
     proxy: {
       "/api": {
-        target: "http://localhost:8080",
+        // Local stress tests proxy to production API when API_PROXY_TARGET is set.
+        target: process.env.API_PROXY_TARGET || "http://localhost:8080",
         changeOrigin: true,
+        secure: true,
       },
     },
     fs: {
