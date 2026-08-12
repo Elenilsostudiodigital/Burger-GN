@@ -17,7 +17,7 @@ import {
 } from '../components/ClubeFidelityRedeemPrompt';
 import { getSavedClubePhone } from '../lib/clubeCliente';
 import {
-  ArrowLeft, Bike, Store, Utensils, CreditCard, Banknote, QrCode,
+  ArrowLeft, Bike, Store, Utensils, CreditCard, Banknote, QrCode, Star,
   Loader2, Tag, X, CheckCircle2, MapPin, AlertCircle, ChevronDown, LocateFixed, Navigation, Home,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -26,7 +26,8 @@ import { Label } from '@/components/ui/label';
 import { motion, AnimatePresence } from 'framer-motion';
 
 type OrderType = 'delivery' | 'pickup' | 'local';
-type PaymentMethod = 'pix' | 'cash' | 'card';
+type CheckoutPayKey = 'pix_online' | 'pix_manual' | 'cash' | 'card' | 'card_online';
+type ApiPaymentMethod = 'pix' | 'cash' | 'card';
 type CardType = 'credit' | 'debit';
 type CheckoutStep = 'fulfillment' | 'contact' | 'address_method' | 'gps' | 'manual' | 'payment';
 type AddressMode = 'gps' | 'manual' | null;
@@ -68,7 +69,7 @@ export default function Checkout() {
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [fieldError, setFieldError] = useState('');
 
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('pix');
+  const [paymentMethod, setPaymentMethod] = useState<CheckoutPayKey>('pix_online');
   const [cardType, setCardType] = useState<CardType>('credit');
   const [needsChange, setNeedsChange] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -132,11 +133,25 @@ export default function Checkout() {
     getPaymentSettings().then(setPaySettings).catch(() => {});
   }, []);
 
+  const pixOnlineAvailable = !!paySettings?.pixOnlineAvailable;
+  const pixManualAvailable = paySettings !== null
+    && paySettings.pixManualEnabled !== false
+    && !!paySettings.pixConfigured;
+  const cardOnlineAvailable = !!paySettings?.cardOnlineEnabled;
+
   useEffect(() => {
-    if (orderType === 'delivery' && paymentMethod === 'cash' && paySettings && !paySettings.cashOnDeliveryEnabled) {
-      setPaymentMethod('pix');
+    if (!paySettings) return;
+    const cashOk = !(orderType === 'delivery' && !paySettings.cashOnDeliveryEnabled);
+    const available: CheckoutPayKey[] = [];
+    if (pixOnlineAvailable) available.push('pix_online');
+    if (cardOnlineAvailable) available.push('card_online');
+    if (cashOk) available.push('cash');
+    available.push('card');
+    if (pixManualAvailable) available.push('pix_manual');
+    if (!available.includes(paymentMethod)) {
+      setPaymentMethod(available[0] ?? 'card');
     }
-  }, [orderType, paymentMethod, paySettings]);
+  }, [orderType, paymentMethod, paySettings, pixOnlineAvailable, pixManualAvailable, cardOnlineAvailable]);
 
   useEffect(() => {
     if (cartItems.length === 0 && !submitting) setLocation('/cardapio');
@@ -616,6 +631,18 @@ export default function Checkout() {
       const customerName = orderType === 'local' ? (form.nome.trim() || LOCAL_PLACEHOLDER.nome) : form.nome.trim();
       const phone = orderType === 'local' ? (form.telefone.replace(/\D/g, '') || LOCAL_PLACEHOLDER.telefone) : form.telefone;
 
+      const apiPaymentMethod: ApiPaymentMethod =
+        paymentMethod === 'pix_online' || paymentMethod === 'pix_manual'
+          ? 'pix'
+          : paymentMethod === 'card_online'
+            ? 'card'
+            : paymentMethod;
+      const pixMode = paymentMethod === 'pix_online'
+        ? 'online' as const
+        : paymentMethod === 'pix_manual'
+          ? 'manual' as const
+          : undefined;
+
       const result = await createOrder({
         customerName,
         phone,
@@ -628,9 +655,10 @@ export default function Checkout() {
         customerLat: isDelivery && customerCoords ? customerCoords.lat : undefined,
         customerLng: isDelivery && customerCoords ? customerCoords.lng : undefined,
         orderType,
-        paymentMethod,
+        paymentMethod: apiPaymentMethod,
+        pixMode,
         changeFor: paymentMethod === 'cash' && needsChange && form.troco ? parseFloat(form.troco) : undefined,
-        cardType: paymentMethod === 'card' ? cardType : undefined,
+        cardType: paymentMethod === 'card' || paymentMethod === 'card_online' ? cardType : undefined,
         needsChange: paymentMethod === 'cash' ? needsChange : undefined,
         couponCode: appliedCoupon?.code,
         fidelityRewardId: fidelityRedeem?.rewardId,
@@ -651,8 +679,9 @@ export default function Checkout() {
         customerName,
         phone,
         orderType,
-        paymentMethod,
-        cardType: paymentMethod === 'card' ? cardType : null,
+        paymentMethod: apiPaymentMethod,
+        pixMode: result.pixMode ?? pixMode ?? null,
+        cardType: paymentMethod === 'card' || paymentMethod === 'card_online' ? cardType : null,
         needsChange: paymentMethod === 'cash' ? needsChange : false,
         changeFor: paymentMethod === 'cash' && needsChange ? (form.troco || null) : null,
         address: form.endereco ?? '',
@@ -687,8 +716,8 @@ export default function Checkout() {
         pixPayment: result.pixPayment?.qrCode ? result.pixPayment : null,
         pixConfigured: !!result.pixConfigured && !!result.pixPayment?.qrCode,
         pixUnavailableReason: result.pixUnavailableReason ?? null,
-        paymentStatus: 'pending',
-        workflow: 'new',
+        paymentStatus: result.paymentStatus ?? 'pending',
+        workflow: result.workflow ?? (apiPaymentMethod === 'pix' ? 'awaiting_payment' : 'new'),
         createdAt: new Date().toISOString(),
       };
 
@@ -1173,10 +1202,49 @@ export default function Checkout() {
 
               <div className="grid grid-cols-1 gap-2">
                 {([
-                  { key: 'pix' as const, icon: <QrCode size={22} />, label: 'Pix', hint: 'QR Code e copia e cola após confirmar', blocked: false },
-                  { key: 'card' as const, icon: <CreditCard size={22} />, label: 'Cartão na maquininha', hint: 'Crédito ou débito no momento do recebimento', blocked: false },
-                  { key: 'cash' as const, icon: <Banknote size={22} />, label: 'Dinheiro', hint: 'Informe se precisa de troco', blocked: cashBlockedForDelivery },
-                ]).map(opt => (
+                  pixOnlineAvailable && {
+                    key: 'pix_online' as const,
+                    icon: <QrCode size={22} />,
+                    label: 'PIX Online (Mercado Pago)',
+                    hint: 'Pague via PIX do Mercado Pago. Aprovação automática.',
+                    blocked: false,
+                    principal: true,
+                  },
+                  cardOnlineAvailable && {
+                    key: 'card_online' as const,
+                    icon: <CreditCard size={22} />,
+                    label: 'Cartão Online (Mercado Pago)',
+                    hint: 'Pague com cartão agora, pela internet.',
+                    blocked: false,
+                    principal: false,
+                  },
+                  {
+                    key: 'cash' as const,
+                    icon: <Banknote size={22} />,
+                    label: 'Dinheiro',
+                    hint: 'Informe se precisa de troco',
+                    blocked: cashBlockedForDelivery,
+                    principal: false,
+                  },
+                  {
+                    key: 'card' as const,
+                    icon: <CreditCard size={22} />,
+                    label: 'Cartão na entrega',
+                    hint: 'Crédito ou débito no momento do recebimento',
+                    blocked: false,
+                    principal: false,
+                  },
+                  pixManualAvailable && {
+                    key: 'pix_manual' as const,
+                    icon: <QrCode size={22} />,
+                    label: pixOnlineAvailable ? 'PIX Manual (Backup)' : 'PIX Manual',
+                    hint: pixOnlineAvailable
+                      ? 'Use apenas caso o PIX Online esteja indisponível.'
+                      : 'Chave PIX da loja. Envie o comprovante após pagar.',
+                    blocked: false,
+                    principal: false,
+                  },
+                ] as const).filter((opt): opt is Exclude<typeof opt, false> => Boolean(opt)).map(opt => (
                   <button key={opt.key} type="button" disabled={opt.blocked}
                     onClick={() => setPaymentMethod(opt.key)}
                     className={`p-4 rounded-2xl border flex items-center gap-3.5 text-left transition-all ${
@@ -1191,8 +1259,15 @@ export default function Checkout() {
                     }`}>
                       {opt.icon}
                     </div>
-                    <div>
-                      <p className="font-black text-sm uppercase tracking-wide">{opt.label}</p>
+                    <div className="min-w-0 flex-1">
+                      <p className="font-black text-sm uppercase tracking-wide flex items-center gap-1.5 flex-wrap">
+                        {opt.label}
+                        {opt.principal && (
+                          <span className="inline-flex items-center gap-0.5 text-[9px] font-black uppercase tracking-wider bg-amber-500 text-zinc-950 rounded-full px-1.5 py-0.5">
+                            <Star size={9} fill="currentColor" /> Principal
+                          </span>
+                        )}
+                      </p>
                       <p className={`text-xs mt-0.5 ${paymentMethod === opt.key && !opt.blocked ? 'text-amber-500/80' : 'text-zinc-500'}`}>
                         {opt.hint}
                       </p>
@@ -1208,25 +1283,45 @@ export default function Checkout() {
                 </p>
               )}
 
-              {paymentMethod === 'pix' && (
-                <div className="p-4 bg-zinc-900 border border-zinc-800 rounded-2xl space-y-2">
+              {paymentMethod === 'pix_online' && (
+                <div className="p-4 bg-zinc-900 border border-amber-500/30 rounded-2xl space-y-2">
                   <div className="flex items-center gap-2 text-amber-500">
                     <QrCode size={16} />
-                    <p className="text-sm font-bold uppercase tracking-wide">Pix</p>
+                    <p className="text-sm font-bold uppercase tracking-wide">PIX Online</p>
+                    <span className="inline-flex items-center gap-0.5 text-[9px] font-black uppercase tracking-wider bg-amber-500 text-zinc-950 rounded-full px-1.5 py-0.5">
+                      <Star size={9} fill="currentColor" /> Principal
+                    </span>
                   </div>
                   <p className="text-zinc-300 text-sm">
-                    Após confirmar, você verá o QR Code e a chave copia e cola na tela de confirmação.
+                    Pague via PIX do Mercado Pago. Aprovação automática.
                   </p>
-                  <p className="text-zinc-600 text-xs">
-                    Estrutura pronta para integração futura com gateway Pix.
-                    {paySettings?.pixConfigured
-                      ? ` Chave atual: ${paySettings.pixKeyPreview}`
-                      : ' Configure a chave em Admin → Pagamento para gerar o QR automaticamente.'}
+                  <p className="text-zinc-500 text-xs">
+                    Após confirmar, você verá o QR Code dinâmico e o código PIX Copia e Cola. O pedido muda para Pago assim que o Mercado Pago confirmar.
                   </p>
                 </div>
               )}
 
-              {paymentMethod === 'card' && (
+              {paymentMethod === 'pix_manual' && (
+                <div className="p-4 bg-zinc-900 border border-zinc-800 rounded-2xl space-y-2">
+                  <div className="flex items-center gap-2 text-amber-500">
+                    <QrCode size={16} />
+                    <p className="text-sm font-bold uppercase tracking-wide">
+                      {pixOnlineAvailable ? 'PIX Manual (Backup)' : 'PIX Manual'}
+                    </p>
+                  </div>
+                  <p className="text-zinc-300 text-sm">
+                    {pixOnlineAvailable
+                      ? 'Use apenas caso o PIX Online esteja indisponível.'
+                      : 'Pague com a chave PIX da loja e envie o comprovante.'}
+                  </p>
+                  <p className="text-zinc-500 text-xs">
+                    Após confirmar, você verá a chave PIX cadastrada e o QR Code estático. O pedido fica aguardando confirmação manual.
+                    {paySettings?.pixKeyPreview ? ` Chave: ${paySettings.pixKeyPreview}` : ''}
+                  </p>
+                </div>
+              )}
+
+              {(paymentMethod === 'card' || paymentMethod === 'card_online') && (
                 <div className="space-y-3 p-4 bg-zinc-900 border border-zinc-800 rounded-2xl">
                   <Label className="text-zinc-400 text-sm">Tipo do cartão</Label>
                   <div className="grid grid-cols-2 gap-2">

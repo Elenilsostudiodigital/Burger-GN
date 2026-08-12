@@ -729,6 +729,7 @@ export type OrderStatus = "new" | "preparing" | "delivery" | "done" | "cancelled
 export type WorkflowStage = "awaiting_payment" | "new" | "accepted" | "preparing" | "ready" | "out" | "done";
 export type OrderType = "delivery" | "pickup" | "local";
 export type PaymentMethod = "pix" | "cash" | "card";
+export type PixMode = "online" | "manual";
 export type CardType = "credit" | "debit";
 
 export interface OrderItem { id: number; orderId: number; productName: string; productPrice: string; quantity: number; addons: Addon[]; notes: string; subtotal: string; }
@@ -754,6 +755,9 @@ export interface Order {
   review?: OrderReview | null;
   deliveredAt?: string | null;
   history?: StatusHistoryEntry[];
+  pixMode?: PixMode | null;
+  pixCopyPaste?: string | null;
+  pixKey?: string | null;
   customerNotifyMessage?: string | null;
   /** Prep timer (kitchen countdown) — set on accept, cleared on ready. */
   prepStartedAt?: string | null;
@@ -798,6 +802,7 @@ export interface CreateOrderPayload {
   neighborhood?: string; reference?: string; notes?: string;
   customerLat?: number; customerLng?: number;
   orderType: OrderType; paymentMethod: PaymentMethod; changeFor?: number;
+  pixMode?: PixMode;
   cardType?: CardType; needsChange?: boolean;
   couponCode?: string;
   fidelityRewardId?: string;
@@ -809,6 +814,7 @@ export const createOrder = (d: CreateOrderPayload) => api.post("/orders", d) as 
   ok: boolean; trackingId: string; orderNumber: number; orderId: number;
   deliveryFee: number; distanceKm: number | null; discountAmount: number; couponCode: string | null;
   pixPayment: PixPaymentResult | null; pixConfigured?: boolean; pixUnavailableReason?: string | null;
+  pixMode?: PixMode | null;
   cardCheckoutUrl: string | null; paymentStatus?: PaymentStatus; workflow?: WorkflowStage;
 }>;
 export const getOrders = () => api.get("/orders") as Promise<Order[]>;
@@ -866,6 +872,10 @@ export const deleteCoupon = (id: number) => api.delete(`/admin/coupons/${id}`);
 // ── Payment Settings ──────────────────────────────────────────────────────────
 export interface PaymentSettingsPublic {
   onlinePaymentEnabled: boolean;
+  pixOnlineEnabled?: boolean;
+  pixOnlineAvailable?: boolean;
+  pixManualEnabled?: boolean;
+  cardOnlineEnabled?: boolean;
   cashOnDeliveryEnabled: boolean;
   pixConfigured?: boolean;
   pixKeyPreview?: string;
@@ -878,12 +888,14 @@ export interface PaymentSettingsAdmin {
   updatedAt: string;
   mercadoPagoConfigured: boolean; mercadoPagoAccessTokenPreview: string; mercadoPagoPublicKey: string;
   pixKey?: string; pixMerchantName?: string; pixMerchantCity?: string; pixConfigured?: boolean;
+  pixManualEnabled?: boolean; pixOnlineEnabled?: boolean;
   prepTimeMin?: number; prepTimeMax?: number;
 }
 export const getPaymentSettings = () => api.get("/payment-settings") as Promise<PaymentSettingsPublic>;
 export const getAdminPaymentSettings = () => api.get("/admin/payment-settings") as Promise<PaymentSettingsAdmin>;
 export const updatePaymentSettings = (d: {
-  onlinePaymentEnabled?: boolean; gatewayProvider?: string; cashOnDeliveryEnabled?: boolean;
+  onlinePaymentEnabled?: boolean; pixManualEnabled?: boolean;
+  gatewayProvider?: string; cashOnDeliveryEnabled?: boolean;
   mercadoPagoAccessToken?: string; mercadoPagoPublicKey?: string; clearMercadoPagoCredentials?: boolean;
   pixKey?: string; pixMerchantName?: string; pixMerchantCity?: string;
   prepTimeMin?: number; prepTimeMax?: number;
@@ -1054,6 +1066,21 @@ export const ORDER_TYPE_LABELS: Record<OrderType, string> = {
   delivery: "Receber em casa",
 };
 export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = { pix: "Pix", cash: "Dinheiro", card: "Cartão" };
+export function formatPaymentMethod(order: {
+  paymentMethod: PaymentMethod;
+  pixMode?: PixMode | null;
+  cardType?: CardType | null;
+}): string {
+  if (order.paymentMethod === "pix") {
+    if (order.pixMode === "online") return "PIX Online";
+    if (order.pixMode === "manual") return "PIX Manual";
+    return "Pix";
+  }
+  if (order.paymentMethod === "card" && order.cardType) {
+    return `Cartão (${order.cardType === "credit" ? "Crédito" : "Débito"})`;
+  }
+  return PAYMENT_METHOD_LABELS[order.paymentMethod];
+}
 export const CARD_TYPE_LABELS: Record<CardType, string> = { credit: "Crédito", debit: "Débito" };
 export const STATUS_LABELS: Record<OrderStatus, string> = {
   new: "Pendente",
@@ -1074,8 +1101,8 @@ export const WORKFLOW_LABELS: Record<WorkflowStage | "cancelled", string> = {
 };
 export const PAYMENT_STATUS_LABELS: Record<PaymentStatus, string> = {
   pending: "Pendente",
-  paid: "Pagamento Confirmado",
-  failed: "Comprovante recusado",
+  paid: "Pago",
+  failed: "Pagamento recusado",
 };
 
 export const RECEIPT_ACCEPT = "image/png,image/jpeg,image/jpg,image/webp";

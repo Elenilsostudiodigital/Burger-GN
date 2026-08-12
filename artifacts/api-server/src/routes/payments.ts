@@ -1,8 +1,9 @@
 import { Router } from "express";
-import { db, ordersTable, paymentSettingsTable, companiesTable } from "@workspace/db";
-import { eq, and } from "drizzle-orm";
+import { db, paymentSettingsTable, companiesTable } from "@workspace/db";
+import { eq } from "drizzle-orm";
 import { fetchMPPayment } from "../lib/mercadopago";
-import { broadcastSSE } from "../lib/sse";
+import { applyMercadoPagoStatus } from "../lib/mpReconcile";
+import { ensurePaymentSettingsSchema } from "../lib/ensurePaymentSettingsSchema";
 
 const router = Router();
 
@@ -13,6 +14,8 @@ router.post("/payments/mercadopago/webhook", async (req, res) => {
   try {
     // Always ack quickly so Mercado Pago doesn't retry; do the work best-effort.
     res.status(200).json({ received: true });
+
+    await ensurePaymentSettingsSchema();
 
     const query = req.query as Record<string, string>;
     const body = req.body as { data?: { id?: string }; type?: string };
@@ -27,19 +30,15 @@ router.post("/payments/mercadopago/webhook", async (req, res) => {
     const [settings] = await db.select().from(paymentSettingsTable).where(eq(paymentSettingsTable.companyId, company.id));
     if (!settings?.mercadoPagoAccessToken) return;
 
-    const payment = await fetchMPPayment(settings.mercadoPagoAccessToken, String(paymentId));
-    if (!payment?.externalReference) return;
+    const payment = await fetchMPPayment(settings.mercadoPagoAccessToken, String(paymentId), { fromWebhook: true });
+    if (!payment) return;
 
-    const paymentStatus = payment.status === "approved" ? "paid" : payment.status === "rejected" || payment.status === "cancelled" ? "failed" : "pending";
-
-    const [order] = await db.update(ordersTable)
-      .set({ paymentStatus, updatedAt: new Date() })
-      .where(and(eq(ordersTable.trackingId, payment.externalReference), eq(ordersTable.companyId, company.id)))
-      .returning();
-
-    if (order) {
-      broadcastSSE(company.id, "order_payment", { id: order.id, trackingId: order.trackingId, paymentStatus: order.paymentStatus });
-    }
+    await applyMercadoPagoStatus({
+      companyId: company.id,
+      trackingId: payment.externalReference,
+      paymentId: payment.id,
+      mpStatus: payment.status,
+    });
   } catch (err) {
     req.log.error({ err }, "Failed to process Mercado Pago webhook");
   }

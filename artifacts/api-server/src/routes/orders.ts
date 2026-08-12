@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { ordersTable, orderItemsTable, couponsTable, deliveryZonesTable, kmDeliveryConfigTable, kmDeliveryTiersTable, paymentSettingsTable, productsTable, categoriesTable, clubeMembersTable, deliveryStreetsTable, deliveryStreetRequestsTable, deliveryAreasTable } from "@workspace/db";
+import { ordersTable, orderItemsTable, couponsTable, deliveryZonesTable, kmDeliveryConfigTable, kmDeliveryTiersTable, paymentSettingsTable, productsTable, categoriesTable, clubeMembersTable, deliveryStreetsTable, deliveryStreetRequestsTable, deliveryAreasTable, companiesTable } from "@workspace/db";
 import { eq, and, desc, sql, asc, inArray, ne } from "drizzle-orm";
 import { requireCompanyAuth } from "../middlewares/auth";
 import { resolvePublicCompany } from "../middlewares/company";
@@ -15,6 +15,9 @@ import {
   type WorkflowStage, type CardType, type OrderMeta, type OrderReview,
 } from "../lib/orderMeta";
 import { buildStaticPixPayload, decodePixSettings, normalizePixKey } from "../lib/staticPix";
+import { createPixPayment, getMPSettings, getMPAccessToken, fetchMPPayment } from "../lib/mercadopago";
+import { mercadoPagoNotificationUrl } from "../lib/publicUrl";
+import { applyMercadoPagoStatus } from "../lib/mpReconcile";
 import { syncClubeMemberOnOrder } from "../lib/clubeClientSync";
 import {
   isFidelityFreeBurgerProduct,
@@ -62,6 +65,9 @@ function enrichOrder<T extends { notes: string; status: string }>(order: T) {
     review: meta.review ?? null,
     deliveredAt: meta.deliveredAt ?? null,
     history: meta.history ?? [],
+    pixMode: meta.pixMode ?? null,
+    pixCopyPaste: meta.pixCopyPaste ?? null,
+    pixKey: meta.pixKey ?? null,
     prepStartedAt: meta.prepStartedAt ?? null,
     prepFinishedAt: meta.prepFinishedAt ?? null,
     prepTimeMin: meta.prepTimeMin ?? null,
@@ -135,6 +141,7 @@ router.post("/orders", resolvePublicCompany, async (req, res) => {
       customerLat?: number; customerLng?: number;
       orderType: "delivery" | "pickup" | "local";
       paymentMethod: "pix" | "cash" | "card";
+      pixMode?: "online" | "manual";
       changeFor?: number;
       cardType?: CardType;
       needsChange?: boolean;
@@ -432,12 +439,13 @@ router.post("/orders", resolvePublicCompany, async (req, res) => {
     const [{ maxNum }] = await db.select({ maxNum: sql<number>`COALESCE(MAX(order_number), 0)` }).from(ordersTable).where(eq(ordersTable.companyId, companyId));
     const orderNumber = (Number(maxNum) || 0) + 1;
 
-    // Non-Pix: start as Pendente. Pix: waits for receipt → conferência → then Pendente.
-    // Never auto-accepted.
-    let pixPayment: { paymentId: string; qrCode: string; qrCodeBase64: string; pixKey: string } | null = null;
+    // Non-Pix: start as Pendente. Pix: waits for payment (MP webhook or manual receipt).
+    let pixPayment: { paymentId: string; qrCode: string; qrCodeBase64: string; pixKey?: string } | null = null;
     let pixConfigured = false;
     let pixUnavailableReason: string | null = null;
     const isPix = body.paymentMethod === "pix";
+    let pixMode: "online" | "manual" | null = null;
+    let mpPaymentId: string | null = null;
     let meta: OrderMeta = isPix
       ? {
           workflow: "awaiting_payment",
@@ -460,35 +468,84 @@ router.post("/orders", resolvePublicCompany, async (req, res) => {
         ?? (paySettings?.mercadoPagoPublicKey && !paySettings.mercadoPagoPublicKey.startsWith("APP_USR")
           ? { key: paySettings.mercadoPagoPublicKey, name: "THE BURGER GN", city: "LAURO DE FREITAS" }
           : null);
+      const pixManualEnabled = paySettings?.pixManualEnabled !== false;
+      const mpSettings = await getMPSettings(companyId);
+      const onlineAvailable = !!mpSettings;
+      const requestedMode = body.pixMode === "online" || body.pixMode === "manual" ? body.pixMode : null;
+      const useOnline = requestedMode === "online"
+        ? true
+        : requestedMode === "manual"
+          ? false
+          : onlineAvailable;
 
-      const pixKey = pixCfg?.key?.trim() || "";
-      if (pixKey) {
-        pixConfigured = true;
-        const qrCode = buildStaticPixPayload({
-          key: pixKey,
-          merchantName: pixCfg!.name,
-          merchantCity: pixCfg!.city,
-          amount: total,
-          // Referência só na descrição (MAI 02). TXID deve permanecer "***" no BR Code estático.
-          description: `PEDIDO${orderNumber}`,
-        });
-        // Never return an empty/invalid payload as a QR.
-        if (qrCode && qrCode.length > 20) {
-          const normalizedKey = normalizePixKey(pixKey);
-          pixPayment = {
-            paymentId: `static_${trackingId}`,
-            qrCode,
-            qrCodeBase64: "",
-            pixKey: normalizedKey,
-          };
-          meta.pixCopyPaste = qrCode;
-          meta.pixKey = normalizedKey;
-        } else {
-          pixConfigured = false;
-          pixUnavailableReason = "Não foi possível gerar o QR Code Pix. Verifique a chave cadastrada no painel.";
+      if (useOnline) {
+        if (!mpSettings) {
+          res.status(400).json({
+            error: "PIX Online indisponível no momento. Use o PIX Manual ou tente novamente.",
+          });
+          return;
         }
+        const [companyRow] = await db.select().from(companiesTable).where(eq(companiesTable.id, companyId));
+        const slug = companyRow?.slug || req.companySlug || "burger-gn";
+        const notificationUrl = mercadoPagoNotificationUrl(req, slug);
+        const mp = await createPixPayment({
+          accessToken: mpSettings.accessToken,
+          total,
+          trackingId,
+          customerName: body.customerName,
+          phone: body.phone,
+          notificationUrl,
+        });
+        if (!mp?.qrCode) {
+          res.status(502).json({
+            error: "Não foi possível gerar o PIX Online do Mercado Pago. Tente novamente ou use o PIX Manual.",
+          });
+          return;
+        }
+        pixMode = "online";
+        pixConfigured = true;
+        mpPaymentId = mp.paymentId;
+        pixPayment = {
+          paymentId: mp.paymentId,
+          qrCode: mp.qrCode,
+          qrCodeBase64: mp.qrCodeBase64 || "",
+        };
+        meta.pixMode = "online";
+        meta.pixCopyPaste = mp.qrCode;
       } else {
-        pixUnavailableReason = "A chave Pix da loja precisa ser cadastrada em Admin → Config → Pagamento.";
+        if (!pixManualEnabled) {
+          res.status(400).json({ error: "PIX Manual está desativado. Use o PIX Online." });
+          return;
+        }
+        pixMode = "manual";
+        meta.pixMode = "manual";
+        const pixKey = pixCfg?.key?.trim() || "";
+        if (pixKey) {
+          pixConfigured = true;
+          const qrCode = buildStaticPixPayload({
+            key: pixKey,
+            merchantName: pixCfg!.name,
+            merchantCity: pixCfg!.city,
+            amount: total,
+            description: `PEDIDO${orderNumber}`,
+          });
+          if (qrCode && qrCode.length > 20) {
+            const normalizedKey = normalizePixKey(pixKey);
+            pixPayment = {
+              paymentId: `static_${trackingId}`,
+              qrCode,
+              qrCodeBase64: "",
+              pixKey: normalizedKey,
+            };
+            meta.pixCopyPaste = qrCode;
+            meta.pixKey = normalizedKey;
+          } else {
+            pixConfigured = false;
+            pixUnavailableReason = "Não foi possível gerar o QR Code Pix. Verifique a chave cadastrada no painel.";
+          }
+        } else {
+          pixUnavailableReason = "A chave Pix da loja precisa ser cadastrada em Admin → Config → Pagamento.";
+        }
       }
     }
 
@@ -537,6 +594,7 @@ router.post("/orders", resolvePublicCompany, async (req, res) => {
         discountAmount: String(discountAmount.toFixed(2)),
         couponCode: validatedCouponCode,
         total: String(total.toFixed(2)),
+        mpPaymentId,
       }).returning();
 
       await tx.insert(orderItemsTable).values(
@@ -624,12 +682,12 @@ router.post("/orders", resolvePublicCompany, async (req, res) => {
       }
     }
 
-    // cardCheckoutUrl kept null — Mercado Pago intentionally not wired yet (future-ready)
-    // paymentStatus stays DB default "pending"; Pix/receipt never auto-accepts the order.
+    // cardCheckoutUrl kept null — online card checkout is reserved for a later switch.
     res.status(201).json({
       ok: true, trackingId, orderNumber, orderId: result.id,
       deliveryFee, distanceKm: customerDistanceKm, discountAmount, couponCode: validatedCouponCode,
-      pixPayment, pixConfigured, pixUnavailableReason, cardCheckoutUrl: null,
+      pixPayment, pixConfigured, pixUnavailableReason, pixMode,
+      cardCheckoutUrl: null,
       paymentStatus: "pending",
       workflow: isPix ? "awaiting_payment" : "new",
     });
@@ -679,8 +737,27 @@ router.get("/orders/track/:trackingId", async (req, res) => {
     const { trackingId } = req.params as { trackingId: string };
     const [order] = await db.select().from(ordersTable).where(eq(ordersTable.trackingId, trackingId));
     if (!order) { res.status(404).json({ error: "Order not found" }); return; }
-    const items = await db.select().from(orderItemsTable).where(eq(orderItemsTable.orderId, order.id));
-    res.json({ ...enrichOrder(order), items });
+
+    // Backup to the official webhook: if PIX Online is still pending, re-fetch Mercado Pago.
+    if (order.paymentMethod === "pix" && order.paymentStatus === "pending" && order.mpPaymentId) {
+      const token = await getMPAccessToken(order.companyId);
+      if (token) {
+        const payment = await fetchMPPayment(token, order.mpPaymentId);
+        if (payment?.status) {
+          await applyMercadoPagoStatus({
+            companyId: order.companyId,
+            trackingId: order.trackingId,
+            paymentId: payment.id,
+            mpStatus: payment.status,
+          });
+        }
+      }
+    }
+
+    const [fresh] = await db.select().from(ordersTable).where(eq(ordersTable.trackingId, trackingId));
+    const live = fresh ?? order;
+    const items = await db.select().from(orderItemsTable).where(eq(orderItemsTable.orderId, live.id));
+    res.json({ ...enrichOrder(live), items });
   } catch (err) {
     req.log.error({ err }, "Failed to track order");
     res.status(500).json({ error: "Internal server error" });
@@ -1026,6 +1103,12 @@ router.post("/orders/track/:trackingId/receipt", async (req, res) => {
     }
 
     const { publicNotes, meta } = parseOrderNotes(existing.notes);
+    if (meta.pixMode === "online") {
+      res.status(400).json({
+        error: "Este pedido usa PIX Online. O pagamento é confirmado automaticamente pelo Mercado Pago.",
+      });
+      return;
+    }
     let nextMeta: OrderMeta = {
       ...meta,
       receiptDataUrl,

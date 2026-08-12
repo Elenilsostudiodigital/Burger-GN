@@ -11,6 +11,7 @@ declare global {
     interface Request {
       companyId?: number;
       companyUserId?: number;
+      companySlug?: string;
     }
   }
 }

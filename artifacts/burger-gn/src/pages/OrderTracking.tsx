@@ -4,7 +4,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   trackOrder, getPaymentSettings, submitOrderReview, uploadOrderReceipt, getPublicClubeMe, Order,
   PublicClubeMeResponse,
-  ORDER_TYPE_LABELS, PAYMENT_METHOD_LABELS, PAYMENT_STATUS_LABELS, WORKFLOW_LABELS,
+  ORDER_TYPE_LABELS, PAYMENT_STATUS_LABELS, WORKFLOW_LABELS,
+  formatPaymentMethod,
   isAllowedReceiptFile, RECEIPT_ACCEPT, customerInAppStatusMessage,
 } from '../lib/api';
 import {
@@ -13,7 +14,7 @@ import {
 } from '../lib/myOrder';
 import { notifyOrderStatusChange } from '../lib/pushNotifications';
 import { buildPostDeliverySurveyMessage, sendPostDeliverySurveyWhenReady } from '../lib/whatsappFuture';
-import { ArrowLeft, Clock, Home, AlertCircle, Timer, Star, Loader2, Camera, ImageIcon, Upload } from 'lucide-react';
+import { ArrowLeft, Clock, Home, AlertCircle, Timer, Star, Loader2, Camera, ImageIcon, Upload, Copy, Check } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { PageTransition } from '../components/PageTransition';
 import { BottomNav } from '../components/BottomNav';
@@ -99,6 +100,7 @@ function OrderTimelineView({ trackingId }: { trackingId: string }) {
   const [uploadingReceipt, setUploadingReceipt] = useState(false);
   const [receiptError, setReceiptError] = useState('');
   const [receiptOk, setReceiptOk] = useState(false);
+  const [copiedPix, setCopiedPix] = useState(false);
   const [statusToast, setStatusToast] = useState<{ title: string; body: string } | null>(null);
   const [celebrationKind, setCelebrationKind] = useState<ClubeCelebrationKind>('returning');
   const [celebrationCashback, setCelebrationCashback] = useState<string | undefined>();
@@ -347,6 +349,7 @@ function OrderTimelineView({ trackingId }: { trackingId: string }) {
     now: prepTick,
   });
   const pixNeedsReceipt = order.paymentMethod === 'pix'
+    && order.pixMode !== 'online'
     && order.paymentStatus !== 'paid'
     && order.status !== 'cancelled';
   const paymentConfirmed = order.paymentMethod === 'pix'
@@ -388,13 +391,15 @@ function OrderTimelineView({ trackingId }: { trackingId: string }) {
     if (order.paymentMethod === 'pix' && order.paymentStatus === 'paid' && order.workflow === 'new') {
       return { emoji: '🎉', title: 'Pagamento confirmado', sub: 'Seu pedido foi enviado para análise da loja.' };
     }
-    if (order.workflow === 'awaiting_payment' || (order.paymentMethod === 'pix' && order.receiptDataUrl && order.paymentStatus !== 'paid')) {
+    if (order.workflow === 'awaiting_payment' || (order.paymentMethod === 'pix' && order.pixMode !== 'online' && order.receiptDataUrl && order.paymentStatus !== 'paid')) {
       return {
         emoji: '🟡',
-        title: WORKFLOW_LABELS.awaiting_payment,
-        sub: order.receiptRejectReason
-          ? `Comprovante recusado: ${order.receiptRejectReason}`
-          : 'Seu pagamento será analisado por nossa equipe.',
+        title: order.pixMode === 'online' ? 'Aguardando pagamento Pix' : WORKFLOW_LABELS.awaiting_payment,
+        sub: order.pixMode === 'online'
+          ? 'Pague via PIX do Mercado Pago. A aprovação é automática.'
+          : order.receiptRejectReason
+            ? `Comprovante recusado: ${order.receiptRejectReason}`
+            : 'Seu pagamento será analisado por nossa equipe.',
       };
     }
     return {
@@ -570,6 +575,29 @@ function OrderTimelineView({ trackingId }: { trackingId: string }) {
           </motion.div>
         )}
 
+        {!cancelled && order.paymentMethod === 'pix' && order.pixMode === 'online' && order.paymentStatus !== 'paid' && order.pixCopyPaste && (
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+            className="rounded-3xl border border-amber-500/30 bg-zinc-900 p-5 space-y-3">
+            <h3 className="text-white font-black uppercase text-xs tracking-wider">PIX Online — Mercado Pago</h3>
+            <p className="text-zinc-400 text-xs">Pague via PIX do Mercado Pago. Aprovação automática.</p>
+            <div className="flex gap-2">
+              <div className="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-zinc-400 text-xs font-mono truncate">
+                {order.pixCopyPaste}
+              </div>
+              <button type="button" onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(order.pixCopyPaste || '');
+                  setCopiedPix(true);
+                  setTimeout(() => setCopiedPix(false), 2500);
+                } catch { /* ignore */ }
+              }}
+                className={`shrink-0 px-3 rounded-lg font-bold text-xs flex items-center gap-1.5 ${copiedPix ? 'bg-green-500/20 text-green-400' : 'bg-amber-500 text-zinc-950'}`}>
+                {copiedPix ? <Check size={14} /> : <Copy size={14} />} {copiedPix ? 'Copiado!' : 'Copiar'}
+              </button>
+            </div>
+          </motion.div>
+        )}
+
         {!cancelled && pixNeedsReceipt && (
           <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
             className="rounded-3xl border border-amber-500/30 bg-zinc-900 p-5 space-y-3">
@@ -715,7 +743,7 @@ function OrderTimelineView({ trackingId }: { trackingId: string }) {
             <div className="flex justify-between items-center">
               <span>Pagamento</span>
               <span className="flex items-center gap-1.5">
-                {PAYMENT_METHOD_LABELS[order.paymentMethod]}
+                {formatPaymentMethod(order)}
                 <span className={`text-[9px] font-black uppercase px-1.5 py-0.5 rounded ${
                   order.paymentStatus === 'paid' ? 'bg-green-500/15 text-green-400' : 'bg-zinc-700/40 text-zinc-400'
                 }`}>{PAYMENT_STATUS_LABELS[order.paymentStatus]}</span>

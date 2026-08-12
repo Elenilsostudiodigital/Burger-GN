@@ -5,6 +5,8 @@ export const paymentSettingsTable = pgTable("payment_settings", {
   id: serial("id").primaryKey(),
   companyId: integer("company_id").notNull().unique().references(() => companiesTable.id, { onDelete: "cascade" }),
   onlinePaymentEnabled: boolean("online_payment_enabled").notNull().default(false),
+  /** Store PIX key (static QR) as backup when Mercado Pago is unavailable. */
+  pixManualEnabled: boolean("pix_manual_enabled").notNull().default(true),
   gatewayProvider: text("gateway_provider").notNull().default(""), // 'mercadopago' | 'stripe' | ''
   cashOnDeliveryEnabled: boolean("cash_on_delivery_enabled").notNull().default(true),
   mercadoPagoAccessToken: text("mercado_pago_access_token"),

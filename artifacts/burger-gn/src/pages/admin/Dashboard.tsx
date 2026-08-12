@@ -11,7 +11,8 @@ import {
   openCustomerWhatsapp, buildCustomerNotifyMessage, WHATSAPP_EXTERNAL_ENABLED,
   REJECT_REASON_SUGGESTIONS, RECEIPT_REJECT_SUGGESTIONS,
   Order, WorkflowStage, PrepDayStats,
-  ORDER_TYPE_LABELS, PAYMENT_METHOD_LABELS, PAYMENT_STATUS_LABELS, CARD_TYPE_LABELS, WORKFLOW_LABELS,
+  ORDER_TYPE_LABELS, PAYMENT_STATUS_LABELS, WORKFLOW_LABELS,
+  formatPaymentMethod,
 } from '../../lib/api';
 import {
   LayoutDashboard, UtensilsCrossed, LogOut, Bell, BellOff,
@@ -64,6 +65,7 @@ function timeAgo(dateStr: string) {
 
 function needsPaymentConference(order: Order): boolean {
   return order.paymentMethod === 'pix'
+    && order.pixMode !== 'online'
     && !!order.receiptDataUrl
     && order.paymentStatus !== 'paid'
     && order.status !== 'cancelled';
@@ -148,8 +150,7 @@ function buildReceiptHTML(order: Order): string {
   <b>Tel:</b> ${order.phone}<br>
   <b>Tipo:</b> ${ORDER_TYPE_LABELS[order.orderType]}<br>
   ${order.orderType === 'delivery' ? `<b>End.:</b> ${order.address}, ${order.neighborhood}<br>` : ''}
-  <b>Pagamento:</b> ${PAYMENT_METHOD_LABELS[order.paymentMethod]}
-  ${order.cardType ? ` (${CARD_TYPE_LABELS[order.cardType]})` : ''}
+  <b>Pagamento:</b> ${formatPaymentMethod(order)}
   ${order.changeFor ? ` (troco p/ ${fmt(order.changeFor)})` : ''}</p>
   <table>${items}</table>
   <table class="total">
@@ -270,8 +271,7 @@ function OrderCard({ order, highlight, dragging, onAccept, onRefuse, onAdvance, 
           {ORDER_TYPE_LABELS[order.orderType]}
         </span>
         <span className="font-bold uppercase px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-300">
-          {PAYMENT_METHOD_LABELS[order.paymentMethod]}
-          {order.cardType ? ` · ${CARD_TYPE_LABELS[order.cardType]}` : ''}
+          {formatPaymentMethod(order)}
         </span>
         <span
           className={`font-black uppercase px-1.5 py-0.5 rounded ${
