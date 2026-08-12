@@ -121,8 +121,8 @@ export function HorizontalScrollNav({
   }, [children, scrollActiveIntoView]);
 
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    // Only primary mouse button / touch / pen — let buttons/links still work on click
-    if (e.pointerType === "mouse" && e.button !== 0) return;
+    // Drag-to-scroll is mouse-only so touch keeps native swipe/momentum
+    if (e.pointerType !== "mouse" || e.button !== 0) return;
     const el = scrollerRef.current;
     if (!el) return;
     dragRef.current = {
