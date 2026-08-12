@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
-import { Link, useLocation } from 'wouter';
+import { useLocation } from 'wouter';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   DndContext, DragOverlay, PointerSensor, TouchSensor, useSensor, useSensors,
@@ -14,10 +14,10 @@ import {
   ORDER_TYPE_LABELS, PAYMENT_METHOD_LABELS, PAYMENT_STATUS_LABELS, CARD_TYPE_LABELS, WORKFLOW_LABELS,
 } from '../../lib/api';
 import {
-  LayoutDashboard, UtensilsCrossed, LogOut, Bell, BellOff,
+  LogOut, Bell, BellOff,
   Printer, Clock, MessageCircle, History,
-  XCircle, Tag, MapPin, Navigation, Settings, Route, Upload, TrendingUp,
-  ChevronLeft, ChevronRight, GripVertical, X, Crown, Filter, ImageIcon, CheckCircle2, Check, Ban, Star, Users,
+  XCircle, MapPin, Route,
+  ChevronLeft, ChevronRight, GripVertical, X, Filter, ImageIcon, CheckCircle2, Check, Ban,
 } from 'lucide-react';
 import { PrepCountdown, prepCardBorderClass } from '../../components/PrepCountdown';
 import {
@@ -25,6 +25,8 @@ import {
   formatPrepDuration,
   getPrepVisualState,
 } from '../../lib/prepTimer';
+import { AdminBottomNav } from '../../components/AdminBottomNav';
+import { HorizontalScrollNav } from '../../components/HorizontalScrollNav';
 
 /** Board columns — pending orders never auto-advance. */
 type ColumnKey = 'new' | 'preparing' | 'ready' | 'out' | 'done';
@@ -886,21 +888,26 @@ export default function AdminDashboard() {
           </div>
         </div>
 
-        <div className="max-w-[1800px] mx-auto mt-3 flex items-center gap-2 overflow-x-auto no-scrollbar">
+        <HorizontalScrollNav
+          className="max-w-[1800px] mx-auto mt-3"
+          contentClassName="items-center gap-2"
+        >
           <Filter size={14} className="text-zinc-600 shrink-0" />
           <button type="button" onClick={() => setFilter('all')}
-            className={`shrink-0 px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${filter === 'all' ? 'bg-amber-500 text-zinc-950' : 'bg-zinc-900 text-zinc-500 border border-zinc-800'}`}>
+            data-nav-active={filter === 'all' ? 'true' : undefined}
+            className={`shrink-0 px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider whitespace-nowrap ${filter === 'all' ? 'bg-amber-500 text-zinc-950' : 'bg-zinc-900 text-zinc-500 border border-zinc-800'}`}>
             Todos ({orders.filter(o => o.status !== 'cancelled').length})
           </button>
           {COLUMNS.map(col => (
             <button key={col.key} type="button" onClick={() => setFilter(col.key)}
-              className={`shrink-0 px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+              data-nav-active={filter === col.key ? 'true' : undefined}
+              className={`shrink-0 px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider whitespace-nowrap ${
                 filter === col.key ? col.badgeClass : 'bg-zinc-900 text-zinc-500 border border-zinc-800'
               }`}>
               {col.label} ({ordersByColumn[col.key].length})
             </button>
           ))}
-        </div>
+        </HorizontalScrollNav>
 
         {prepStats && (
           <div className="max-w-[1800px] mx-auto mt-3 grid grid-cols-3 gap-2">
@@ -1091,31 +1098,7 @@ export default function AdminDashboard() {
         )}
       </AnimatePresence>
 
-      <nav className="sticky bottom-0 left-0 right-0 bg-zinc-950/95 backdrop-blur border-t border-zinc-800 z-40">
-        <div className="max-w-[1800px] mx-auto flex overflow-x-auto no-scrollbar">
-          {[
-            { href: '/admin', icon: TrendingUp, label: 'Início', active: false },
-            { href: '/admin/pedidos', icon: LayoutDashboard, label: 'Pedidos', active: true },
-            { href: '/admin/clientes', icon: Users, label: 'Clientes', active: false },
-            { href: '/admin/avaliacoes', icon: Star, label: 'Avaliações', active: false },
-            { href: '/admin/cardapio', icon: UtensilsCrossed, label: 'Cardápio' },
-            { href: '/admin/financeiro', icon: TrendingUp, label: 'Financeiro' },
-            { href: '/admin/cupons', icon: Tag, label: 'Cupons' },
-            { href: '/admin/clube', icon: Crown, label: 'Clube' },
-            { href: '/admin/taxas', icon: MapPin, label: 'Bairros' },
-            { href: '/admin/entrega-km', icon: Navigation, label: 'Por KM' },
-            { href: '/admin/config', icon: Settings, label: 'Config' },
-            { href: '/admin/importar', icon: Upload, label: 'Importar' },
-          ].map(item => (
-            <Link key={item.href} href={item.href} className="flex-1 min-w-[64px]">
-              <div className={`flex flex-col items-center gap-0.5 py-2.5 ${item.active ? 'text-amber-500' : 'text-zinc-500 hover:text-white'}`}>
-                <item.icon size={18} />
-                <span className="text-[9px] font-bold uppercase">{item.label}</span>
-              </div>
-            </Link>
-          ))}
-        </div>
-      </nav>
+      <AdminBottomNav active="/admin/pedidos" />
     </div>
   );
 }

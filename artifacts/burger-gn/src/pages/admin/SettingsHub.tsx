@@ -8,44 +8,16 @@ import {
 } from '../../lib/api';
 import { useAdmin } from '../../context/AdminContext';
 import {
-  LayoutDashboard, UtensilsCrossed, Tag, MapPin, Navigation, Settings,
+  MapPin, Settings,
   LogOut, Plus, Pencil, Trash2, Check, X, ToggleLeft, ToggleRight,
-  Loader2, CreditCard, Link as LinkIcon, ShieldAlert, ShieldCheck, Upload,
-  MessageCircle, TrendingUp, Crown, Star, Clock,
+  Loader2, CreditCard, Link as LinkIcon, ShieldAlert, ShieldCheck,
+  MessageCircle, Clock,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-
-function AdminNav({ active }: { active: string }) {
-  const items = [
-    { href: '/admin', icon: <TrendingUp size={17} />, label: 'Início' },
-    { href: '/admin/pedidos', icon: <LayoutDashboard size={17} />, label: 'Pedidos' },
-    { href: '/admin/avaliacoes', icon: <Star size={17} />, label: 'Avaliações' },
-    { href: '/admin/cardapio', icon: <UtensilsCrossed size={17} />, label: 'Cardápio' },
-    { href: '/admin/financeiro', icon: <TrendingUp size={17} />, label: 'Financeiro' },
-    { href: '/admin/cupons', icon: <Tag size={17} />, label: 'Cupons' },
-    { href: '/admin/clube', icon: <Crown size={17} />, label: 'Clube' },
-    { href: '/admin/taxas', icon: <MapPin size={17} />, label: 'Bairros' },
-    { href: '/admin/entrega-km', icon: <Navigation size={17} />, label: 'Por KM' },
-    { href: '/admin/config', icon: <Settings size={17} />, label: 'Config' },
-    { href: '/admin/importar', icon: <Upload size={17} />, label: 'Importar' },
-  ];
-  return (
-    <nav className="fixed bottom-0 left-0 right-0 bg-zinc-950/95 backdrop-blur border-t border-zinc-800 z-40">
-      <div className="max-w-3xl mx-auto flex overflow-x-auto no-scrollbar">
-        {items.map(item => (
-          <Link key={item.href} href={item.href} className="flex-1 min-w-[64px]">
-            <div className={`flex flex-col items-center gap-0.5 py-2.5 transition-colors ${active === item.href ? 'text-amber-500' : 'text-zinc-500 hover:text-white'}`}>
-              {item.icon}
-              <span className="text-[9px] font-bold uppercase">{item.label}</span>
-            </div>
-          </Link>
-        ))}
-      </div>
-    </nav>
-  );
-}
+import { AdminBottomNav } from '../../components/AdminBottomNav';
+import { HorizontalScrollNav } from '../../components/HorizontalScrollNav';
 
 type Tab = 'pagamento' | 'preparo' | 'links' | 'whatsapp' | 'ruas';
 
@@ -530,28 +502,33 @@ export default function SettingsHub() {
       </header>
 
       <main className="max-w-2xl mx-auto px-4 py-5 space-y-5">
-        <div className="flex gap-2 overflow-x-auto no-scrollbar">
+        <HorizontalScrollNav contentClassName="gap-2">
           <button onClick={() => setTab('pagamento')}
-            className={`shrink-0 flex-1 min-w-[7rem] h-11 rounded-xl font-bold text-sm uppercase tracking-wide transition-all flex items-center justify-center gap-2 ${tab === 'pagamento' ? 'bg-amber-500 text-zinc-950' : 'bg-zinc-900 text-zinc-400 border border-zinc-800'}`}>
+            data-nav-active={tab === 'pagamento' ? 'true' : undefined}
+            className={`shrink-0 flex-1 min-w-[7rem] h-11 rounded-xl font-bold text-sm uppercase tracking-wide transition-all flex items-center justify-center gap-2 whitespace-nowrap ${tab === 'pagamento' ? 'bg-amber-500 text-zinc-950' : 'bg-zinc-900 text-zinc-400 border border-zinc-800'}`}>
             <CreditCard size={16} /> Pagamento
           </button>
           <button onClick={() => setTab('preparo')}
-            className={`shrink-0 flex-1 min-w-[7rem] h-11 rounded-xl font-bold text-sm uppercase tracking-wide transition-all flex items-center justify-center gap-2 ${tab === 'preparo' ? 'bg-amber-500 text-zinc-950' : 'bg-zinc-900 text-zinc-400 border border-zinc-800'}`}>
+            data-nav-active={tab === 'preparo' ? 'true' : undefined}
+            className={`shrink-0 flex-1 min-w-[7rem] h-11 rounded-xl font-bold text-sm uppercase tracking-wide transition-all flex items-center justify-center gap-2 whitespace-nowrap ${tab === 'preparo' ? 'bg-amber-500 text-zinc-950' : 'bg-zinc-900 text-zinc-400 border border-zinc-800'}`}>
             <Clock size={16} /> Tempo de Preparo
           </button>
           <button onClick={() => setTab('links')}
-            className={`shrink-0 flex-1 min-w-[7rem] h-11 rounded-xl font-bold text-sm uppercase tracking-wide transition-all flex items-center justify-center gap-2 ${tab === 'links' ? 'bg-amber-500 text-zinc-950' : 'bg-zinc-900 text-zinc-400 border border-zinc-800'}`}>
+            data-nav-active={tab === 'links' ? 'true' : undefined}
+            className={`shrink-0 flex-1 min-w-[7rem] h-11 rounded-xl font-bold text-sm uppercase tracking-wide transition-all flex items-center justify-center gap-2 whitespace-nowrap ${tab === 'links' ? 'bg-amber-500 text-zinc-950' : 'bg-zinc-900 text-zinc-400 border border-zinc-800'}`}>
             <LinkIcon size={16} /> Links Externos
           </button>
           <button onClick={() => setTab('whatsapp')}
-            className={`shrink-0 flex-1 min-w-[7rem] h-11 rounded-xl font-bold text-sm uppercase tracking-wide transition-all flex items-center justify-center gap-2 ${tab === 'whatsapp' ? 'bg-amber-500 text-zinc-950' : 'bg-zinc-900 text-zinc-400 border border-zinc-800'}`}>
+            data-nav-active={tab === 'whatsapp' ? 'true' : undefined}
+            className={`shrink-0 flex-1 min-w-[7rem] h-11 rounded-xl font-bold text-sm uppercase tracking-wide transition-all flex items-center justify-center gap-2 whitespace-nowrap ${tab === 'whatsapp' ? 'bg-amber-500 text-zinc-950' : 'bg-zinc-900 text-zinc-400 border border-zinc-800'}`}>
             <MessageCircle size={16} /> WhatsApp
           </button>
           <button onClick={() => setTab('ruas')}
-            className={`shrink-0 flex-1 min-w-[7rem] h-11 rounded-xl font-bold text-sm uppercase tracking-wide transition-all flex items-center justify-center gap-2 ${tab === 'ruas' ? 'bg-amber-500 text-zinc-950' : 'bg-zinc-900 text-zinc-400 border border-zinc-800'}`}>
+            data-nav-active={tab === 'ruas' ? 'true' : undefined}
+            className={`shrink-0 flex-1 min-w-[7rem] h-11 rounded-xl font-bold text-sm uppercase tracking-wide transition-all flex items-center justify-center gap-2 whitespace-nowrap ${tab === 'ruas' ? 'bg-amber-500 text-zinc-950' : 'bg-zinc-900 text-zinc-400 border border-zinc-800'}`}>
             <MapPin size={16} /> Ruas de Entrega
           </button>
-        </div>
+        </HorizontalScrollNav>
 
         {tab === 'pagamento' ? <PaymentTab /> : tab === 'preparo' ? <PrepTimeTab /> : tab === 'links' ? <LinksTab /> : tab === 'whatsapp' ? <WhatsappTab /> : (
           <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-5 space-y-3">
@@ -571,7 +548,7 @@ export default function SettingsHub() {
         )}
       </main>
 
-      <AdminNav active="/admin/config" />
+      <AdminBottomNav active="/admin/config" />
     </div>
   );
 }

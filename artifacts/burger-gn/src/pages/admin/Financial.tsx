@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Link, useLocation } from 'wouter';
+import { useLocation } from 'wouter';
 import { motion } from 'framer-motion';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
@@ -11,43 +11,14 @@ import {
 import { getFinancialReport, FinancialReport, PAYMENT_METHOD_LABELS } from '../../lib/api';
 import { useAdmin } from '../../context/AdminContext';
 import {
-  LayoutDashboard, UtensilsCrossed, Tag, MapPin, Navigation, Settings,
-  LogOut, Upload, TrendingUp, Wallet, ShoppingBag, CheckCircle2, XCircle,
+  LogOut, TrendingUp, Wallet, ShoppingBag, CheckCircle2, XCircle,
   Clock, Users, UserPlus, Repeat, Truck, Star, Crown, FileDown, FileSpreadsheet,
   Loader2, DollarSign, Wallet2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-
-function AdminNav({ active }: { active: string }) {
-  const items = [
-    { href: '/admin', icon: <TrendingUp size={17} />, label: 'Início' },
-    { href: '/admin/pedidos', icon: <LayoutDashboard size={17} />, label: 'Pedidos' },
-    { href: '/admin/cardapio', icon: <UtensilsCrossed size={17} />, label: 'Cardápio' },
-    { href: '/admin/financeiro', icon: <TrendingUp size={17} />, label: 'Financeiro' },
-    { href: '/admin/cupons', icon: <Tag size={17} />, label: 'Cupons' },
-    { href: '/admin/clube', icon: <Crown size={17} />, label: 'Clube Burger' },
-    { href: '/admin/taxas', icon: <MapPin size={17} />, label: 'Bairros' },
-    { href: '/admin/entrega-km', icon: <Navigation size={17} />, label: 'Por KM' },
-    { href: '/admin/config', icon: <Settings size={17} />, label: 'Config' },
-    { href: '/admin/importar', icon: <Upload size={17} />, label: 'Importar' },
-  ];
-  return (
-    <nav className="fixed bottom-0 left-0 right-0 bg-zinc-950/95 backdrop-blur border-t border-zinc-800 z-40 overflow-x-auto no-scrollbar">
-      <div className="max-w-3xl mx-auto flex min-w-max">
-        {items.map(item => (
-          <Link key={item.href} href={item.href} className="flex-1 min-w-[12%]">
-            <div className={`flex flex-col items-center gap-0.5 py-2.5 px-2 transition-colors ${active === item.href ? 'text-amber-500' : 'text-zinc-500 hover:text-white'}`}>
-              {item.icon}
-              <span className="text-[9px] font-bold uppercase whitespace-nowrap">{item.label}</span>
-            </div>
-          </Link>
-        ))}
-      </div>
-    </nav>
-  );
-}
+import { AdminBottomNav } from '../../components/AdminBottomNav';
 
 const PRESETS = [
   { key: '7d', label: '7 dias' },
@@ -439,7 +410,7 @@ export default function Financial() {
         ) : null}
       </main>
 
-      <AdminNav active="/admin/financeiro" />
+      <AdminBottomNav active="/admin/financeiro" />
     </div>
   );
 }

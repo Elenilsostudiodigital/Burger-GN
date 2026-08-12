@@ -11,6 +11,7 @@ import {
 } from '../../lib/api';
 import { AdminBottomNav } from '../../components/AdminBottomNav';
 import { ClientsSubnav } from '../../components/ClientsSubnav';
+import { HorizontalScrollNav } from '../../components/HorizontalScrollNav';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -214,13 +215,14 @@ export default function ClientsRecovery() {
               className="w-full h-12 rounded-xl bg-zinc-900 border border-zinc-800 pl-10 pr-3 text-sm text-white placeholder:text-zinc-600 focus:border-amber-500 focus:outline-none"
             />
           </div>
-          <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
+          <HorizontalScrollNav contentClassName="gap-2 pb-1">
             {FILTERS.map((f) => (
               <button
                 key={f.id}
                 type="button"
                 onClick={() => setFilter(f.id)}
-                className={`shrink-0 h-10 px-3 rounded-xl text-[11px] font-black uppercase ${
+                data-nav-active={filter === f.id ? 'true' : undefined}
+                className={`shrink-0 h-10 px-3 rounded-xl text-[11px] font-black uppercase whitespace-nowrap ${
                   filter === f.id
                     ? 'bg-amber-500 text-zinc-950'
                     : 'bg-zinc-900 border border-zinc-800 text-zinc-400'
@@ -229,7 +231,7 @@ export default function ClientsRecovery() {
                 {f.emoji} {f.label}
               </button>
             ))}
-          </div>
+          </HorizontalScrollNav>
         </div>
 
         {toast && (
