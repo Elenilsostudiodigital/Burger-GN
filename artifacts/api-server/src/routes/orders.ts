@@ -27,6 +27,7 @@ import {
   serializeClientNotes,
 } from "../lib/clientMeta";
 import { applyOrderCompletionRewards } from "../lib/orderRewards";
+import { loadLatestDeliveryAnalysis, serializeDeliveryAnalysis } from "../lib/deliveryAnalysis";
 import { buildPublicClubeMe, type PublicClubeMePayload } from "../lib/clubePublicMe";
 import {
   computePrepDayStats,
@@ -757,7 +758,12 @@ router.get("/orders/track/:trackingId", async (req, res) => {
     const [fresh] = await db.select().from(ordersTable).where(eq(ordersTable.trackingId, trackingId));
     const live = fresh ?? order;
     const items = await db.select().from(orderItemsTable).where(eq(orderItemsTable.orderId, live.id));
-    res.json({ ...enrichOrder(live), items });
+    const analysis = await loadLatestDeliveryAnalysis(live.id);
+    res.json({
+      ...enrichOrder(live),
+      items,
+      deliveryAnalysis: analysis ? serializeDeliveryAnalysis(analysis) : null,
+    });
   } catch (err) {
     req.log.error({ err }, "Failed to track order");
     res.status(500).json({ error: "Internal server error" });

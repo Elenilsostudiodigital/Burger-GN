@@ -13,12 +13,14 @@ import {
   Order, WorkflowStage, PrepDayStats,
   ORDER_TYPE_LABELS, PAYMENT_STATUS_LABELS, WORKFLOW_LABELS,
   formatPaymentMethod,
+  getDeliveryAnalysisRequests, approveDeliveryAnalysis, rejectDeliveryAnalysis,
+  DeliveryAnalysisRequest,
 } from '../../lib/api';
 import {
   LayoutDashboard, UtensilsCrossed, LogOut, Bell, BellOff,
   Printer, Clock, MessageCircle, History,
   XCircle, Tag, MapPin, Navigation, Settings, Route, Upload, TrendingUp,
-  ChevronLeft, ChevronRight, GripVertical, X, Crown, Filter, ImageIcon, CheckCircle2, Check, Ban, Star, Users,
+  ChevronLeft, ChevronRight, GripVertical, X, Crown, Filter, ImageIcon, CheckCircle2, Check, Ban, Star, Users, AlertTriangle,
 } from 'lucide-react';
 import { PrepCountdown, prepCardBorderClass } from '../../components/PrepCountdown';
 import {
@@ -48,6 +50,24 @@ const COLUMNS: ColumnDef[] = [
 
 const COLUMN_ORDER: ColumnKey[] = COLUMNS.map(c => c.key);
 const SOUND_STORAGE_KEY = 'admin_sound_enabled';
+const ANALYSIS_HEARD_KEY = 'admin_delivery_analysis_heard';
+
+function loadAnalysisHeard(): Set<number> {
+  try {
+    const raw = sessionStorage.getItem(ANALYSIS_HEARD_KEY);
+    const parsed = raw ? JSON.parse(raw) as unknown : [];
+    if (!Array.isArray(parsed)) return new Set();
+    return new Set(parsed.filter((n): n is number => typeof n === 'number'));
+  } catch {
+    return new Set();
+  }
+}
+
+function persistAnalysisHeard(ids: Set<number>) {
+  try {
+    sessionStorage.setItem(ANALYSIS_HEARD_KEY, JSON.stringify([...ids]));
+  } catch { /* ignore */ }
+}
 
 function fmt(val: string) { return `R$ ${parseFloat(val).toFixed(2).replace('.', ',')}` }
 function formatTime(dateStr: string) {
@@ -164,8 +184,8 @@ function buildReceiptHTML(order: Order): string {
   </body></html>`;
 }
 
-function OrderCard({ order, highlight, dragging, onAccept, onRefuse, onAdvance, onBack, onConfirmPayment, onRefuseReceipt }: {
-  order: Order; highlight: boolean; dragging?: boolean;
+function OrderCard({ order, highlight, dragging, analysisPending, onAccept, onRefuse, onAdvance, onBack, onConfirmPayment, onRefuseReceipt }: {
+  order: Order; highlight: boolean; dragging?: boolean; analysisPending?: boolean;
   onAccept: (order: Order) => void;
   onRefuse: (order: Order) => void;
   onAdvance: (order: Order, workflow: ColumnKey) => void;
@@ -222,9 +242,16 @@ function OrderCard({ order, highlight, dragging, onAccept, onRefuse, onAdvance, 
       initial={{ opacity: 0, y: -10 }}
       animate={{ opacity: isDragging ? 0.3 : 1, y: 0 }}
       className={`rounded-2xl border overflow-hidden transition-colors touch-none ${
-        prepCardBorderClass(prepVisual, highlight)
+        analysisPending
+          ? 'border-amber-400 bg-amber-500/10 ring-2 ring-amber-400/70 shadow-[0_0_18px_rgba(251,191,36,0.25)]'
+          : prepCardBorderClass(prepVisual, highlight)
       } ${dragging ? 'shadow-2xl ring-2 ring-amber-500/60' : ''}`}
     >
+      {analysisPending && (
+        <div className="bg-amber-400 text-zinc-950 text-[10px] font-black uppercase tracking-wide px-3 py-1.5 flex items-center gap-1.5">
+          <AlertTriangle size={12} /> Atenção — análise de entrega pendente
+        </div>
+      )}
       <div className="p-3 pb-2 flex items-start gap-2">
         {!dragDisabled && (
           <button {...attributes} {...listeners}
@@ -497,8 +524,8 @@ function OrderCard({ order, highlight, dragging, onAccept, onRefuse, onAdvance, 
   );
 }
 
-function Column({ col, orders, newOrderIds, onAccept, onRefuse, onAdvance, onBack, onConfirmPayment, onRefuseReceipt }: {
-  col: ColumnDef; orders: Order[]; newOrderIds: Set<number>;
+function Column({ col, orders, newOrderIds, analysisOrderIds, onAccept, onRefuse, onAdvance, onBack, onConfirmPayment, onRefuseReceipt }: {
+  col: ColumnDef; orders: Order[]; newOrderIds: Set<number>; analysisOrderIds: Set<number>;
   onAccept: (order: Order) => void;
   onRefuse: (order: Order) => void;
   onAdvance: (order: Order, workflow: ColumnKey) => void;
@@ -524,6 +551,7 @@ function Column({ col, orders, newOrderIds, onAccept, onRefuse, onAdvance, onBac
             <div className="text-center py-10"><p className="text-zinc-700 text-xs font-medium">Nenhum pedido</p></div>
           ) : orders.map(order => (
             <OrderCard key={order.id} order={order} highlight={newOrderIds.has(order.id)}
+              analysisPending={analysisOrderIds.has(order.id)}
               onAccept={onAccept} onRefuse={onRefuse} onAdvance={onAdvance} onBack={onBack}
               onConfirmPayment={onConfirmPayment} onRefuseReceipt={onRefuseReceipt} />
           ))}
@@ -553,6 +581,12 @@ export default function AdminDashboard() {
   const [receiptRejectCustom, setReceiptRejectCustom] = useState('');
   const [receiptRefuseError, setReceiptRefuseError] = useState('');
   const [receiptRefuseSaving, setReceiptRefuseSaving] = useState(false);
+  const [pendingAnalyses, setPendingAnalyses] = useState<DeliveryAnalysisRequest[]>([]);
+  const [openAnalysis, setOpenAnalysis] = useState<DeliveryAnalysisRequest | null>(null);
+  const [analysisRejecting, setAnalysisRejecting] = useState(false);
+  const [analysisRejectReason, setAnalysisRejectReason] = useState('');
+  const [analysisActionError, setAnalysisActionError] = useState('');
+  const [analysisSaving, setAnalysisSaving] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState<boolean>(() => {
     const stored = localStorage.getItem(SOUND_STORAGE_KEY);
     return stored === null ? true : stored === 'true';
@@ -563,13 +597,38 @@ export default function AdminDashboard() {
     durationSeconds: number;
   } | null>(null);
   const soundEnabledRef = useRef(soundEnabled);
+  const analysisHeardRef = useRef<Set<number>>(loadAnalysisHeard());
+  const analysisInitialLoadRef = useRef(true);
 
   useEffect(() => { soundEnabledRef.current = soundEnabled; }, [soundEnabled]);
+
+  const ingestPendingAnalyses = useCallback((rows: DeliveryAnalysisRequest[], fromSse: boolean) => {
+    const pending = rows.filter(r => r.status === 'pending');
+    if (!fromSse) setPendingAnalyses(pending);
+    for (const row of pending) {
+      if (analysisHeardRef.current.has(row.id)) continue;
+      if (analysisInitialLoadRef.current && !fromSse) {
+        analysisHeardRef.current.add(row.id);
+        persistAnalysisHeard(analysisHeardRef.current);
+        continue;
+      }
+      analysisHeardRef.current.add(row.id);
+      persistAnalysisHeard(analysisHeardRef.current);
+      if (soundEnabledRef.current) playBeep();
+    }
+    if (!fromSse) analysisInitialLoadRef.current = false;
+  }, []);
 
   const fetchOrders = useCallback(async () => {
     try { setOrders(await getOrders()); } catch { /* ignore */ }
     finally { setLoading(false); }
   }, []);
+
+  const fetchPendingAnalyses = useCallback(async () => {
+    try {
+      ingestPendingAnalyses(await getDeliveryAnalysisRequests('pending'), false);
+    } catch { /* ignore */ }
+  }, [ingestPendingAnalyses]);
 
   const fetchPrepStats = useCallback(async () => {
     try { setPrepStats(await getPrepStats()); } catch { /* ignore */ }
@@ -578,12 +637,14 @@ export default function AdminDashboard() {
   useEffect(() => {
     fetchOrders();
     fetchPrepStats();
+    fetchPendingAnalyses();
     const interval = setInterval(() => {
       fetchOrders();
       fetchPrepStats();
+      fetchPendingAnalyses();
     }, 30000);
     return () => clearInterval(interval);
-  }, [fetchOrders, fetchPrepStats]);
+  }, [fetchOrders, fetchPrepStats, fetchPendingAnalyses]);
 
   useEffect(() => {
     fetchOrders();
@@ -630,9 +691,23 @@ export default function AdminDashboard() {
       setNotification('🔔 Status de pagamento atualizado');
       setTimeout(() => setNotification(null), 4000);
     });
+    es.addEventListener('delivery_analysis', (e) => {
+      try {
+        const row = JSON.parse((e as MessageEvent).data) as DeliveryAnalysisRequest;
+        if (row.status === 'pending') {
+          ingestPendingAnalyses([row], true);
+          setPendingAnalyses(prev => [row, ...prev.filter(r => r.id !== row.id)]);
+          setNotification(`⚠ Atenção — nova análise de entrega #${row.orderNumber}`);
+          setTimeout(() => setNotification(null), 8000);
+        } else {
+          setPendingAnalyses(prev => prev.filter(r => r.id !== row.id));
+          setOpenAnalysis(prev => prev?.id === row.id ? row : prev);
+        }
+      } catch { /* ignore */ }
+    });
 
     return () => es.close();
-  }, [fetchOrders]);
+  }, [fetchOrders, ingestPendingAnalyses]);
 
   const applyUpdated = (id: number, updated: Order) => {
     setOrders(prev => prev.map(o => o.id === id ? { ...o, ...updated, items: updated.items?.length ? updated.items : o.items } : o));
@@ -654,6 +729,48 @@ export default function AdminDashboard() {
       setNotification(err instanceof Error ? err.message : 'Não foi possível aceitar o pedido.');
       setTimeout(() => setNotification(null), 4000);
       fetchOrders();
+    }
+  };
+
+  const handleApproveAnalysis = async (row: DeliveryAnalysisRequest) => {
+    setAnalysisSaving(true);
+    setAnalysisActionError('');
+    try {
+      const res = await approveDeliveryAnalysis(row.id);
+      setPendingAnalyses(prev => prev.filter(r => r.id !== row.id));
+      setOpenAnalysis(null);
+      setAnalysisRejecting(false);
+      setAnalysisRejectReason('');
+      setNotification(`Análise de entrega #${res.deliveryAnalysis.orderNumber} aprovada`);
+      setTimeout(() => setNotification(null), 4000);
+    } catch (err) {
+      setAnalysisActionError(err instanceof Error ? err.message : 'Não foi possível aprovar a análise.');
+    } finally {
+      setAnalysisSaving(false);
+    }
+  };
+
+  const handleRejectAnalysis = async () => {
+    if (!openAnalysis) return;
+    const reason = analysisRejectReason.trim();
+    if (!reason) {
+      setAnalysisActionError('Informe o motivo da recusa da análise.');
+      return;
+    }
+    setAnalysisSaving(true);
+    setAnalysisActionError('');
+    try {
+      const res = await rejectDeliveryAnalysis(openAnalysis.id, reason);
+      setPendingAnalyses(prev => prev.filter(r => r.id !== openAnalysis.id));
+      setOpenAnalysis(null);
+      setAnalysisRejecting(false);
+      setAnalysisRejectReason('');
+      setNotification(`Análise de entrega #${res.deliveryAnalysis.orderNumber} recusada`);
+      setTimeout(() => setNotification(null), 4000);
+    } catch (err) {
+      setAnalysisActionError(err instanceof Error ? err.message : 'Não foi possível recusar a análise.');
+    } finally {
+      setAnalysisSaving(false);
     }
   };
 
@@ -798,6 +915,7 @@ export default function AdminDashboard() {
   }, [orders]);
 
   const cancelledOrders = useMemo(() => orders.filter(o => o.status === 'cancelled'), [orders]);
+  const analysisOrderIds = useMemo(() => new Set(pendingAnalyses.map(r => r.orderId)), [pendingAnalyses]);
   const activeCount = orders.filter(o => o.status !== 'cancelled' && o.status !== 'done').length;
   const newCount = ordersByColumn.new.length;
   const receiptPending = orders.filter(o => o.receiptDataUrl && o.paymentStatus !== 'paid').length;
@@ -862,6 +980,12 @@ export default function AdminDashboard() {
               <div className="text-center border-l border-zinc-800 pl-4">
                 <p className="text-lg font-black text-amber-400 leading-none">{receiptPending}</p>
                 <p className="text-zinc-600 text-[9px] uppercase mt-0.5">Comprovantes</p>
+              </div>
+            )}
+            {pendingAnalyses.length > 0 && (
+              <div className="text-center border-l border-zinc-800 pl-4">
+                <p className="text-lg font-black text-amber-300 leading-none">{pendingAnalyses.length}</p>
+                <p className="text-zinc-600 text-[9px] uppercase mt-0.5">Análises</p>
               </div>
             )}
           </div>
@@ -936,17 +1060,57 @@ export default function AdminDashboard() {
               setActiveDragOrder(orders.find(o => o.id === orderId) ?? null);
             }}
             onDragEnd={handleDragEnd}>
-            <div className="max-w-[1800px] mx-auto h-full flex gap-3 overflow-x-auto pb-4" style={{ minHeight: 'calc(100vh - 240px)' }}>
+            <div className="max-w-[1800px] mx-auto h-full flex flex-col gap-3 overflow-hidden" style={{ minHeight: 'calc(100vh - 240px)' }}>
+              {pendingAnalyses.length > 0 && (
+                <div className="shrink-0 space-y-2 max-h-[42vh] overflow-y-auto pr-1">
+                  {pendingAnalyses.map(row => (
+                    <button
+                      key={row.id}
+                      type="button"
+                      onClick={() => {
+                        setOpenAnalysis(row);
+                        setAnalysisRejecting(false);
+                        setAnalysisRejectReason('');
+                        setAnalysisActionError('');
+                      }}
+                      className="w-full text-left rounded-2xl border-2 border-amber-400 bg-amber-500/15 p-4 shadow-[0_0_24px_rgba(251,191,36,0.28)]"
+                    >
+                      <p className="text-amber-300 font-black text-sm uppercase tracking-wide flex items-center gap-2">
+                        <AlertTriangle size={16} /> Atenção — nova análise de entrega
+                      </p>
+                      <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 text-xs text-zinc-200">
+                        <p><span className="text-zinc-500">Pedido:</span> #{row.orderNumber}</p>
+                        <p><span className="text-zinc-500">Cliente:</span> {row.customerName}</p>
+                        <p className="sm:col-span-2">
+                          <span className="text-zinc-500">Endereço:</span>{' '}
+                          {row.address}{row.addressNumber ? `, ${row.addressNumber}` : ''}
+                          {row.neighborhood ? ` — ${row.neighborhood}` : ''}
+                        </p>
+                        <p><span className="text-zinc-500">Taxa:</span> {fmt(row.deliveryFee)}</p>
+                        <p><span className="text-zinc-500">Pagamento:</span> {row.paymentMethod} · {row.paymentStatus}</p>
+                        <p><span className="text-zinc-500">Solicitado:</span> {formatTime(String(row.requestedAt))} · {timeAgo(String(row.requestedAt))}</p>
+                        {row.customerNote && (
+                          <p className="sm:col-span-2"><span className="text-zinc-500">Motivo:</span> {row.customerNote}</p>
+                        )}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+              <div className="flex-1 flex gap-3 overflow-x-auto pb-4 min-h-0">
               {visibleColumns.map(col => (
                 <Column key={col.key} col={col} orders={ordersByColumn[col.key]} newOrderIds={newOrderIds}
+                  analysisOrderIds={analysisOrderIds}
                   onAccept={handleAccept} onRefuse={openRefuse} onAdvance={handleAdvance} onBack={handleBack}
                   onConfirmPayment={handleConfirmPayment} onRefuseReceipt={openRefuseReceipt} />
               ))}
+              </div>
             </div>
             <DragOverlay>
               {activeDragOrder && (
                 <div className="w-[300px] rotate-2">
                   <OrderCard order={activeDragOrder} highlight={false} dragging
+                    analysisPending={analysisOrderIds.has(activeDragOrder.id)}
                     onAccept={handleAccept} onRefuse={openRefuse} onAdvance={handleAdvance} onBack={handleBack}
                     onConfirmPayment={handleConfirmPayment} onRefuseReceipt={openRefuseReceipt} />
                 </div>
@@ -955,6 +1119,79 @@ export default function AdminDashboard() {
           </DndContext>
         )}
       </main>
+
+      <AnimatePresence>
+        {openAnalysis && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[90] bg-black/75 flex items-end sm:items-center justify-center p-0 sm:p-4"
+            onClick={() => !analysisSaving && setOpenAnalysis(null)}>
+            <motion.div initial={{ y: 40 }} animate={{ y: 0 }} exit={{ y: 40 }}
+              className="bg-zinc-950 border-2 border-amber-500/50 rounded-t-3xl sm:rounded-3xl w-full sm:max-w-md p-5 space-y-4"
+              onClick={e => e.stopPropagation()}>
+              <div className="flex items-center justify-between">
+                <h2 className="text-amber-300 font-black uppercase text-sm flex items-center gap-2">
+                  <AlertTriangle size={16} /> Análise de entrega #{openAnalysis.orderNumber}
+                </h2>
+                <button type="button" disabled={analysisSaving} onClick={() => setOpenAnalysis(null)} className="text-zinc-500 hover:text-white"><X size={18} /></button>
+              </div>
+              <p className="text-zinc-500 text-xs">
+                Recusar esta análise não cancela o pedido e não gera reembolso.
+              </p>
+              <div className="text-sm text-zinc-200 space-y-1">
+                <p><span className="text-zinc-500">Cliente:</span> {openAnalysis.customerName}</p>
+                <p>
+                  <span className="text-zinc-500">Endereço:</span>{' '}
+                  {openAnalysis.address}{openAnalysis.addressNumber ? `, ${openAnalysis.addressNumber}` : ''}
+                  {openAnalysis.neighborhood ? ` — ${openAnalysis.neighborhood}` : ''}
+                </p>
+                <p><span className="text-zinc-500">Taxa:</span> {fmt(openAnalysis.deliveryFee)}</p>
+                <p><span className="text-zinc-500">Pagamento:</span> {openAnalysis.paymentMethod} · {openAnalysis.paymentStatus}</p>
+                <p><span className="text-zinc-500">Solicitado:</span> {formatTime(String(openAnalysis.requestedAt))}</p>
+                {openAnalysis.customerNote && (
+                  <p><span className="text-zinc-500">Observação do cliente:</span> {openAnalysis.customerNote}</p>
+                )}
+              </div>
+
+              {analysisRejecting ? (
+                <div className="space-y-3">
+                  <label className="block text-zinc-400 text-xs font-bold uppercase tracking-wide">Motivo da recusa</label>
+                  <textarea
+                    value={analysisRejectReason}
+                    onChange={e => { setAnalysisRejectReason(e.target.value); setAnalysisActionError(''); }}
+                    placeholder="Informe o motivo da recusa da análise..."
+                    className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 text-white text-sm resize-none h-24 focus:border-amber-500 focus:outline-none"
+                  />
+                  {analysisActionError && <p className="text-red-400 text-sm">{analysisActionError}</p>}
+                  <div className="grid grid-cols-2 gap-2">
+                    <button type="button" disabled={analysisSaving} onClick={() => { setAnalysisRejecting(false); setAnalysisActionError(''); }}
+                      className="h-12 rounded-xl bg-zinc-800 text-zinc-200 font-black uppercase text-sm">
+                      Voltar
+                    </button>
+                    <button type="button" disabled={analysisSaving} onClick={handleRejectAnalysis}
+                      className="h-12 rounded-xl bg-red-500 hover:bg-red-400 text-white font-black uppercase text-sm disabled:opacity-50">
+                      Confirmar recusa
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {analysisActionError && <p className="text-red-400 text-sm">{analysisActionError}</p>}
+                  <div className="grid grid-cols-2 gap-2">
+                    <button type="button" disabled={analysisSaving} onClick={() => handleApproveAnalysis(openAnalysis)}
+                      className="h-12 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-black uppercase text-sm disabled:opacity-50">
+                      Aceitar
+                    </button>
+                    <button type="button" disabled={analysisSaving} onClick={() => { setAnalysisRejecting(true); setAnalysisActionError(''); }}
+                      className="h-12 rounded-xl bg-red-500 hover:bg-red-400 text-white font-black uppercase text-sm disabled:opacity-50">
+                      Recusar
+                    </button>
+                  </div>
+                </div>
+              )}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Refuse modal */}
       <AnimatePresence>

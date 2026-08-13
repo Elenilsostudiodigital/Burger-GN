@@ -6,6 +6,7 @@ export * from "./order_items";
 export * from "./coupons";
 export * from "./delivery_zones";
 export * from "./delivery_streets";
+export * from "./delivery_analysis";
 export * from "./delivery_areas";
 export * from "./km_delivery";
 export * from "./settings";
