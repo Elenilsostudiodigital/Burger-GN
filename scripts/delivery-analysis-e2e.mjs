@@ -6,7 +6,12 @@
  */
 
 import { randomUUID } from "node:crypto";
-import pg from "pg";
+import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
+
+const require = createRequire(path.join(path.dirname(fileURLToPath(import.meta.url)), "../lib/db/package.json"));
+const pg = require("pg");
 
 const API = process.env.API_URL || "http://127.0.0.1:8080";
 const DATABASE_URL = process.env.DATABASE_URL || "postgresql://postgres:burger123@127.0.0.1:55432/burger_gn";
