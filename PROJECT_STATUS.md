@@ -40,4 +40,5 @@ _Nenhum bug aberto registrado neste momento. Incluir aqui qualquer falha reprodu
 
 ## PRÓXIMA ETAPA
 
-Deploy + validação manual do proprietário: módulo **Notificações e Sons** (Configurações).
+Atualização do módulo **Notificações e Sons** pronta para revisão.
+Aguardando aprovação do proprietário para deploy.

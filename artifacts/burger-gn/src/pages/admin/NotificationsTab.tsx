@@ -1,24 +1,33 @@
-import React, { useEffect, useState } from 'react';
-import { Bell, Check, Loader2, Volume2 } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { Bell, Check, Loader2, Play, Upload, Volume2 } from 'lucide-react';
 import {
   getAdminNotificationSettings,
   updateAdminNotificationSettings,
 } from '../../lib/api';
 import {
   EVENT_LABELS,
+  MASTER_VOLUME_STEPS,
+  REPEAT_MODE_OPTIONS,
   REPEAT_OPTIONS,
-  SOUND_OPTIONS,
+  SOUND_LIBRARY,
+  allSoundChoices,
   defaultNotificationSettings,
+  detectDeviceKind,
+  fileToCustomSound,
   loadNotificationSettings,
   normalizeNotificationSettings,
   playEventSound,
-  playSoundId,
+  playLibrarySound,
   requestPushPermission,
   saveNotificationSettingsLocal,
+  showAdminPush,
   type EventSoundConfig,
+  type MasterVolumeStep,
   type NotifEventKey,
   type NotificationSettings,
+  type OutsideHoursMode,
   type RepeatIntervalSec,
+  type RepeatMode,
   type SoundId,
 } from '../../lib/adminNotifications';
 import { Button } from '@/components/ui/button';
@@ -32,6 +41,7 @@ const EVENT_KEYS: NotifEventKey[] = [
   'ready',
   'outForDelivery',
   'delivered',
+  'overdue',
 ];
 
 function CheckboxRow({
@@ -56,17 +66,47 @@ function CheckboxRow({
   );
 }
 
+function RadioRow({
+  checked,
+  onChange,
+  label,
+}: {
+  checked: boolean;
+  onChange: () => void;
+  label: string;
+}) {
+  return (
+    <label className="flex items-center gap-2 text-sm text-zinc-300 cursor-pointer select-none">
+      <input
+        type="radio"
+        checked={checked}
+        onChange={onChange}
+        className="border-zinc-600 bg-zinc-950 text-amber-500 focus:ring-amber-500"
+      />
+      {label}
+    </label>
+  );
+}
+
 function EventCard({
   eventKey,
   cfg,
+  settings,
   onChange,
 }: {
   eventKey: NotifEventKey;
   cfg: EventSoundConfig;
+  settings: NotificationSettings;
   onChange: (next: EventSoundConfig) => void;
 }) {
-  const isNew = eventKey === 'newOrder';
-  const showMessage = cfg.sound === 'voice_female' || cfg.sound === 'voice_male' || cfg.sound === 'custom';
+  const showRepeat = eventKey === 'newOrder' || eventKey === 'overdue';
+  const showMessage =
+    cfg.sound === 'voice_female' ||
+    cfg.sound === 'voice_male' ||
+    cfg.sound === 'custom' ||
+    cfg.sound === 'smart_voice';
+  const choices = allSoundChoices(settings);
+  const mode = cfg.repeatMode || (cfg.repeatEnabled ? 'until_accepted' : 'none');
 
   return (
     <div className="rounded-2xl border border-zinc-800 bg-zinc-950/50 p-4 space-y-3">
@@ -88,7 +128,7 @@ function EventCard({
             onChange={e => onChange({ ...cfg, sound: e.target.value as SoundId })}
             className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 h-10 text-white text-sm focus:border-amber-500 focus:outline-none disabled:opacity-40"
           >
-            {SOUND_OPTIONS.map(o => (
+            {choices.map(o => (
               <option key={o.id} value={o.id}>{o.label}</option>
             ))}
           </select>
@@ -117,19 +157,36 @@ function EventCard({
             placeholder="Ex: Pedido pronto"
             className="bg-zinc-950 border-zinc-800 text-white h-10 text-sm focus:border-amber-500"
           />
+          {cfg.sound === 'smart_voice' ? (
+            <p className="text-[10px] text-zinc-500">
+              🎙️ Voz Inteligente preparada para o futuro (IA ainda não integrada). Hoje usa voz local com roteiro fixo.
+            </p>
+          ) : null}
         </div>
       )}
 
-      {isNew && (
+      {showRepeat && (
         <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-3 space-y-2">
-          <CheckboxRow
-            checked={!!cfg.repeatEnabled}
-            onChange={v => onChange({ ...cfg, repeatEnabled: v })}
-            label="Repetir até o pedido ser aceito"
-          />
-          {cfg.repeatEnabled ? (
-            <div className="space-y-1.5">
-              <Label className="text-zinc-500 text-xs">Repetir a cada</Label>
+          <Label className="text-zinc-400 text-xs uppercase font-bold tracking-wider">Repetição</Label>
+          <div className="space-y-1.5">
+            {REPEAT_MODE_OPTIONS.filter(o =>
+              eventKey === 'newOrder' ? true : o.id !== 'until_accepted',
+            ).map(o => (
+              <RadioRow
+                key={o.id}
+                checked={mode === o.id}
+                onChange={() => onChange({
+                  ...cfg,
+                  repeatMode: o.id as RepeatMode,
+                  repeatEnabled: o.id !== 'none',
+                })}
+                label={o.label}
+              />
+            ))}
+          </div>
+          {mode !== 'none' ? (
+            <div className="space-y-1.5 pt-1">
+              <Label className="text-zinc-500 text-xs">Intervalo entre repetições</Label>
               <div className="flex flex-wrap gap-2">
                 {REPEAT_OPTIONS.map(sec => (
                   <button
@@ -143,7 +200,7 @@ function EventCard({
                         : 'border-zinc-700 text-zinc-400 hover:border-zinc-500'
                     }`}
                   >
-                    {sec} segundos
+                    {sec}s
                   </button>
                 ))}
               </div>
@@ -156,10 +213,10 @@ function EventCard({
         type="button"
         variant="outline"
         disabled={!cfg.enabled}
-        onClick={() => playEventSound(cfg)}
+        onClick={() => playEventSound(cfg, settings, eventKey)}
         className="w-full h-9 border-zinc-700 text-zinc-300 hover:bg-zinc-800 rounded-xl text-xs font-bold"
       >
-        <Volume2 size={14} className="mr-1.5" /> Testar som
+        <Volume2 size={14} className="mr-1.5" /> Testar
       </Button>
     </div>
   );
@@ -171,7 +228,10 @@ export function NotificationsTab() {
   const [saving, setSaving] = useState(false);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState('');
-  const [pushStatus, setPushStatus] = useState<string>('');
+  const [pushStatus, setPushStatus] = useState('');
+  const [uploadError, setUploadError] = useState('');
+  const fileRef = useRef<HTMLInputElement>(null);
+  const deviceKind = detectDeviceKind();
 
   useEffect(() => {
     (async () => {
@@ -183,8 +243,7 @@ export function NotificationsTab() {
           setSettings(normalized);
           saveNotificationSettingsLocal(normalized);
         } else {
-          const local = loadNotificationSettings();
-          setSettings(local);
+          setSettings(loadNotificationSettings());
         }
       } catch {
         setSettings(loadNotificationSettings());
@@ -198,7 +257,7 @@ export function NotificationsTab() {
     if (typeof Notification !== 'undefined') {
       setPushStatus(
         Notification.permission === 'granted'
-          ? 'Permitido neste dispositivo'
+          ? `Permitido · dispositivo: ${deviceKind}`
           : Notification.permission === 'denied'
             ? 'Bloqueado no navegador'
             : 'Aguardando permissão',
@@ -206,10 +265,24 @@ export function NotificationsTab() {
     } else {
       setPushStatus('Não suportado neste navegador');
     }
-  }, []);
+  }, [deviceKind]);
 
   const patchEvent = (key: NotifEventKey, next: EventSoundConfig) => {
-    setSettings(s => ({ ...s, events: { ...s.events, [key]: next } }));
+    setSettings(s => {
+      const events = { ...s.events, [key]: next };
+      const delay = key === 'overdue'
+        ? {
+            ...s.delay,
+            overdueEnabled: next.enabled,
+            overdueSound: next.sound,
+            overdueVolume: next.volume,
+            overdueMessage: next.customMessage,
+            repeatMode: next.repeatMode,
+            repeatIntervalSec: next.repeatIntervalSec,
+          }
+        : s.delay;
+      return { ...s, events, delay };
+    });
   };
 
   const handleSave = async () => {
@@ -224,7 +297,7 @@ export function NotificationsTab() {
       setSuccess(true);
       setTimeout(() => setSuccess(false), 3000);
     } catch {
-      setError('Erro ao salvar notificações. Preferências locais foram aplicadas neste aparelho.');
+      setError('Erro ao salvar. Preferências locais foram aplicadas neste aparelho.');
       saveNotificationSettingsLocal(settings);
     } finally {
       setSaving(false);
@@ -234,9 +307,12 @@ export function NotificationsTab() {
   const handleEnablePush = async () => {
     const perm = await requestPushPermission();
     if (perm === 'granted') {
-      setPushStatus('Permitido neste dispositivo');
+      setPushStatus(`Permitido · dispositivo: ${deviceKind}`);
       setSettings(s => ({ ...s, pushEnabled: true }));
-      await showTestPush();
+      await showAdminPush('Burger GN', 'Notificações ativas neste dispositivo.', 'burger-gn-test', {
+        ...settings,
+        pushEnabled: true,
+      });
     } else if (perm === 'denied') {
       setPushStatus('Bloqueado no navegador — libere nas configurações do sistema');
     } else if (perm === 'unsupported') {
@@ -246,9 +322,18 @@ export function NotificationsTab() {
     }
   };
 
-  const showTestPush = async () => {
-    const { showAdminPush } = await import('../../lib/adminNotifications');
-    await showAdminPush('Burger GN', 'Notificações ativas neste dispositivo.', 'burger-gn-test');
+  const handleUpload = async (file: File | null) => {
+    if (!file) return;
+    setUploadError('');
+    try {
+      const custom = await fileToCustomSound(file);
+      setSettings(s => ({
+        ...s,
+        customSounds: [...s.customSounds.filter(c => c.id !== custom.id), custom].slice(0, 20),
+      }));
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : 'Falha no upload');
+    }
   };
 
   if (loading) {
@@ -261,25 +346,205 @@ export function NotificationsTab() {
 
   return (
     <div className="space-y-4">
+      {/* Master */}
       <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-5 space-y-3">
         <h3 className="text-white font-black uppercase text-sm flex items-center gap-2">
           <Bell size={16} className="text-amber-500" /> Notificações e Sons
         </h3>
-        <p className="text-zinc-500 text-xs leading-relaxed">
-          Configure sons, volume, repetição e avisos de atraso. No PWA instalado, as notificações
-          aparecem no notebook, celular ou tablet enquanto o painel estiver aberto ou em segundo plano.
-        </p>
-        <div className="flex flex-col gap-2">
-          <CheckboxRow
-            checked={settings.masterEnabled}
-            onChange={v => setSettings(s => ({ ...s, masterEnabled: v }))}
-            label="Ativar sistema de sons e notificações"
+        <CheckboxRow
+          checked={settings.masterEnabled}
+          onChange={v => setSettings(s => ({ ...s, masterEnabled: v }))}
+          label="Ativar sistema de sons e notificações"
+        />
+
+        <div className="space-y-2 pt-1">
+          <Label className="text-zinc-400 text-xs uppercase font-bold tracking-wider">🔊 Volume Geral</Label>
+          <div className="flex flex-wrap gap-2">
+            {MASTER_VOLUME_STEPS.map(step => (
+              <button
+                key={step.label}
+                type="button"
+                onClick={() => setSettings(s => ({ ...s, masterVolume: step.value as MasterVolumeStep }))}
+                className={`px-3 py-2 rounded-xl text-xs font-black border ${
+                  settings.masterVolume === step.value
+                    ? 'border-amber-500 bg-amber-500/20 text-amber-400'
+                    : 'border-zinc-700 text-zinc-400 hover:border-zinc-500'
+                }`}
+              >
+                {step.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Sound library */}
+      <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-5 space-y-3">
+        <h4 className="text-white font-black uppercase text-sm">🎵 Biblioteca de Sons</h4>
+        <div className="space-y-2">
+          {SOUND_LIBRARY.map(sound => (
+            <div
+              key={sound.id}
+              className="flex items-center justify-between gap-2 rounded-xl border border-zinc-800 bg-zinc-950/60 px-3 py-2"
+            >
+              <div className="min-w-0">
+                <p className="text-white text-sm font-bold truncate">
+                  {sound.emoji} {sound.label}
+                </p>
+                {sound.group === 'future' ? (
+                  <p className="text-[10px] text-zinc-500">Estrutura futura · IA ainda não integrada</p>
+                ) : null}
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => playLibrarySound(sound.id, settings, EVENT_LABELS.newOrder)}
+                className="h-8 shrink-0 border-zinc-700 text-zinc-200 hover:bg-zinc-800 rounded-lg text-[11px] font-bold"
+              >
+                <Play size={12} className="mr-1" /> Testar
+              </Button>
+            </div>
+          ))}
+        </div>
+
+        <div className="rounded-xl border border-dashed border-zinc-700 p-3 space-y-2">
+          <p className="text-zinc-400 text-xs font-bold uppercase tracking-wider">📁 Meus áudios</p>
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".mp3,.wav,audio/mpeg,audio/wav,audio/wave"
+            className="hidden"
+            onChange={e => void handleUpload(e.target.files?.[0] || null)}
           />
-          <CheckboxRow
-            checked={settings.pushEnabled}
-            onChange={v => setSettings(s => ({ ...s, pushEnabled: v }))}
-            label="Notificações push (PWA / navegador)"
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => fileRef.current?.click()}
+            className="w-full h-10 border-zinc-700 text-zinc-300 hover:bg-zinc-800 rounded-xl text-xs font-bold"
+          >
+            <Upload size={14} className="mr-1.5" /> Enviar .mp3 ou .wav
+          </Button>
+          {uploadError ? <p className="text-red-400 text-xs">{uploadError}</p> : null}
+          {settings.customSounds.length === 0 ? (
+            <p className="text-zinc-600 text-xs">Nenhum áudio enviado ainda.</p>
+          ) : (
+            <div className="space-y-2">
+              {settings.customSounds.map(c => (
+                <div
+                  key={c.id}
+                  className="flex items-center justify-between gap-2 rounded-xl border border-zinc-800 px-3 py-2"
+                >
+                  <span className="text-zinc-300 text-xs font-bold truncate">📁 {c.name}</span>
+                  <div className="flex gap-1.5 shrink-0">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => playLibrarySound(`upload:${c.id}`, settings)}
+                      className="h-8 border-zinc-700 text-zinc-200 rounded-lg text-[11px] font-bold"
+                    >
+                      <Play size={12} className="mr-1" /> Testar
+                    </Button>
+                    <button
+                      type="button"
+                      className="text-[10px] text-red-400 font-bold px-2"
+                      onClick={() => setSettings(s => ({
+                        ...s,
+                        customSounds: s.customSounds.filter(x => x.id !== c.id),
+                      }))}
+                    >
+                      Remover
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Schedule */}
+      <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-5 space-y-3">
+        <h4 className="text-white font-black uppercase text-sm">🕒 Horário das Notificações</h4>
+        <CheckboxRow
+          checked={settings.schedule.enabled}
+          onChange={v => setSettings(s => ({
+            ...s,
+            schedule: { ...s.schedule, enabled: v },
+          }))}
+          label="Usar horário de funcionamento das notificações"
+        />
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1">
+            <Label className="text-zinc-500 text-xs">Início</Label>
+            <Input
+              type="time"
+              value={settings.schedule.start}
+              onChange={e => setSettings(s => ({
+                ...s,
+                schedule: { ...s.schedule, start: e.target.value || '08:00' },
+              }))}
+              className="bg-zinc-950 border-zinc-800 text-white h-10 text-sm focus:border-amber-500"
+            />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-zinc-500 text-xs">Fim</Label>
+            <Input
+              type="time"
+              value={settings.schedule.end}
+              onChange={e => setSettings(s => ({
+                ...s,
+                schedule: { ...s.schedule, end: e.target.value || '23:30' },
+              }))}
+              className="bg-zinc-950 border-zinc-800 text-white h-10 text-sm focus:border-amber-500"
+            />
+          </div>
+        </div>
+        <p className="text-zinc-500 text-[11px]">Fora desse horário:</p>
+        <div className="space-y-1.5">
+          <RadioRow
+            checked={settings.schedule.outsideMode === 'silent_push'}
+            onChange={() => setSettings(s => ({
+              ...s,
+              schedule: { ...s.schedule, outsideMode: 'silent_push' as OutsideHoursMode },
+            }))}
+            label="Apenas notificação silenciosa"
           />
+          <RadioRow
+            checked={settings.schedule.outsideMode === 'mute_all'}
+            onChange={() => setSettings(s => ({
+              ...s,
+              schedule: { ...s.schedule, outsideMode: 'mute_all' as OutsideHoursMode },
+            }))}
+            label="Não tocar sons (nem push)"
+          />
+        </div>
+      </div>
+
+      {/* Push devices */}
+      <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-5 space-y-3">
+        <h4 className="text-white font-black uppercase text-sm">📲 Push Notifications</h4>
+        <CheckboxRow
+          checked={settings.pushEnabled}
+          onChange={v => setSettings(s => ({ ...s, pushEnabled: v }))}
+          label="Ativar notificações push"
+        />
+        <div className="grid grid-cols-2 gap-2">
+          {([
+            ['notebook', 'Notebook'],
+            ['android', 'Android / Celular'],
+            ['tablet', 'Tablet'],
+            ['pwa', 'PWA instalado'],
+          ] as const).map(([key, label]) => (
+            <CheckboxRow
+              key={key}
+              checked={settings.pushDevices[key]}
+              onChange={v => setSettings(s => ({
+                ...s,
+                pushDevices: { ...s.pushDevices, [key]: v },
+              }))}
+              label={label}
+            />
+          ))}
         </div>
         <div className="flex flex-wrap items-center gap-2 pt-1">
           <Button
@@ -287,24 +552,29 @@ export function NotificationsTab() {
             onClick={() => void handleEnablePush()}
             className="h-9 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold rounded-xl text-xs"
           >
-            Permitir notificações neste aparelho
+            Permitir neste aparelho
           </Button>
           <span className="text-zinc-500 text-[11px]">{pushStatus}</span>
         </div>
       </div>
 
+      {/* Per-stage */}
       <div className={`space-y-3 ${settings.masterEnabled ? '' : 'opacity-40 pointer-events-none'}`}>
+        <h4 className="text-zinc-400 text-xs font-black uppercase tracking-wider px-0.5">
+          Notificações por etapa
+        </h4>
         {EVENT_KEYS.map(key => (
           <EventCard
             key={key}
             eventKey={key}
             cfg={settings.events[key]}
+            settings={settings}
             onChange={next => patchEvent(key, next)}
           />
         ))}
 
         <div className="rounded-2xl border border-red-500/30 bg-zinc-950/50 p-4 space-y-3">
-          <h4 className="text-white font-black uppercase text-xs tracking-wider">Pedido em Atraso</h4>
+          <h4 className="text-white font-black uppercase text-xs tracking-wider">Avisos antes do atraso</h4>
           <CheckboxRow
             checked={settings.delay.enabled}
             onChange={v => setSettings(s => ({ ...s, delay: { ...s.delay, enabled: v } }))}
@@ -339,7 +609,7 @@ export function NotificationsTab() {
                 }))}
                 className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 h-10 text-white text-sm focus:border-amber-500 focus:outline-none"
               >
-                {SOUND_OPTIONS.map(o => (
+                {allSoundChoices(settings).map(o => (
                   <option key={o.id} value={o.id}>{o.label}</option>
                 ))}
               </select>
@@ -359,83 +629,14 @@ export function NotificationsTab() {
               />
             </div>
           </div>
-          <Input
-            value={settings.delay.customMessage}
-            onChange={e => setSettings(s => ({
-              ...s,
-              delay: { ...s.delay, customMessage: e.target.value },
-            }))}
-            placeholder="Mensagem do aviso"
-            className="bg-zinc-950 border-zinc-800 text-white h-10 text-sm focus:border-amber-500"
-          />
           <Button
             type="button"
             variant="outline"
-            onClick={() => playSoundId(settings.delay.sound, settings.delay.volume, settings.delay.customMessage)}
+            onClick={() => playLibrarySound(settings.delay.sound, settings, settings.delay.customMessage)}
             className="w-full h-9 border-zinc-700 text-zinc-300 hover:bg-zinc-800 rounded-xl text-xs font-bold"
           >
-            <Volume2 size={14} className="mr-1.5" /> Testar aviso
+            <Play size={12} className="mr-1.5" /> Testar aviso
           </Button>
-
-          <div className="border-t border-zinc-800 pt-3 space-y-3">
-            <CheckboxRow
-              checked={settings.delay.overdueEnabled}
-              onChange={v => setSettings(s => ({ ...s, delay: { ...s.delay, overdueEnabled: v } }))}
-              label="Alerta diferente quando entrar em atraso"
-            />
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label className="text-zinc-500 text-xs">Som do atraso</Label>
-                <select
-                  value={settings.delay.overdueSound}
-                  onChange={e => setSettings(s => ({
-                    ...s,
-                    delay: { ...s.delay, overdueSound: e.target.value as SoundId },
-                  }))}
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 h-10 text-white text-sm focus:border-amber-500 focus:outline-none"
-                >
-                  {SOUND_OPTIONS.map(o => (
-                    <option key={o.id} value={o.id}>{o.label}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-zinc-500 text-xs">Volume ({Math.round(settings.delay.overdueVolume * 100)}%)</Label>
-                <input
-                  type="range"
-                  min={0}
-                  max={100}
-                  value={Math.round(settings.delay.overdueVolume * 100)}
-                  onChange={e => setSettings(s => ({
-                    ...s,
-                    delay: { ...s.delay, overdueVolume: Number(e.target.value) / 100 },
-                  }))}
-                  className="w-full accent-amber-500"
-                />
-              </div>
-            </div>
-            <Input
-              value={settings.delay.overdueMessage}
-              onChange={e => setSettings(s => ({
-                ...s,
-                delay: { ...s.delay, overdueMessage: e.target.value },
-              }))}
-              placeholder="Mensagem de atraso"
-              className="bg-zinc-950 border-zinc-800 text-white h-10 text-sm focus:border-amber-500"
-            />
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => playSoundId(
-                settings.delay.overdueSound,
-                settings.delay.overdueVolume,
-                settings.delay.overdueMessage,
-              )}
-              className="w-full h-9 border-zinc-700 text-zinc-300 hover:bg-zinc-800 rounded-xl text-xs font-bold"
-            >
-              <Volume2 size={14} className="mr-1.5" /> Testar alerta de atraso
-            </Button>
-          </div>
         </div>
       </div>
 

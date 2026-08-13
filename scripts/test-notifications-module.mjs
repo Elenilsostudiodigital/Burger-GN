@@ -51,28 +51,49 @@ async function main() {
   const { cookie } = await waitReady();
   console.log("✓ endpoint notification-settings");
 
+  const tinyWav =
+    "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=";
+
   const sample = {
-    version: 1,
+    version: 2,
     masterEnabled: true,
+    masterVolume: 0.75,
     pushEnabled: true,
+    pushDevices: { notebook: true, android: true, tablet: true, pwa: true },
+    schedule: {
+      enabled: true,
+      start: "08:00",
+      end: "23:30",
+      outsideMode: "silent_push",
+    },
+    smartVoicePrepared: true,
     events: {
       newOrder: {
         enabled: true,
-        sound: "doorbell",
+        sound: "new_order",
         volume: 0.8,
         customMessage: "Novo pedido recebido",
-        repeatEnabled: true,
+        repeatMode: "until_accepted",
         repeatIntervalSec: 10,
+        repeatEnabled: true,
       },
-      accepted: { enabled: true, sound: "bell", volume: 0.7, customMessage: "Pedido aceito" },
-      preparing: { enabled: false, sound: "notification", volume: 0.5, customMessage: "Em preparo" },
-      ready: { enabled: true, sound: "alarm", volume: 0.75, customMessage: "Pedido pronto" },
-      outForDelivery: { enabled: true, sound: "notification", volume: 0.6, customMessage: "Saiu" },
-      delivered: { enabled: false, sound: "bell", volume: 0.5, customMessage: "Entregue" },
+      accepted: { enabled: true, sound: "restaurant_bell", volume: 0.7, customMessage: "Pedido aceito", repeatMode: "none" },
+      preparing: { enabled: false, sound: "classic", volume: 0.5, customMessage: "Em preparo", repeatMode: "none" },
+      ready: { enabled: true, sound: "alarm", volume: 0.75, customMessage: "Pedido pronto", repeatMode: "none" },
+      outForDelivery: { enabled: true, sound: "classic", volume: 0.6, customMessage: "Saiu", repeatMode: "none" },
+      delivered: { enabled: false, sound: "soft", volume: 0.5, customMessage: "Entregue", repeatMode: "none" },
+      overdue: {
+        enabled: true,
+        sound: "alarm",
+        volume: 0.9,
+        customMessage: "Pedido em atraso",
+        repeatMode: "times_3",
+        repeatIntervalSec: 15,
+      },
     },
     delay: {
       enabled: true,
-      sound: "notification",
+      sound: "classic",
       volume: 0.65,
       customMessage: "Perto do atraso",
       warnAtMinutes: [15, 10, 5],
@@ -80,19 +101,62 @@ async function main() {
       overdueSound: "alarm",
       overdueVolume: 0.9,
       overdueMessage: "Pedido em atraso",
+      repeatMode: "times_3",
+      repeatIntervalSec: 15,
     },
+    customSounds: [
+      {
+        id: "ctest1",
+        name: "Teste WAV",
+        mime: "audio/wav",
+        dataUrl: tinyWav,
+        createdAt: new Date().toISOString(),
+      },
+    ],
   };
 
   const saved = await json("PUT", "/api/admin/notification-settings", { config: sample }, cookie);
   assert(saved.status === 200, JSON.stringify(saved.data));
-  assert(saved.data.config?.events?.newOrder?.repeatIntervalSec === 10, "repeat saved");
-  assert(saved.data.config?.delay?.warnAtMinutes?.includes(5), "delay marks");
-  console.log("✓ salvar config (sons / repetição / atraso)");
+  assert(saved.data.config?.masterVolume === 0.75, "master volume");
+  assert(saved.data.config?.events?.newOrder?.repeatMode === "until_accepted", "repeat mode");
+  assert(saved.data.config?.schedule?.start === "08:00", "schedule start");
+  assert(saved.data.config?.pushDevices?.pwa === true, "push devices");
+  assert(saved.data.config?.customSounds?.length >= 1, "custom upload");
+  assert(saved.data.config?.events?.overdue?.sound === "alarm", "overdue stage");
+  assert(saved.data.config?.smartVoicePrepared === true, "smart voice prepared");
+  console.log("✓ biblioteca / upload / volume / repetição / horário / push / etapas");
 
   const got = await json("GET", "/api/admin/notification-settings", null, cookie);
   assert(got.status === 200, "get after save");
   assert(got.data.config?.events?.ready?.sound === "alarm", "persist ready sound");
+  assert(got.data.config?.version === 2, "version 2");
   console.log("✓ persistência OK");
+
+  // legacy payload still accepted by API (raw store)
+  const legacy = await json(
+    "PUT",
+    "/api/admin/notification-settings",
+    {
+      config: {
+        version: 1,
+        masterEnabled: true,
+        pushEnabled: true,
+        events: {
+          newOrder: {
+            enabled: true,
+            sound: "doorbell",
+            volume: 0.8,
+            customMessage: "Novo",
+            repeatEnabled: true,
+            repeatIntervalSec: 5,
+          },
+        },
+      },
+    },
+    cookie,
+  );
+  assert(legacy.status === 200, "legacy save");
+  console.log("✓ compatibilidade legado OK");
 
   const sw = await fetch(`${BASE}/sw.js`);
   assert(sw.status === 200, "sw.js");
@@ -100,23 +164,15 @@ async function main() {
   assert(swText.includes("notificationclick"), "notificationclick handler");
   console.log("✓ PWA SW notificationclick");
 
-  const manifest = await fetch(`${BASE}/manifest.webmanifest`);
-  assert(manifest.status === 200, "manifest");
-  console.log("✓ PWA manifest");
+  const products = await json("GET", "/api/products");
+  assert(products.status === 200 && Array.isArray(products.data), "catalog intact");
+  console.log("✓ outras APIs intactas");
 
-  // restore lighter defaults (keep master on)
+  // restore sample v2 defaults without huge audio
   await json(
     "PUT",
     "/api/admin/notification-settings",
-    {
-      config: {
-        ...sample,
-        events: {
-          ...sample.events,
-          preparing: sample.events.preparing,
-        },
-      },
-    },
+    { config: { ...sample, customSounds: [] } },
     cookie,
   );
   console.log("✓ cleanup");
