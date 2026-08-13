@@ -10,6 +10,7 @@ Estes módulos já foram aprovados manualmente.
 - ✅ Tempo de Preparo
 - ✅ Configuração de Pagamentos
 - ✅ Configuração do WhatsApp
+- ✅ Notificações e Sons
 
 ---
 
@@ -22,10 +23,9 @@ Atualizar esta lista conforme o andamento do projeto.
 - 🔄 Clientes
 - 🔄 Mercado Pago
 - 🔄 Segurança
-- 🔄 Configurações (Perfil + Segurança + Notificações e Sons)
+- 🔄 Configurações (Perfil + Segurança)
 - 🔄 PWA (Progressive Web App)
 - 🔄 Produtos e Promoções (Marketing)
-- 🔄 Notificações e Sons
 
 ---
 
@@ -40,4 +40,4 @@ _Nenhum bug aberto registrado neste momento. Incluir aqui qualquer falha reprodu
 
 ## PRÓXIMA ETAPA
 
-Validação manual do proprietário: atualização **Notificações e Sons** (já em produção).
+Aguardando próxima solicitação do proprietário.
