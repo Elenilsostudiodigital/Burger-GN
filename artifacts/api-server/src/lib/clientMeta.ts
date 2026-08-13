@@ -488,9 +488,15 @@ export function phoneIdentityKeys(phone: string): string[] {
 
 /** Placeholder / local-store phones that must not create CRM clients. */
 export function isPlaceholderPhone(phone: string): boolean {
+  const digits = String(phone || "").replace(/\D/g, "").replace(/^0+/, "");
+  if (!digits) return true;
+  if (/^0+$/.test(digits)) return true;
   const key = phoneIdentityKey(phone);
-  if (!key || key.length < 10) return true;
+  if (!key) return true;
   if (/^0+$/.test(key)) return true;
+  // Only skip junk like "123". Real orders (including slightly short WhatsApp
+  // numbers used in checkout) must still earn cashback/stamps.
+  if (key.length < 8) return true;
   return false;
 }
 

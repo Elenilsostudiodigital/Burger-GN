@@ -12,7 +12,7 @@ import {
   REJECT_REASON_SUGGESTIONS, RECEIPT_REJECT_SUGGESTIONS,
   Order, WorkflowStage, PrepDayStats,
   ORDER_TYPE_LABELS, PAYMENT_STATUS_LABELS, WORKFLOW_LABELS,
-  formatPaymentMethod,
+  formatPaymentMethod, orderHasReceipt,
 } from '../../lib/api';
 import {
   LayoutDashboard, UtensilsCrossed, LogOut, Bell, BellOff,
@@ -66,7 +66,7 @@ function timeAgo(dateStr: string) {
 function needsPaymentConference(order: Order): boolean {
   return order.paymentMethod === 'pix'
     && order.pixMode !== 'online'
-    && !!order.receiptDataUrl
+    && !!orderHasReceipt(order)
     && order.paymentStatus !== 'paid'
     && order.status !== 'cancelled';
 }
@@ -81,7 +81,7 @@ function canAcceptOrder(order: Order): boolean {
 /** Pix without receipt stays off the board until the customer sends proof. */
 function isVisibleOnBoard(order: Order): boolean {
   if (order.status === 'cancelled') return true;
-  if (order.paymentMethod === 'pix' && order.workflow === 'awaiting_payment' && !order.receiptDataUrl) {
+  if (order.paymentMethod === 'pix' && order.workflow === 'awaiting_payment' && !orderHasReceipt(order)) {
     return false;
   }
   return true;
@@ -800,7 +800,7 @@ export default function AdminDashboard() {
   const cancelledOrders = useMemo(() => orders.filter(o => o.status === 'cancelled'), [orders]);
   const activeCount = orders.filter(o => o.status !== 'cancelled' && o.status !== 'done').length;
   const newCount = ordersByColumn.new.length;
-  const receiptPending = orders.filter(o => o.receiptDataUrl && o.paymentStatus !== 'paid').length;
+  const receiptPending = orders.filter(o => orderHasReceipt(o) && o.paymentStatus !== 'paid').length;
   const visibleColumns = filter === 'all' ? COLUMNS : COLUMNS.filter(c => c.key === filter);
 
   return (

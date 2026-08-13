@@ -6,8 +6,9 @@ import {
   PublicClubeMeResponse,
   ORDER_TYPE_LABELS, PAYMENT_STATUS_LABELS, WORKFLOW_LABELS,
   formatPaymentMethod,
-  isAllowedReceiptFile, RECEIPT_ACCEPT, customerInAppStatusMessage,
+  isAllowedReceiptFile, RECEIPT_ACCEPT, customerInAppStatusMessage, orderHasReceipt,
 } from '../lib/api';
+import { compressReceiptImage } from '../lib/receiptImage';
 import {
   getMyOrder, clearMyOrder, saveMyOrder, archiveMyOrder,
   markDeliveredPromptStarted, DELIVERY_CONFIRM_TIMEOUT_MS,
@@ -55,29 +56,6 @@ function resolveTimelineIndex(order: Order): number {
 
 function fmt(val: string) {
   return `R$ ${parseFloat(val).toFixed(2).replace('.', ',')}`;
-}
-
-function compressImage(file: File, maxWidth = 1200, quality = 0.72): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(new Error('Falha ao ler arquivo'));
-    reader.onload = () => {
-      const img = new Image();
-      img.onload = () => {
-        const scale = Math.min(1, maxWidth / img.width);
-        const canvas = document.createElement('canvas');
-        canvas.width = Math.round(img.width * scale);
-        canvas.height = Math.round(img.height * scale);
-        const ctx = canvas.getContext('2d');
-        if (!ctx) { reject(new Error('Canvas indisponível')); return; }
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        resolve(canvas.toDataURL('image/jpeg', quality));
-      };
-      img.onerror = () => reject(new Error('Imagem inválida'));
-      img.src = reader.result as string;
-    };
-    reader.readAsDataURL(file);
-  });
 }
 
 function OrderTimelineView({ trackingId }: { trackingId: string }) {
@@ -364,7 +342,7 @@ function OrderTimelineView({ trackingId }: { trackingId: string }) {
     }
     setReceiptError('');
     try {
-      setReceiptPreview(await compressImage(file));
+      setReceiptPreview(await compressReceiptImage(file));
     } catch {
       setReceiptError('Não foi possível ler a imagem.');
     }
@@ -376,10 +354,19 @@ function OrderTimelineView({ trackingId }: { trackingId: string }) {
     setReceiptError('');
     try {
       const updated = await uploadOrderReceipt(trackingId, receiptPreview);
-      setOrder(updated);
+      setOrder({ ...updated, hasReceipt: true });
       setReceiptOk(true);
       setReceiptPreview(null);
     } catch (err) {
+      try {
+        const live = await trackOrder(trackingId);
+        if (orderHasReceipt(live)) {
+          setOrder(live);
+          setReceiptOk(true);
+          setReceiptPreview(null);
+          return;
+        }
+      } catch { /* keep the original upload error */ }
       setReceiptError(err instanceof Error ? err.message : 'Erro ao enviar comprovante');
     } finally {
       setUploadingReceipt(false);
@@ -391,7 +378,7 @@ function OrderTimelineView({ trackingId }: { trackingId: string }) {
     if (order.paymentMethod === 'pix' && order.paymentStatus === 'paid' && order.workflow === 'new') {
       return { emoji: '🎉', title: 'Pagamento confirmado', sub: 'Seu pedido foi enviado para análise da loja.' };
     }
-    if (order.workflow === 'awaiting_payment' || (order.paymentMethod === 'pix' && order.pixMode !== 'online' && order.receiptDataUrl && order.paymentStatus !== 'paid')) {
+    if (order.workflow === 'awaiting_payment' || (order.paymentMethod === 'pix' && order.pixMode !== 'online' && orderHasReceipt(order) && order.paymentStatus !== 'paid')) {
       return {
         emoji: '🟡',
         title: order.pixMode === 'online' ? 'Aguardando pagamento Pix' : WORKFLOW_LABELS.awaiting_payment,
@@ -604,7 +591,7 @@ function OrderTimelineView({ trackingId }: { trackingId: string }) {
             <h3 className="text-white font-black uppercase text-xs tracking-wider">
               {order.receiptRejectReason || order.paymentStatus === 'failed'
                 ? 'Reenviar comprovante'
-                : order.receiptDataUrl
+                : orderHasReceipt(order)
                   ? 'Comprovante enviado'
                   : 'Enviar comprovante Pix'}
             </h3>
@@ -613,12 +600,12 @@ function OrderTimelineView({ trackingId }: { trackingId: string }) {
                 Motivo da recusa: {order.receiptRejectReason}
               </div>
             )}
-            {order.receiptDataUrl && order.paymentStatus === 'pending' && !order.receiptRejectReason && (
+            {orderHasReceipt(order) && order.paymentStatus === 'pending' && !order.receiptRejectReason && (
               <p className="text-zinc-400 text-sm">
                 ✅ Comprovante enviado. Aguarde a conferência do pagamento.
               </p>
             )}
-            {(order.paymentStatus === 'failed' || !order.receiptDataUrl || !!order.receiptRejectReason) && (
+            {(order.paymentStatus === 'failed' || !orderHasReceipt(order) || !!order.receiptRejectReason) && (
               <>
                 <input ref={galleryRef} type="file" accept={RECEIPT_ACCEPT} className="hidden"
                   onChange={e => { void pickReceipt(e.target.files?.[0] ?? null); e.target.value = ''; }} />

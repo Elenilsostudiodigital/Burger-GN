@@ -46,10 +46,15 @@ const WORKFLOW_VALUES: WorkflowStage[] = [
 
 const RECEIPT_MIME_RE = /^data:image\/(png|jpe?g|webp);base64,/i;
 
-function enrichOrder<T extends { notes: string; status: string }>(order: T) {
+function enrichOrder<T extends { notes: string; status: string }>(
+  order: T,
+  opts?: { includeReceiptBytes?: boolean },
+) {
   const { publicNotes, meta } = parseOrderNotes(order.notes);
   const workflow = resolveWorkflow(order.status, meta);
   const durationSec = prepDurationSeconds(meta);
+  const hasReceipt = !!(meta.receiptDataUrl || meta.receiptUploadedAt);
+  const includeBytes = opts?.includeReceiptBytes !== false;
   return {
     ...order,
     notes: publicNotes,
@@ -57,7 +62,8 @@ function enrichOrder<T extends { notes: string; status: string }>(order: T) {
     workflow,
     cardType: meta.cardType ?? null,
     needsChange: meta.needsChange ?? null,
-    receiptDataUrl: meta.receiptDataUrl ?? null,
+    receiptDataUrl: includeBytes ? (meta.receiptDataUrl ?? null) : null,
+    hasReceipt,
     receiptUploadedAt: meta.receiptUploadedAt ?? null,
     receiptRejectReason: meta.receiptRejectReason ?? null,
     receiptRejectedAt: meta.receiptRejectedAt ?? null,
@@ -755,9 +761,52 @@ router.get("/orders/track/:trackingId", async (req, res) => {
     }
 
     const [fresh] = await db.select().from(ordersTable).where(eq(ordersTable.trackingId, trackingId));
-    const live = fresh ?? order;
+    let live = fresh ?? order;
+    const { publicNotes, meta } = parseOrderNotes(live.notes);
+    if (
+      live.status === "done"
+      && !meta.rewardsProcessedAt
+      && !meta.cashbackAwarded
+      && !meta.stampsAwarded
+    ) {
+      try {
+        const rewardResult = await applyOrderCompletionRewards(
+          {
+            id: live.id,
+            orderNumber: live.orderNumber,
+            companyId: live.companyId,
+            customerName: live.customerName,
+            phone: live.phone,
+            total: live.total,
+            status: live.status,
+            paymentMethod: live.paymentMethod,
+            paymentStatus: live.paymentStatus,
+          },
+          meta,
+        );
+        const rewarded = rewardResult.meta;
+        if (
+          rewarded.cashbackAwarded
+          || rewarded.stampsAwarded
+          || rewarded.rewardsProcessedAt
+          || rewarded.clientMemberId !== meta.clientMemberId
+        ) {
+          const [updated] = await db.update(ordersTable)
+            .set({
+              notes: serializeOrderNotes(publicNotes, rewarded),
+              updatedAt: new Date(),
+            })
+            .where(eq(ordersTable.id, live.id))
+            .returning();
+          if (updated) live = updated;
+        }
+      } catch (rewardErr) {
+        req.log.error({ err: rewardErr }, "Failed to sync rewards on track");
+      }
+    }
+
     const items = await db.select().from(orderItemsTable).where(eq(orderItemsTable.orderId, live.id));
-    res.json({ ...enrichOrder(live), items });
+    res.json({ ...enrichOrder(live, { includeReceiptBytes: false }), items });
   } catch (err) {
     req.log.error({ err }, "Failed to track order");
     res.status(500).json({ error: "Internal server error" });
@@ -873,6 +922,8 @@ router.patch("/orders/:id/status", requireCompanyAuth, async (req, res) => {
             phone: existing.phone,
             total: existing.total,
             status: "done",
+            paymentMethod: existing.paymentMethod,
+            paymentStatus: existing.paymentStatus,
           },
           nextMeta,
         );
@@ -960,6 +1011,8 @@ router.post("/orders/track/:trackingId/review", async (req, res) => {
           phone: existing.phone,
           total: existing.total,
           status: "done",
+          paymentMethod: existing.paymentMethod,
+          paymentStatus: existing.paymentStatus,
         },
         nextMeta,
       );
@@ -1133,14 +1186,20 @@ router.post("/orders/track/:trackingId/receipt", async (req, res) => {
       .where(eq(ordersTable.id, existing.id))
       .returning();
 
-    const enriched = { ...enrichOrder(order), items: (await getOrderWithItems(order.id))?.items ?? [] };
+    const enriched = {
+      ...enrichOrder(order, { includeReceiptBytes: false }),
+      items: (await getOrderWithItems(order.id))?.items ?? [],
+    };
 
     // First receipt (or resubmit after refuse) surfaces the order in the admin queue.
+    // Do not broadcast/return the raw image bytes — that payload is large enough to
+    // fail the HTTP response after the comprovante was already saved.
     broadcastSSE(existing.companyId, "new_order", enriched);
     broadcastSSE(existing.companyId, "order_receipt", {
       id: order.id,
       trackingId: order.trackingId,
       receiptUploadedAt: nextMeta.receiptUploadedAt,
+      hasReceipt: true,
       workflow: "awaiting_payment",
     });
 

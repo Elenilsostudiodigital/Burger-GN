@@ -27,6 +27,8 @@ export type OrderForRewards = {
   phone: string;
   total: string | number;
   status: string;
+  paymentMethod?: string;
+  paymentStatus?: string;
 };
 
 export type ApplyRewardsResult = {
@@ -41,6 +43,17 @@ export type ApplyRewardsResult = {
 
 function roundMoney(n: number): number {
   return Math.round(n * 100) / 100;
+}
+
+/** Cashback/stamps only after a completed sale — never for unpaid PIX, cancelled, or refused. */
+export function isEligibleForOrderRewards(order: {
+  status: string;
+  paymentMethod?: string;
+  paymentStatus?: string;
+}): boolean {
+  if (order.status !== "done") return false;
+  if (order.paymentMethod === "pix" && order.paymentStatus !== "paid") return false;
+  return true;
 }
 
 async function ensureClubeSettings(companyId: number) {
@@ -75,7 +88,7 @@ export async function applyOrderCompletionRewards(
     memberId: typeof meta.clientMemberId === "number" ? meta.clientMemberId : null,
   };
 
-  if (order.status !== "done") {
+  if (!isEligibleForOrderRewards(order)) {
     return result;
   }
 
