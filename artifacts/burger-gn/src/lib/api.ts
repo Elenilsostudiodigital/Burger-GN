@@ -955,6 +955,58 @@ export const adminForgotPassword = (email: string) =>
     emailDelivery?: string;
   }>;
 
+// ── Company Profile (Configurações → Perfil) ─────────────────────────────────
+export interface CompanyProfile {
+  name: string;
+  logoUrl: string;
+  photoUrl: string;
+  slogan: string;
+  description: string;
+  address: string;
+  phone: string;
+  profileWhatsapp: string;
+  instagramUrl: string;
+  facebookUrl: string;
+  websiteUrl: string;
+  bannerUrl: string;
+  displayOpenDays: string;
+  displayHoursText: string;
+  menuWelcomeMessage: string;
+  primaryColor: string;
+  secondaryColor: string;
+}
+
+export const getCompanyProfile = () =>
+  api.get("/company-profile") as Promise<CompanyProfile>;
+export const getAdminCompanyProfile = () =>
+  api.get("/admin/company-profile") as Promise<CompanyProfile>;
+export const updateAdminCompanyProfile = (d: Partial<CompanyProfile>) =>
+  api.put("/admin/company-profile", d) as Promise<{
+    ok: boolean;
+    message?: string;
+    profile: CompanyProfile;
+  }>;
+
+export interface RecoveryContacts {
+  loginEmail: string;
+  recoveryEmail: string;
+  recoveryPhone: string;
+}
+export const getRecoveryContacts = () =>
+  api.get("/admin/recovery-contacts") as Promise<RecoveryContacts>;
+export const updateRecoveryEmail = (recoveryEmail: string) =>
+  api.put("/admin/recovery-email", { recoveryEmail }) as Promise<{
+    ok: boolean;
+    message?: string;
+    recoveryEmail: string;
+  }>;
+export const updateRecoveryPhone = (recoveryPhone: string) =>
+  api.put("/admin/recovery-phone", { recoveryPhone }) as Promise<{
+    ok: boolean;
+    message?: string;
+    recoveryPhone: string;
+  }>;
+
 // ── WhatsApp Settings ─────────────────────────────────────────────────────────
 export interface WhatsappSettings { id: number; number: string; updatedAt: string; }
 export const getWhatsappSettings = () => api.get("/whatsapp-settings") as Promise<{ number: string }>;

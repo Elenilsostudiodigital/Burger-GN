@@ -2,7 +2,7 @@ import { Link } from 'wouter';
 import { useEffect, useState } from 'react';
 import {
   LayoutDashboard, UtensilsCrossed, Tag, MapPin, Settings, Crown,
-  TrendingUp, Star, Upload, Navigation, Users, BarChart3, PackageCheck, Shield,
+  TrendingUp, Star, Upload, Navigation, Users, BarChart3, PackageCheck,
 } from 'lucide-react';
 import { getAdminStreetRequests } from '../lib/api';
 
@@ -20,7 +20,6 @@ const ITEMS = [
   { href: '/admin/novas-ruas', icon: MapPin, label: 'Novas Ruas' },
   { href: '/admin/entrega-km', icon: Navigation, label: 'Por KM' },
   { href: '/admin/config', icon: Settings, label: 'Config' },
-  { href: '/admin/seguranca', icon: Shield, label: 'Segurança' },
   { href: '/admin/importar', icon: Upload, label: 'Importar' },
 ] as const;
 

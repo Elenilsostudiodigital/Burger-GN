@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'wouter';
 import { motion } from 'framer-motion';
 import { ShoppingCart, ArrowRight, Search, X } from 'lucide-react';
-import { getCategories, getProducts, getPopularProducts, Category, Product, Addon } from '../lib/api';
+import { getCategories, getProducts, getPopularProducts, getCompanyProfile, Category, Product, Addon, CompanyProfile } from '../lib/api';
 import { buildHomeSections, filterProductsByQuery } from '../lib/homeSections';
 import { useCart } from '../context/CartContext';
 import { BottomNav } from '../components/BottomNav';
@@ -17,21 +17,41 @@ export default function Home() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [popularIds, setPopularIds] = useState<number[]>([]);
+  const [profile, setProfile] = useState<CompanyProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [detailProduct, setDetailProduct] = useState<Product | null>(null);
   const { cartItems, addItem, updateQuantity, totalItems } = useCart();
 
   useEffect(() => {
-    Promise.all([getCategories(), getProducts(), getPopularProducts().catch(() => [])])
-      .then(([cats, prods, popular]) => {
+    Promise.all([
+      getCategories(),
+      getProducts(),
+      getPopularProducts().catch(() => []),
+      getCompanyProfile().catch(() => null),
+    ])
+      .then(([cats, prods, popular, companyProfile]) => {
         setCategories(cats);
         setProducts(prods);
         setPopularIds(popular.map(p => p.productId).filter((id): id is number => typeof id === 'number'));
+        setProfile(companyProfile);
       })
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
+
+  const brandName = profile?.name?.trim() || 'The Burger GN';
+  const brandMark = profile?.logoUrl?.trim()
+    ? null
+    : (brandName.match(/GN/i)?.[0] || brandName.slice(0, 2).toUpperCase() || 'GN');
+  const bannerUrl =
+    profile?.bannerUrl?.trim() ||
+    'https://images.unsplash.com/photo-1550547660-d9450f859349?w=1200&h=800&fit=crop';
+  const slogan = profile?.slogan?.trim() || 'Muito mais que um hambúrguer.';
+  const welcome =
+    profile?.menuWelcomeMessage?.trim() ||
+    profile?.description?.trim() ||
+    'Sabores artesanais, apresentação impecável e o padrão que o pedido merece.';
 
   const sections = useMemo(
     () => buildHomeSections(categories, products, popularIds),
@@ -88,10 +108,18 @@ export default function Home() {
       <header className="sticky top-0 z-40 bg-zinc-950 border-b border-zinc-800/80 px-4 py-3">
         <div className="max-w-md mx-auto flex items-center justify-between">
           <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 border-2 border-amber-500 rounded-full flex items-center justify-center shadow-[0_0_18px_rgba(245,158,11,0.25)]">
-              <span className="text-amber-500 font-black text-xs tracking-tight">GN</span>
-            </div>
-            <span className="text-white font-black uppercase tracking-tight text-sm">The Burger GN</span>
+            {profile?.logoUrl?.trim() ? (
+              <img
+                src={profile.logoUrl}
+                alt=""
+                className="w-9 h-9 rounded-full object-cover border-2 border-amber-500"
+              />
+            ) : (
+              <div className="w-9 h-9 border-2 border-amber-500 rounded-full flex items-center justify-center shadow-[0_0_18px_rgba(245,158,11,0.25)]">
+                <span className="text-amber-500 font-black text-xs tracking-tight">{brandMark}</span>
+              </div>
+            )}
+            <span className="text-white font-black uppercase tracking-tight text-sm">{brandName}</span>
           </div>
           <Link href="/carrinho" className="relative p-2 text-zinc-300 hover:text-amber-500 transition-colors">
             <ShoppingCart size={22} />
@@ -117,7 +145,7 @@ export default function Home() {
       <section className="relative overflow-hidden">
         <div
           className="absolute inset-0 bg-cover bg-center scale-105"
-          style={{ backgroundImage: "url('https://images.unsplash.com/photo-1550547660-d9450f859349?w=1200&h=800&fit=crop')" }}
+          style={{ backgroundImage: `url('${bannerUrl.replace(/'/g, "%27")}')` }}
         />
         <div className="absolute inset-0 bg-gradient-to-b from-black/55 via-[#0a0a0a]/85 to-[#0a0a0a]" />
         <div className="relative max-w-md mx-auto px-5 pt-10 pb-8">
@@ -128,15 +156,22 @@ export default function Home() {
             className="space-y-4"
           >
             <p className="text-amber-500 text-xs font-bold uppercase tracking-[0.22em]">
-              The Burger GN
+              {brandName}
             </p>
             <h1 className="font-display text-white text-[2.65rem] sm:text-5xl leading-[0.95] tracking-wide uppercase">
-              Muito mais que um hambúrguer.
-              <span className="block text-amber-500 mt-1">Uma experiência de verdade.</span>
+              {slogan}
+              {!profile?.slogan?.trim() ? (
+                <span className="block text-amber-500 mt-1">Uma experiência de verdade.</span>
+              ) : null}
             </h1>
             <p className="text-zinc-400 text-sm leading-relaxed max-w-[300px]">
-              Sabores artesanais, apresentação impecável e o padrão que o pedido merece.
+              {welcome}
             </p>
+            {(profile?.displayOpenDays || profile?.displayHoursText) ? (
+              <p className="text-zinc-500 text-xs">
+                {[profile.displayOpenDays, profile.displayHoursText].filter(Boolean).join(' · ')}
+              </p>
+            ) : null}
             <div className="flex gap-3 pt-2">
               <Link href="/cardapio" className="flex-1">
                 <Button size="lg" className="w-full h-12 rounded-xl font-bold tracking-wider shadow-lg shadow-amber-500/20">

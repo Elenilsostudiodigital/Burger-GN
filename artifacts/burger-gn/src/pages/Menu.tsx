@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useCart } from '../context/CartContext';
-import { getCategories, getProducts, getExternalLinks, Category, Product, ExternalLink, Addon } from '../lib/api';
+import { getCategories, getProducts, getExternalLinks, getCompanyProfile, Category, Product, ExternalLink, Addon, CompanyProfile } from '../lib/api';
 import { filterProductsByQuery } from '../lib/homeSections';
 import { BottomNav } from '../components/BottomNav';
 import { WhatsAppButton } from '../components/WhatsAppButton';
@@ -10,13 +10,14 @@ import { ProductDetailModal } from '../components/ProductDetailModal';
 import { ProductRowCard } from '../components/ProductRowCard';
 import { ClubeHomeCard } from '../components/ClubeHomeCard';
 import { StoreClosedBanner } from '../components/StoreClosedBanner';
-import { ShoppingCart, ExternalLink as ExternalLinkIcon, Search, X } from 'lucide-react';
+import { ShoppingCart, ExternalLink as ExternalLinkIcon, Search, X, Instagram, Facebook, Globe, MapPin, Phone } from 'lucide-react';
 import { Link } from 'wouter';
 
 export default function Menu() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [externalLinks, setExternalLinks] = useState<ExternalLink[]>([]);
+  const [profile, setProfile] = useState<CompanyProfile | null>(null);
   const [activeCategory, setActiveCategory] = useState<string>('');
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
@@ -24,16 +25,26 @@ export default function Menu() {
   const { cartItems, addItem, updateQuantity, totalItems } = useCart();
 
   useEffect(() => {
-    Promise.all([getCategories(), getProducts()])
-      .then(([cats, prods]) => {
+    Promise.all([
+      getCategories(),
+      getProducts(),
+      getCompanyProfile().catch(() => null),
+    ])
+      .then(([cats, prods, companyProfile]) => {
         setCategories(cats);
         setProducts(prods);
+        setProfile(companyProfile);
         if (cats.length > 0) setActiveCategory(cats[0].slug);
       })
       .catch(() => {})
       .finally(() => setLoading(false));
     getExternalLinks().then(setExternalLinks).catch(() => {});
   }, []);
+
+  const brandName = profile?.name?.trim() || 'The Burger GN';
+  const brandMark = profile?.logoUrl?.trim()
+    ? null
+    : (brandName.match(/GN/i)?.[0] || brandName.slice(0, 2).toUpperCase() || 'GN');
 
   const filteredItems = useMemo(() => {
     if (search.trim()) return filterProductsByQuery(products, search);
@@ -79,10 +90,18 @@ export default function Menu() {
       <header className="sticky top-0 z-40 bg-zinc-950 border-b border-zinc-800 px-6 py-4">
         <div className="max-w-md mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 border-2 border-amber-500 rounded-full flex items-center justify-center">
-              <span className="text-amber-500 font-black text-sm">GN</span>
-            </div>
-            <h1 className="text-xl font-black text-white uppercase tracking-tight">The Burger GN</h1>
+            {profile?.logoUrl?.trim() ? (
+              <img
+                src={profile.logoUrl}
+                alt=""
+                className="w-10 h-10 rounded-full object-cover border-2 border-amber-500"
+              />
+            ) : (
+              <div className="w-10 h-10 border-2 border-amber-500 rounded-full flex items-center justify-center">
+                <span className="text-amber-500 font-black text-sm">{brandMark}</span>
+              </div>
+            )}
+            <h1 className="text-xl font-black text-white uppercase tracking-tight">{brandName}</h1>
           </div>
           <Link href="/carrinho" className="relative p-2 text-zinc-300 hover:text-amber-500 transition-colors">
             <ShoppingCart size={24} />
@@ -101,6 +120,18 @@ export default function Menu() {
 
       <div className="max-w-md mx-auto px-4 pt-3 space-y-3">
         <StoreClosedBanner />
+        {profile?.menuWelcomeMessage?.trim() ? (
+          <p className="text-zinc-400 text-sm leading-relaxed px-1">{profile.menuWelcomeMessage}</p>
+        ) : null}
+        {(profile?.bannerUrl || profile?.photoUrl) ? (
+          <div className="rounded-2xl overflow-hidden border border-zinc-800 aspect-[21/9]">
+            <img
+              src={(profile.bannerUrl || profile.photoUrl)!}
+              alt=""
+              className="w-full h-full object-cover"
+            />
+          </div>
+        ) : null}
         <ClubeHomeCard />
       </div>
 
@@ -192,6 +223,56 @@ export default function Menu() {
                 <ExternalLinkIcon size={16} /> {link.label}
               </a>
             ))}
+          </div>
+        )}
+
+        {profile && (
+          <div className="mt-8 space-y-3 rounded-2xl border border-zinc-800 bg-zinc-900/50 p-4">
+            {profile.description?.trim() ? (
+              <p className="text-zinc-400 text-sm leading-relaxed">{profile.description}</p>
+            ) : null}
+            {(profile.displayOpenDays || profile.displayHoursText) ? (
+              <p className="text-zinc-500 text-xs">
+                {[profile.displayOpenDays, profile.displayHoursText].filter(Boolean).join(' · ')}
+              </p>
+            ) : null}
+            {profile.address?.trim() ? (
+              <p className="text-zinc-400 text-sm flex items-start gap-2">
+                <MapPin size={14} className="mt-0.5 text-amber-500 shrink-0" /> {profile.address}
+              </p>
+            ) : null}
+            {profile.phone?.trim() ? (
+              <a href={`tel:${profile.phone}`} className="text-zinc-400 text-sm flex items-center gap-2 hover:text-amber-500">
+                <Phone size={14} className="text-amber-500" /> {profile.phone}
+              </a>
+            ) : null}
+            <div className="flex flex-wrap gap-2 pt-1">
+              {profile.instagramUrl?.trim() ? (
+                <a href={profile.instagramUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-zinc-800 text-zinc-400 text-xs font-bold hover:text-amber-500">
+                  <Instagram size={14} /> Instagram
+                </a>
+              ) : null}
+              {profile.facebookUrl?.trim() ? (
+                <a href={profile.facebookUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-zinc-800 text-zinc-400 text-xs font-bold hover:text-amber-500">
+                  <Facebook size={14} /> Facebook
+                </a>
+              ) : null}
+              {profile.websiteUrl?.trim() ? (
+                <a href={profile.websiteUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-zinc-800 text-zinc-400 text-xs font-bold hover:text-amber-500">
+                  <Globe size={14} /> Site
+                </a>
+              ) : null}
+              {profile.profileWhatsapp?.trim() ? (
+                <a
+                  href={`https://wa.me/${profile.profileWhatsapp.replace(/\D/g, '')}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-zinc-800 text-zinc-400 text-xs font-bold hover:text-amber-500"
+                >
+                  WhatsApp
+                </a>
+              ) : null}
+            </div>
           </div>
         )}
       </main>

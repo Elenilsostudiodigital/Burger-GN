@@ -8,47 +8,51 @@ import {
 } from '../../lib/api';
 import { useAdmin } from '../../context/AdminContext';
 import {
-  LayoutDashboard, UtensilsCrossed, Tag, MapPin, Navigation, Settings,
-  LogOut, Plus, Pencil, Trash2, Check, X, ToggleLeft, ToggleRight,
-  Loader2, CreditCard, Link as LinkIcon, ShieldAlert, ShieldCheck, Upload,
-  MessageCircle, TrendingUp, Crown, Star, Clock,
+  MapPin, Settings, LogOut, Plus, Pencil, Trash2, Check, X, ToggleLeft, ToggleRight,
+  Loader2, CreditCard, Link as LinkIcon, ShieldAlert, ShieldCheck,
+  MessageCircle, Clock, User, Shield, Bell,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { BusinessHoursTab } from './BusinessHoursTab';
+import { ProfileTab } from './ProfileTab';
+import { SecurityTab } from './SecurityTab';
+import { NotificationsTab } from './NotificationsTab';
+import { AdminBottomNav } from '../../components/AdminBottomNav';
 
-function AdminNav({ active }: { active: string }) {
-  const items = [
-    { href: '/admin', icon: <TrendingUp size={17} />, label: 'Início' },
-    { href: '/admin/pedidos', icon: <LayoutDashboard size={17} />, label: 'Pedidos' },
-    { href: '/admin/avaliacoes', icon: <Star size={17} />, label: 'Avaliações' },
-    { href: '/admin/cardapio', icon: <UtensilsCrossed size={17} />, label: 'Cardápio' },
-    { href: '/admin/financeiro', icon: <TrendingUp size={17} />, label: 'Financeiro' },
-    { href: '/admin/cupons', icon: <Tag size={17} />, label: 'Cupons' },
-    { href: '/admin/clube', icon: <Crown size={17} />, label: 'Clube' },
-    { href: '/admin/taxas', icon: <MapPin size={17} />, label: 'Bairros' },
-    { href: '/admin/entrega-km', icon: <Navigation size={17} />, label: 'Por KM' },
-    { href: '/admin/config', icon: <Settings size={17} />, label: 'Config' },
-    { href: '/admin/importar', icon: <Upload size={17} />, label: 'Importar' },
-  ];
-  return (
-    <nav className="fixed bottom-0 left-0 right-0 bg-zinc-950/95 backdrop-blur border-t border-zinc-800 z-40">
-      <div className="max-w-3xl mx-auto flex overflow-x-auto no-scrollbar">
-        {items.map(item => (
-          <Link key={item.href} href={item.href} className="flex-1 min-w-[64px]">
-            <div className={`flex flex-col items-center gap-0.5 py-2.5 transition-colors ${active === item.href ? 'text-amber-500' : 'text-zinc-500 hover:text-white'}`}>
-              {item.icon}
-              <span className="text-[9px] font-bold uppercase">{item.label}</span>
-            </div>
-          </Link>
-        ))}
-      </div>
-    </nav>
-  );
+type Tab =
+  | 'perfil'
+  | 'seguranca'
+  | 'horario'
+  | 'preparo'
+  | 'pagamento'
+  | 'whatsapp'
+  | 'notificacoes'
+  | 'links'
+  | 'ruas';
+
+const TAB_FROM_QUERY: Record<string, Tab> = {
+  perfil: 'perfil',
+  seguranca: 'seguranca',
+  horario: 'horario',
+  preparo: 'preparo',
+  pagamento: 'pagamento',
+  pagamentos: 'pagamento',
+  whatsapp: 'whatsapp',
+  notificacoes: 'notificacoes',
+  links: 'links',
+  ruas: 'ruas',
+};
+
+function readInitialTab(): Tab {
+  try {
+    const q = new URLSearchParams(window.location.search).get('tab') || '';
+    return TAB_FROM_QUERY[q.toLowerCase()] || 'perfil';
+  } catch {
+    return 'perfil';
+  }
 }
-
-type Tab = 'pagamento' | 'preparo' | 'horario' | 'links' | 'whatsapp' | 'ruas';
 
 function PrepTimeTab() {
   const [loading, setLoading] = useState(true);
@@ -524,9 +528,30 @@ function WhatsappTab() {
 export default function SettingsHub() {
   const { logout } = useAdmin();
   const [, setLocation] = useLocation();
-  const [tab, setTab] = useState<Tab>('pagamento');
+  const [tab, setTab] = useState<Tab>(readInitialTab);
+
+  useEffect(() => {
+    const next = new URLSearchParams();
+    next.set('tab', tab);
+    const url = `/admin/config?${next.toString()}`;
+    if (`${window.location.pathname}${window.location.search}` !== url) {
+      window.history.replaceState(null, '', url);
+    }
+  }, [tab]);
 
   const handleLogout = async () => { await logout(); setLocation('/'); };
+
+  const tabs: Array<{ id: Tab; label: string; icon: React.ReactNode }> = [
+    { id: 'perfil', label: 'Perfil', icon: <User size={16} /> },
+    { id: 'seguranca', label: 'Segurança', icon: <Shield size={16} /> },
+    { id: 'horario', label: 'Horário', icon: <Clock size={16} /> },
+    { id: 'preparo', label: 'Preparo', icon: <Clock size={16} /> },
+    { id: 'pagamento', label: 'Pagamentos', icon: <CreditCard size={16} /> },
+    { id: 'whatsapp', label: 'WhatsApp', icon: <MessageCircle size={16} /> },
+    { id: 'notificacoes', label: 'Notificações', icon: <Bell size={16} /> },
+    { id: 'links', label: 'Links', icon: <LinkIcon size={16} /> },
+    { id: 'ruas', label: 'Ruas', icon: <MapPin size={16} /> },
+  ];
 
   return (
     <div className="min-h-screen bg-[#0a0a0a] pb-24">
@@ -536,7 +561,7 @@ export default function SettingsHub() {
             <Settings size={20} className="text-amber-500" />
             <div>
               <h1 className="text-white font-black uppercase text-base leading-none">Configurações</h1>
-              <p className="text-zinc-600 text-xs">Pagamento, horário e links</p>
+              <p className="text-zinc-600 text-xs">Perfil, segurança e operação</p>
             </div>
           </div>
           <button onClick={handleLogout} className="p-2 text-zinc-400 hover:text-red-400 transition-colors">
@@ -547,37 +572,30 @@ export default function SettingsHub() {
 
       <main className="max-w-2xl mx-auto px-4 py-5 space-y-5">
         <div className="flex gap-2 overflow-x-auto no-scrollbar">
-          <button onClick={() => setTab('pagamento')}
-            className={`shrink-0 flex-1 min-w-[7rem] h-11 rounded-xl font-bold text-sm uppercase tracking-wide transition-all flex items-center justify-center gap-2 ${tab === 'pagamento' ? 'bg-amber-500 text-zinc-950' : 'bg-zinc-900 text-zinc-400 border border-zinc-800'}`}>
-            <CreditCard size={16} /> Pagamento
-          </button>
-          <button onClick={() => setTab('preparo')}
-            className={`shrink-0 flex-1 min-w-[7rem] h-11 rounded-xl font-bold text-sm uppercase tracking-wide transition-all flex items-center justify-center gap-2 ${tab === 'preparo' ? 'bg-amber-500 text-zinc-950' : 'bg-zinc-900 text-zinc-400 border border-zinc-800'}`}>
-            <Clock size={16} /> Tempo de Preparo
-          </button>
-          <button onClick={() => setTab('horario')}
-            className={`shrink-0 flex-1 min-w-[7rem] h-11 rounded-xl font-bold text-sm uppercase tracking-wide transition-all flex items-center justify-center gap-2 ${tab === 'horario' ? 'bg-amber-500 text-zinc-950' : 'bg-zinc-900 text-zinc-400 border border-zinc-800'}`}>
-            <Clock size={16} /> Horário
-          </button>
-          <button onClick={() => setTab('links')}
-            className={`shrink-0 flex-1 min-w-[7rem] h-11 rounded-xl font-bold text-sm uppercase tracking-wide transition-all flex items-center justify-center gap-2 ${tab === 'links' ? 'bg-amber-500 text-zinc-950' : 'bg-zinc-900 text-zinc-400 border border-zinc-800'}`}>
-            <LinkIcon size={16} /> Links Externos
-          </button>
-          <button onClick={() => setTab('whatsapp')}
-            className={`shrink-0 flex-1 min-w-[7rem] h-11 rounded-xl font-bold text-sm uppercase tracking-wide transition-all flex items-center justify-center gap-2 ${tab === 'whatsapp' ? 'bg-amber-500 text-zinc-950' : 'bg-zinc-900 text-zinc-400 border border-zinc-800'}`}>
-            <MessageCircle size={16} /> WhatsApp
-          </button>
-          <button onClick={() => setTab('ruas')}
-            className={`shrink-0 flex-1 min-w-[7rem] h-11 rounded-xl font-bold text-sm uppercase tracking-wide transition-all flex items-center justify-center gap-2 ${tab === 'ruas' ? 'bg-amber-500 text-zinc-950' : 'bg-zinc-900 text-zinc-400 border border-zinc-800'}`}>
-            <MapPin size={16} /> Ruas de Entrega
-          </button>
+          {tabs.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => setTab(t.id)}
+              className={`shrink-0 flex-1 min-w-[7rem] h-11 rounded-xl font-bold text-sm uppercase tracking-wide transition-all flex items-center justify-center gap-2 ${
+                tab === t.id
+                  ? 'bg-amber-500 text-zinc-950'
+                  : 'bg-zinc-900 text-zinc-400 border border-zinc-800'
+              }`}
+            >
+              {t.icon} {t.label}
+            </button>
+          ))}
         </div>
 
-        {tab === 'pagamento' ? <PaymentTab />
-          : tab === 'preparo' ? <PrepTimeTab />
+        {tab === 'perfil' ? <ProfileTab />
+          : tab === 'seguranca' ? <SecurityTab />
             : tab === 'horario' ? <BusinessHoursTab />
-              : tab === 'links' ? <LinksTab />
-                : tab === 'whatsapp' ? <WhatsappTab /> : (
+              : tab === 'preparo' ? <PrepTimeTab />
+                : tab === 'pagamento' ? <PaymentTab />
+                  : tab === 'whatsapp' ? <WhatsappTab />
+                    : tab === 'notificacoes' ? <NotificationsTab />
+                      : tab === 'links' ? <LinksTab /> : (
           <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-5 space-y-3">
             <h3 className="text-white font-black uppercase text-sm">Ruas de Entrega</h3>
             <p className="text-zinc-400 text-sm leading-relaxed">
@@ -588,14 +606,14 @@ export default function SettingsHub() {
             </Link>
             <Link href="/admin/novas-ruas">
               <Button variant="outline" className="w-full h-11 rounded-xl font-bold border-zinc-700">
-                📍 Ver Novas Ruas
+                Ver Novas Ruas
               </Button>
             </Link>
           </div>
         )}
       </main>
 
-      <AdminNav active="/admin/config" />
+      <AdminBottomNav active="/admin/config" />
     </div>
   );
 }
