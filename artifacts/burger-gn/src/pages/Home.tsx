@@ -11,6 +11,8 @@ import { ProductDetailModal } from '../components/ProductDetailModal';
 import { ProductRowCard } from '../components/ProductRowCard';
 import { ClubeHomeCard } from '../components/ClubeHomeCard';
 import { StoreClosedBanner } from '../components/StoreClosedBanner';
+import { getSavedClubePhone } from '../lib/clubeCliente';
+import { productEffectivePrice } from '../lib/productMarketing';
 import { Button } from '@/components/ui/button';
 
 export default function Home() {
@@ -21,7 +23,18 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [detailProduct, setDetailProduct] = useState<Product | null>(null);
+  const [clubeLoggedIn, setClubeLoggedIn] = useState(() => !!getSavedClubePhone());
   const { cartItems, addItem, updateQuantity, totalItems } = useCart();
+
+  useEffect(() => {
+    const sync = () => setClubeLoggedIn(!!getSavedClubePhone());
+    window.addEventListener('bgn:clube-session-changed', sync);
+    window.addEventListener('storage', sync);
+    return () => {
+      window.removeEventListener('bgn:clube-session-changed', sync);
+      window.removeEventListener('storage', sync);
+    };
+  }, []);
 
   useEffect(() => {
     Promise.all([
@@ -72,22 +85,24 @@ export default function Home() {
     cartItems.find(ci => ci.item.id === productId && ci.selectedAddons.length === 0 && !ci.notes)?.lineId;
 
   const handleQuickAdd = (product: Product) => {
+    if (product.isClubeExclusive && !clubeLoggedIn) return;
     addItem({
       id: product.id,
       name: product.name,
       description: product.description,
-      price: parseFloat(product.price),
+      price: productEffectivePrice(product),
       image: product.image,
       available: product.available,
     });
   };
 
   const handleModalAdd = (product: Product, addons: Addon[], notes: string, quantity: number) => {
+    if (product.isClubeExclusive && !clubeLoggedIn) return;
     addItem({
       id: product.id,
       name: product.name,
       description: product.description,
-      price: parseFloat(product.price),
+      price: productEffectivePrice(product),
       image: product.image,
       available: product.available,
     }, { addons, notes, quantity });
@@ -244,6 +259,7 @@ export default function Home() {
                     product={product}
                     index={idx}
                     quantity={quantityForProduct(product.id)}
+                    clubeLoggedIn={clubeLoggedIn}
                     onSelect={setDetailProduct}
                     onQuickAdd={handleQuickAdd}
                     onQuantityChange={handleQuantityChange}
@@ -286,6 +302,7 @@ export default function Home() {
                     product={product}
                     index={idx}
                     quantity={quantityForProduct(product.id)}
+                    clubeLoggedIn={clubeLoggedIn}
                     onSelect={setDetailProduct}
                     onQuickAdd={handleQuickAdd}
                     onQuantityChange={handleQuantityChange}
@@ -301,6 +318,7 @@ export default function Home() {
         product={detailProduct}
         onClose={() => setDetailProduct(null)}
         onAdd={handleModalAdd}
+        clubeLoggedIn={clubeLoggedIn}
       />
       <BottomNav />
     </PageTransition>

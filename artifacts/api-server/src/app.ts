@@ -12,6 +12,7 @@ import { ensureDeliveryStreetsSchema } from "./lib/ensureDeliveryStreetsSchema";
 import { ensureDeliveryAreasSchema } from "./lib/ensureDeliveryAreasSchema";
 import { ensurePaymentSettingsSchema } from "./lib/ensurePaymentSettingsSchema";
 import { ensureBusinessHoursSchema } from "./lib/ensureBusinessHoursSchema";
+import { ensureProductMarketingSchema } from "./lib/ensureProductMarketingSchema";
 
 const app: Express = express();
 
@@ -126,6 +127,24 @@ app.use("/api", async (req, res, next) => {
   } catch (err) {
     logger.error({ err }, "Failed to ensure business hours schema");
     res.status(500).json({ error: "Falha ao preparar o horário de funcionamento." });
+  }
+});
+
+/** Ensures product marketing / promotion columns before product handlers. */
+app.use("/api", async (req, res, next) => {
+  const p = req.path || "";
+  const needsMarketing =
+    p.startsWith("/products") ||
+    p.startsWith("/admin/products") ||
+    p === "/orders" ||
+    p.startsWith("/orders/");
+  if (!needsMarketing) return next();
+  try {
+    await ensureProductMarketingSchema();
+    next();
+  } catch (err) {
+    logger.error({ err }, "Failed to ensure product marketing schema");
+    res.status(500).json({ error: "Falha ao preparar marketing de produtos." });
   }
 });
 

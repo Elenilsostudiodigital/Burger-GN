@@ -1,22 +1,23 @@
 import React, { useEffect, useState } from 'react';
-import { Link } from 'wouter';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   getAdminProducts, getAdminCategories, createProduct, updateProduct, deleteProduct,
+  updateProductPromotion,
   createCategory, updateCategory, deleteCategory,
   Product, Category,
 } from '../../lib/api';
+import { MARKETING_BADGE_OPTIONS } from '../../lib/productMarketing';
 import { useAdmin } from '../../context/AdminContext';
 import { useLocation } from 'wouter';
 import {
-  LayoutDashboard, UtensilsCrossed, Plus, Pencil, Trash2, Check, X,
-  ToggleLeft, ToggleRight, Loader2, Tag, MapPin, LogOut, Navigation, Settings, Upload,
-  TrendingUp, Crown,
+  UtensilsCrossed, Plus, Pencil, Trash2, Check, X,
+  ToggleLeft, ToggleRight, Loader2, LogOut, Zap,
 } from 'lucide-react';
 import type { Addon } from '../../lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { AdminBottomNav } from '../../components/AdminBottomNav';
 
 type Tab = 'products' | 'categories';
 
@@ -30,11 +31,73 @@ interface ProductFormData {
   addons: Addon[];
   categoryId: string;
   displayOrder: string;
+  isFeatured: boolean;
+  isPromotion: boolean;
+  isBestseller: boolean;
+  isNew: boolean;
+  isFlashOffer: boolean;
+  isClubeExclusive: boolean;
+  promoOriginalPrice: string;
+  promoPrice: string;
+  promoStartsAt: string;
+  promoEndsAt: string;
+  marketingBadge: string;
 }
 
 const EMPTY_FORM: ProductFormData = {
   name: '', description: '', price: '', image: '', videoUrl: '', ingredients: '', addons: [], categoryId: '', displayOrder: '0',
+  isFeatured: false, isPromotion: false, isBestseller: false, isNew: false, isFlashOffer: false, isClubeExclusive: false,
+  promoOriginalPrice: '', promoPrice: '', promoStartsAt: '', promoEndsAt: '', marketingBadge: '',
 };
+
+function toLocalInput(iso: string | null | undefined): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function productToForm(p: Product): ProductFormData {
+  return {
+    name: p.name,
+    description: p.description,
+    price: p.price,
+    image: p.image,
+    videoUrl: p.videoUrl ?? '',
+    ingredients: (p.ingredients ?? []).join(', '),
+    addons: p.addons ?? [],
+    categoryId: p.categoryId ? String(p.categoryId) : '',
+    displayOrder: String(p.displayOrder),
+    isFeatured: !!p.isFeatured,
+    isPromotion: !!p.isPromotion,
+    isBestseller: !!p.isBestseller,
+    isNew: !!p.isNew,
+    isFlashOffer: !!p.isFlashOffer,
+    isClubeExclusive: !!p.isClubeExclusive,
+    promoOriginalPrice: p.promoOriginalPrice || '',
+    promoPrice: p.promoPrice || '',
+    promoStartsAt: toLocalInput(p.promoStartsAt),
+    promoEndsAt: toLocalInput(p.promoEndsAt),
+    marketingBadge: p.marketingBadge || '',
+  };
+}
+
+function CheckboxRow({
+  checked, onChange, label,
+}: { checked: boolean; onChange: (v: boolean) => void; label: string }) {
+  return (
+    <label className="flex items-center gap-2 text-sm text-zinc-300 cursor-pointer select-none">
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={e => onChange(e.target.checked)}
+        className="rounded border-zinc-700 bg-zinc-950 text-amber-500 focus:ring-amber-500"
+      />
+      {label}
+    </label>
+  );
+}
 
 function ProductForm({ categories, initial, onSave, onCancel, saving }: {
   categories: Category[];
@@ -135,6 +198,56 @@ function ProductForm({ categories, initial, onSave, onCancel, saving }: {
           <p className="text-zinc-600 text-xs">Nenhum adicional cadastrado.</p>
         )}
       </div>
+
+      <div className="rounded-2xl border border-amber-500/30 bg-zinc-950/60 p-4 space-y-3">
+        <h4 className="text-amber-500 font-black uppercase text-xs tracking-wider">📢 Marketing do Produto</h4>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <CheckboxRow checked={form.isFeatured} onChange={v => setForm(f => ({ ...f, isFeatured: v }))} label="Produto em Destaque" />
+          <CheckboxRow checked={form.isPromotion} onChange={v => setForm(f => ({ ...f, isPromotion: v }))} label="Produto em Promoção" />
+          <CheckboxRow checked={form.isBestseller} onChange={v => setForm(f => ({ ...f, isBestseller: v }))} label="Mais Vendido" />
+          <CheckboxRow checked={form.isNew} onChange={v => setForm(f => ({ ...f, isNew: v }))} label="Novidade" />
+          <CheckboxRow checked={form.isFlashOffer} onChange={v => setForm(f => ({ ...f, isFlashOffer: v }))} label="Oferta Relâmpago" />
+          <CheckboxRow checked={form.isClubeExclusive} onChange={v => setForm(f => ({ ...f, isClubeExclusive: v }))} label="Oferta Exclusiva Clube Burger" />
+        </div>
+        <div className="space-y-1">
+          <Label className="text-zinc-400 text-xs">Etiqueta exibida</Label>
+          <select
+            value={form.marketingBadge}
+            onChange={set('marketingBadge')}
+            className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 h-10 text-white text-sm focus:border-amber-500 focus:outline-none"
+          >
+            {MARKETING_BADGE_OPTIONS.map(o => (
+              <option key={o.value || 'auto'} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+        </div>
+        {(form.isPromotion || form.isFlashOffer || form.isClubeExclusive) && (
+          <div className="grid grid-cols-2 gap-3 pt-1">
+            <div className="space-y-1">
+              <Label className="text-zinc-400 text-xs">Preço Original</Label>
+              <Input type="number" step="0.01" min="0" value={form.promoOriginalPrice} onChange={set('promoOriginalPrice')}
+                placeholder={form.price || '0.00'}
+                className="bg-zinc-950 border-zinc-800 text-white h-10 text-sm focus:border-amber-500" />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-zinc-400 text-xs">Preço Promocional</Label>
+              <Input type="number" step="0.01" min="0" value={form.promoPrice} onChange={set('promoPrice')}
+                className="bg-zinc-950 border-zinc-800 text-white h-10 text-sm focus:border-amber-500" />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-zinc-400 text-xs">Início</Label>
+              <Input type="datetime-local" value={form.promoStartsAt} onChange={set('promoStartsAt')}
+                className="bg-zinc-950 border-zinc-800 text-white h-10 text-sm focus:border-amber-500" />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-zinc-400 text-xs">Término</Label>
+              <Input type="datetime-local" value={form.promoEndsAt} onChange={set('promoEndsAt')}
+                className="bg-zinc-950 border-zinc-800 text-white h-10 text-sm focus:border-amber-500" />
+            </div>
+          </div>
+        )}
+      </div>
+
       <div className="flex gap-3 pt-2">
         <Button onClick={() => onSave(form)} disabled={saving || !form.name || !form.price}
           className="flex-1 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold rounded-xl h-10 text-sm">
@@ -147,6 +260,80 @@ function ProductForm({ categories, initial, onSave, onCancel, saving }: {
         </Button>
       </div>
     </motion.div>
+  );
+}
+
+function QuickPromoModal({
+  product, onClose, onSaved,
+}: {
+  product: Product;
+  onClose: () => void;
+  onSaved: (p: Product) => void;
+}) {
+  const [promoPrice, setPromoPrice] = useState(product.promoPrice || '');
+  const [starts, setStarts] = useState(toLocalInput(product.promoStartsAt));
+  const [ends, setEnds] = useState(toLocalInput(product.promoEndsAt));
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  const save = async () => {
+    setError('');
+    if (!promoPrice.trim()) {
+      setError('Informe o preço promocional.');
+      return;
+    }
+    setSaving(true);
+    try {
+      const updated = await updateProductPromotion(product.id, {
+        promoPrice,
+        promoStartsAt: starts || null,
+        promoEndsAt: ends || null,
+      });
+      onSaved(updated);
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Erro ao salvar promoção');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/70 p-4" onClick={onClose}>
+      <div
+        className="w-full max-w-md rounded-2xl border border-zinc-700 bg-zinc-950 p-5 space-y-4"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between gap-2">
+          <h3 className="text-white font-black uppercase text-sm">⚡ Promoção Rápida</h3>
+          <button type="button" onClick={onClose} className="text-zinc-500 hover:text-white"><X size={18} /></button>
+        </div>
+        <p className="text-zinc-500 text-xs">{product.name}</p>
+        <div className="space-y-1">
+          <Label className="text-zinc-400 text-xs">Preço Promocional</Label>
+          <Input type="number" step="0.01" min="0" value={promoPrice} onChange={e => setPromoPrice(e.target.value)}
+            className="bg-zinc-900 border-zinc-800 text-white h-11 focus:border-amber-500" />
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1">
+            <Label className="text-zinc-400 text-xs">Data inicial</Label>
+            <Input type="datetime-local" value={starts} onChange={e => setStarts(e.target.value)}
+              className="bg-zinc-900 border-zinc-800 text-white h-11 focus:border-amber-500" />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-zinc-400 text-xs">Data final</Label>
+            <Input type="datetime-local" value={ends} onChange={e => setEnds(e.target.value)}
+              className="bg-zinc-900 border-zinc-800 text-white h-11 focus:border-amber-500" />
+          </div>
+        </div>
+        {error ? <p className="text-red-400 text-sm">{error}</p> : null}
+        <Button onClick={save} disabled={saving}
+          className="w-full h-11 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold rounded-xl">
+          {saving ? <Loader2 size={16} className="animate-spin mr-2" /> : <Check size={16} className="mr-2" />}
+          Salvar
+        </Button>
+      </div>
+    </div>
   );
 }
 
@@ -163,6 +350,7 @@ export default function MenuAdmin() {
   const [newCatName, setNewCatName] = useState('');
   const [newCatSlug, setNewCatSlug] = useState('');
   const [addingCat, setAddingCat] = useState(false);
+  const [promoProduct, setPromoProduct] = useState<Product | null>(null);
 
   const loadData = async () => {
     setLoading(true);
@@ -187,6 +375,17 @@ export default function MenuAdmin() {
         addons: form.addons.filter(a => a.name.trim()),
         categoryId: form.categoryId ? parseInt(form.categoryId) : null,
         displayOrder: parseInt(form.displayOrder) || 0,
+        isFeatured: form.isFeatured,
+        isPromotion: form.isPromotion,
+        isBestseller: form.isBestseller,
+        isNew: form.isNew,
+        isFlashOffer: form.isFlashOffer,
+        isClubeExclusive: form.isClubeExclusive,
+        promoOriginalPrice: form.promoOriginalPrice || form.price,
+        promoPrice: form.promoPrice || null,
+        promoStartsAt: form.promoStartsAt || null,
+        promoEndsAt: form.promoEndsAt || null,
+        marketingBadge: form.marketingBadge,
       };
       if (editProduct) {
         const updated = await updateProduct(editProduct.id, payload);
@@ -237,23 +436,19 @@ export default function MenuAdmin() {
 
   return (
     <div className="min-h-screen bg-[#0a0a0a] pb-24">
-      {/* Header */}
       <header className="sticky top-0 z-40 bg-zinc-950/95 backdrop-blur border-b border-zinc-800 px-4 py-3">
         <div className="max-w-2xl mx-auto flex items-center justify-between">
           <div>
             <h1 className="text-white font-black uppercase text-base leading-none">Gestão do Cardápio</h1>
-            <p className="text-zinc-600 text-xs">The Burger GN</p>
+            <p className="text-zinc-600 text-xs">Produtos e promoções</p>
           </div>
-          <div className="flex items-center gap-2">
-            <button onClick={handleLogout} className="p-2 text-zinc-400 hover:text-red-400 transition-colors">
-              <LogOut size={20} />
-            </button>
-          </div>
+          <button onClick={handleLogout} className="p-2 text-zinc-400 hover:text-red-400 transition-colors">
+            <LogOut size={20} />
+          </button>
         </div>
       </header>
 
       <main className="max-w-2xl mx-auto px-4 py-5 space-y-5">
-        {/* Tabs */}
         <div className="flex gap-2">
           {(['products', 'categories'] as const).map(t => (
             <button key={t} onClick={() => setTab(t)}
@@ -271,21 +466,10 @@ export default function MenuAdmin() {
           </div>
         ) : tab === 'products' ? (
           <div className="space-y-4">
-            {/* Add / Edit form */}
             {showForm && (
               <ProductForm
                 categories={categories}
-                initial={editProduct ? {
-                  name: editProduct.name,
-                  description: editProduct.description,
-                  price: editProduct.price,
-                  image: editProduct.image,
-                  videoUrl: editProduct.videoUrl ?? '',
-                  ingredients: (editProduct.ingredients ?? []).join(', '),
-                  addons: editProduct.addons ?? [],
-                  categoryId: editProduct.categoryId ? String(editProduct.categoryId) : '',
-                  displayOrder: String(editProduct.displayOrder),
-                } : undefined}
+                initial={editProduct ? productToForm(editProduct) : undefined}
                 onSave={handleSaveProduct}
                 onCancel={() => { setShowForm(false); setEditProduct(null); }}
                 saving={saving}
@@ -299,13 +483,11 @@ export default function MenuAdmin() {
               </Button>
             )}
 
-            {/* Product list */}
             <div className="space-y-3">
               <AnimatePresence>
                 {products.map(product => (
                   <motion.div key={product.id} layout initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
                     className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden flex gap-0">
-                    {/* Image */}
                     <div className="w-24 shrink-0">
                       <img
                         src={product.image || 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=200&h=150&fit=crop'}
@@ -313,7 +495,6 @@ export default function MenuAdmin() {
                         className={`w-full h-full object-cover min-h-[88px] ${!product.available ? 'opacity-40 grayscale' : ''}`}
                       />
                     </div>
-                    {/* Info */}
                     <div className="flex-1 p-3 min-w-0">
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0">
@@ -326,9 +507,16 @@ export default function MenuAdmin() {
                           <p className="text-amber-500 font-black text-base mt-1">
                             R$ {parseFloat(product.price).toFixed(2).replace('.', ',')}
                           </p>
+                          {product.badgeLabel ? (
+                            <span className="inline-block mt-1 text-[10px] font-bold text-red-400">{product.badgeLabel}</span>
+                          ) : null}
                         </div>
-                        {/* Actions */}
                         <div className="flex flex-col gap-1.5 shrink-0">
+                          <button onClick={() => setPromoProduct(product)}
+                            className="px-2 py-1 text-[10px] font-black uppercase rounded-lg bg-amber-500/15 text-amber-400 border border-amber-500/30 hover:bg-amber-500/25 inline-flex items-center gap-1"
+                            title="Promoção rápida">
+                            <Zap size={12} /> Promoção
+                          </button>
                           <button onClick={() => handleToggleAvailable(product)}
                             className={`p-1.5 rounded-lg transition-colors ${product.available ? 'text-green-400 bg-green-900/30 hover:bg-green-900/50' : 'text-zinc-600 bg-zinc-800 hover:bg-zinc-700'}`}
                             title={product.available ? 'Desativar' : 'Ativar'}>
@@ -358,9 +546,7 @@ export default function MenuAdmin() {
             </div>
           </div>
         ) : (
-          /* Categories tab */
           <div className="space-y-4">
-            {/* Add category */}
             <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 space-y-3">
               <h3 className="text-white font-bold uppercase text-sm">Nova Categoria</h3>
               <div className="grid grid-cols-2 gap-3">
@@ -383,7 +569,6 @@ export default function MenuAdmin() {
               </Button>
             </div>
 
-            {/* Category list */}
             <div className="space-y-2">
               {categories.map(cat => (
                 <div key={cat.id} className="bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 flex items-center justify-between">
@@ -408,66 +593,15 @@ export default function MenuAdmin() {
         )}
       </main>
 
-      {/* Bottom nav */}
-      <nav className="fixed bottom-0 left-0 right-0 bg-zinc-950/95 backdrop-blur border-t border-zinc-800 z-40">
-        <div className="max-w-2xl mx-auto flex">
-          <Link href="/admin/pedidos" className="flex-1">
-            <div className="flex flex-col items-center gap-0.5 py-2.5 text-zinc-500 hover:text-white transition-colors">
-              <LayoutDashboard size={18} />
-              <span className="text-[9px] font-bold uppercase">Pedidos</span>
-            </div>
-          </Link>
-          <Link href="/admin/cardapio" className="flex-1">
-            <div className="flex flex-col items-center gap-0.5 py-2.5 text-amber-500">
-              <UtensilsCrossed size={18} />
-              <span className="text-[9px] font-bold uppercase">Cardápio</span>
-            </div>
-          </Link>
-          <Link href="/admin/financeiro" className="flex-1">
-            <div className="flex flex-col items-center gap-0.5 py-2.5 text-zinc-500 hover:text-white transition-colors">
-              <TrendingUp size={18} />
-              <span className="text-[9px] font-bold uppercase">Financeiro</span>
-            </div>
-          </Link>
+      {promoProduct ? (
+        <QuickPromoModal
+          product={promoProduct}
+          onClose={() => setPromoProduct(null)}
+          onSaved={(updated) => setProducts(prev => prev.map(p => p.id === updated.id ? { ...p, ...updated } : p))}
+        />
+      ) : null}
 
-          <Link href="/admin/cupons" className="flex-1">
-            <div className="flex flex-col items-center gap-0.5 py-2.5 text-zinc-500 hover:text-white transition-colors">
-              <Tag size={18} />
-              <span className="text-[9px] font-bold uppercase">Cupons</span>
-            </div>
-          </Link>
-          <Link href="/admin/clube" className="flex-1">
-            <div className="flex flex-col items-center gap-0.5 py-2.5 text-zinc-500 hover:text-white transition-colors">
-              <Crown size={18} />
-              <span className="text-[9px] font-bold uppercase">Clube Burger</span>
-            </div>
-          </Link>
-          <Link href="/admin/taxas" className="flex-1">
-            <div className="flex flex-col items-center gap-0.5 py-2.5 text-zinc-500 hover:text-white transition-colors">
-              <MapPin size={18} />
-              <span className="text-[9px] font-bold uppercase">Bairros</span>
-            </div>
-          </Link>
-          <Link href="/admin/entrega-km" className="flex-1">
-            <div className="flex flex-col items-center gap-0.5 py-2.5 text-zinc-500 hover:text-white transition-colors">
-              <Navigation size={18} />
-              <span className="text-[9px] font-bold uppercase">Por KM</span>
-            </div>
-          </Link>
-          <Link href="/admin/config" className="flex-1">
-            <div className="flex flex-col items-center gap-0.5 py-2.5 text-zinc-500 hover:text-white transition-colors">
-              <Settings size={18} />
-              <span className="text-[9px] font-bold uppercase">Config</span>
-            </div>
-          </Link>
-          <Link href="/admin/importar" className="flex-1">
-            <div className="flex flex-col items-center gap-0.5 py-2.5 text-zinc-500 hover:text-white transition-colors">
-              <Upload size={18} />
-              <span className="text-[9px] font-bold uppercase">Importar</span>
-            </div>
-          </Link>
-        </div>
-      </nav>
+      <AdminBottomNav active="/admin/cardapio" />
     </div>
   );
 }

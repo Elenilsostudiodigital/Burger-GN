@@ -1,19 +1,22 @@
 import React, { useEffect, useState } from 'react';
+import { Link } from 'wouter';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Plus, Minus, Check } from 'lucide-react';
+import { X, Plus, Minus, Check, Crown } from 'lucide-react';
 import type { Product, Addon } from '../lib/api';
+import { formatBrl, productBadgeText, productEffectivePrice } from '../lib/productMarketing';
 
 interface ProductDetailModalProps {
   product: Product | null;
   onClose: () => void;
   onAdd: (product: Product, addons: Addon[], notes: string, quantity: number) => void;
+  clubeLoggedIn?: boolean;
 }
 
 function safeList<T>(value: T[] | null | undefined): T[] {
   return Array.isArray(value) ? value : [];
 }
 
-export function ProductDetailModal({ product, onClose, onAdd }: ProductDetailModalProps) {
+export function ProductDetailModal({ product, onClose, onAdd, clubeLoggedIn = false }: ProductDetailModalProps) {
   const [quantity, setQuantity] = useState(1);
   const [selected, setSelected] = useState<Addon[]>([]);
   const [notes, setNotes] = useState('');
@@ -58,11 +61,15 @@ export function ProductDetailModal({ product, onClose, onAdd }: ProductDetailMod
 
   const ingredients = safeList(product?.ingredients);
   const addons = safeList(product?.addons);
+  const locked = !!(product?.isClubeExclusive && !clubeLoggedIn);
+  const base = product ? productEffectivePrice(product) : 0;
   const unitPrice = product
-    ? (parseFloat(product.price) || 0) + selected.reduce((acc, a) => acc + (Number(a.price) || 0), 0)
+    ? base + selected.reduce((acc, a) => acc + (Number(a.price) || 0), 0)
     : 0;
   const totalPrice = unitPrice * quantity;
-  const fmt = (v: number) => `R$ ${v.toFixed(2).replace('.', ',')}`;
+  const fmt = (v: number) => formatBrl(v);
+  const badge = product ? productBadgeText(product) : '';
+  const compareAt = product?.compareAtPrice ? parseFloat(String(product.compareAtPrice)) : null;
 
   return (
     <AnimatePresence
@@ -127,8 +134,31 @@ export function ProductDetailModal({ product, onClose, onAdd }: ProductDetailMod
 
               <div className="px-5 py-4 space-y-5">
                 <div>
-                  <h2 className="text-white font-black uppercase text-xl leading-tight tracking-tight">{product.name}</h2>
-                  <p className="text-amber-500 font-black text-lg mt-1">{fmt(parseFloat(product.price) || 0)}</p>
+                  <div className="flex items-start gap-2 flex-wrap">
+                    <h2 className="text-white font-black uppercase text-xl leading-tight tracking-tight">{product.name}</h2>
+                    {badge ? (
+                      <span className="shrink-0 mt-1 inline-flex rounded-md bg-red-600/90 px-2 py-0.5 text-[10px] font-bold text-white">
+                        {badge}
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="flex items-baseline gap-2 mt-1">
+                    {product.isPromoActive && compareAt !== null && Number.isFinite(compareAt) ? (
+                      <span className="text-zinc-500 text-sm line-through">{fmt(compareAt)}</span>
+                    ) : null}
+                    <p className="text-amber-500 font-black text-lg">{fmt(base)}</p>
+                  </div>
+                  {locked ? (
+                    <p className="text-amber-500/90 text-sm leading-snug mt-3 flex items-start gap-2">
+                      <Crown size={16} className="mt-0.5 shrink-0" />
+                      <span>
+                        Oferta exclusiva para membros do Clube Burger.{' '}
+                        <Link href="/clube" className="underline font-bold" onClick={onClose}>
+                          Faça login ou cadastre-se para desbloquear.
+                        </Link>
+                      </span>
+                    </p>
+                  ) : null}
                 </div>
 
                 {product.description && (
@@ -190,33 +220,45 @@ export function ProductDetailModal({ product, onClose, onAdd }: ProductDetailMod
             </div>
 
             <div className="shrink-0 z-20 border-t border-zinc-800 bg-zinc-950 px-5 pt-3 pb-3 space-y-3">
-              <div className="flex items-center justify-center gap-4 bg-zinc-900 border border-zinc-800 rounded-xl py-2">
-                <button
-                  type="button"
-                  onClick={() => setQuantity(q => Math.max(1, q - 1))}
-                  className="w-10 h-10 flex items-center justify-center bg-zinc-800 text-white rounded-lg active:scale-95"
+              {!locked ? (
+                <>
+                  <div className="flex items-center justify-center gap-4 bg-zinc-900 border border-zinc-800 rounded-xl py-2">
+                    <button
+                      type="button"
+                      onClick={() => setQuantity(q => Math.max(1, q - 1))}
+                      className="w-10 h-10 flex items-center justify-center bg-zinc-800 text-white rounded-lg active:scale-95"
+                    >
+                      <Minus size={16} />
+                    </button>
+                    <span className="font-bold text-white w-6 text-center text-lg">{quantity}</span>
+                    <button
+                      type="button"
+                      onClick={() => setQuantity(q => q + 1)}
+                      className="w-10 h-10 flex items-center justify-center bg-amber-500 text-zinc-950 rounded-lg active:scale-95"
+                    >
+                      <Plus size={16} />
+                    </button>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onAdd(product, selected, notes.trim(), quantity);
+                      onClose();
+                    }}
+                    className="w-full min-h-14 py-3.5 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-black uppercase tracking-wider rounded-xl flex items-center justify-center gap-2 active:scale-[0.98]"
+                  >
+                    Confirmar Pedido • {fmt(totalPrice)}
+                  </button>
+                </>
+              ) : (
+                <Link
+                  href="/clube"
+                  onClick={onClose}
+                  className="w-full min-h-14 py-3.5 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-black uppercase tracking-wider rounded-xl flex items-center justify-center gap-2"
                 >
-                  <Minus size={16} />
-                </button>
-                <span className="font-bold text-white w-6 text-center text-lg">{quantity}</span>
-                <button
-                  type="button"
-                  onClick={() => setQuantity(q => q + 1)}
-                  className="w-10 h-10 flex items-center justify-center bg-amber-500 text-zinc-950 rounded-lg active:scale-95"
-                >
-                  <Plus size={16} />
-                </button>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  onAdd(product, selected, notes.trim(), quantity);
-                  onClose();
-                }}
-                className="w-full min-h-14 py-3.5 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-black uppercase tracking-wider rounded-xl flex items-center justify-center gap-2 active:scale-[0.98]"
-              >
-                Confirmar Pedido • {fmt(totalPrice)}
-              </button>
+                  Entrar no Clube Burger
+                </Link>
+              )}
             </div>
           </motion.div>
         </motion.div>

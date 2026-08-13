@@ -67,7 +67,37 @@ export const deleteCategory = (id: number) => api.delete(`/admin/categories/${id
 
 // ── Products ──────────────────────────────────────────────────────────────────
 export interface Addon { name: string; price: number; }
-export interface Product { id: number; name: string; description: string; price: string; categoryId: number | null; image: string; videoUrl: string; ingredients: string[]; addons: Addon[]; available: boolean; displayOrder: number; categorySlug: string | null; categoryName: string | null; }
+export interface Product {
+  id: number;
+  name: string;
+  description: string;
+  price: string;
+  categoryId: number | null;
+  image: string;
+  videoUrl: string;
+  ingredients: string[];
+  addons: Addon[];
+  available: boolean;
+  displayOrder: number;
+  categorySlug: string | null;
+  categoryName: string | null;
+  /** Marketing — present after schema ensure; defaults safe for legacy rows */
+  isFeatured?: boolean;
+  isPromotion?: boolean;
+  isBestseller?: boolean;
+  isNew?: boolean;
+  isFlashOffer?: boolean;
+  isClubeExclusive?: boolean;
+  promoOriginalPrice?: string | null;
+  promoPrice?: string | null;
+  promoStartsAt?: string | null;
+  promoEndsAt?: string | null;
+  marketingBadge?: string;
+  isPromoActive?: boolean;
+  displayPrice?: string;
+  compareAtPrice?: string | null;
+  badgeLabel?: string;
+}
 
 /** Normalize API product payloads so null JSON fields never crash the mobile UI. */
 export function normalizeProduct(p: Product): Product {
@@ -79,15 +109,36 @@ export function normalizeProduct(p: Product): Product {
     price: p.price ?? "0",
     ingredients: Array.isArray(p.ingredients) ? p.ingredients : [],
     addons: Array.isArray(p.addons) ? p.addons : [],
+    isFeatured: !!p.isFeatured,
+    isPromotion: !!p.isPromotion,
+    isBestseller: !!p.isBestseller,
+    isNew: !!p.isNew,
+    isFlashOffer: !!p.isFlashOffer,
+    isClubeExclusive: !!p.isClubeExclusive,
+    marketingBadge: p.marketingBadge ?? "",
+    isPromoActive: !!p.isPromoActive,
+    displayPrice: p.displayPrice ?? p.price ?? "0",
+    compareAtPrice: p.compareAtPrice ?? null,
+    badgeLabel: p.badgeLabel ?? "",
   };
 }
 
 export const getProducts = () =>
   api.get("/products").then((list: Product[]) => (Array.isArray(list) ? list.map(normalizeProduct) : [])) as Promise<Product[]>;
-export const getAdminProducts = () => api.get("/admin/products") as Promise<Product[]>;
+export const getAdminProducts = () =>
+  api.get("/admin/products").then((list: Product[]) => (Array.isArray(list) ? list.map(normalizeProduct) : [])) as Promise<Product[]>;
 export const createProduct = (d: Partial<Product>) => api.post("/admin/products", d) as Promise<Product>;
 export const updateProduct = (id: number, d: Partial<Product>) => api.put(`/admin/products/${id}`, d) as Promise<Product>;
 export const deleteProduct = (id: number) => api.delete(`/admin/products/${id}`);
+export const updateProductPromotion = (
+  id: number,
+  d: {
+    promoPrice?: string | number;
+    promoStartsAt?: string | null;
+    promoEndsAt?: string | null;
+    clear?: boolean;
+  },
+) => api.patch(`/admin/products/${id}/promotion`, d) as Promise<Product>;
 
 // ── Delivery Zones (neighborhood) ─────────────────────────────────────────────
 export interface DeliveryZone { id: number; neighborhood: string; fee: string; active: boolean; createdAt: string; }

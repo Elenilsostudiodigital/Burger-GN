@@ -73,22 +73,28 @@ function productsForDef(
   popularIds: number[],
 ): Product[] {
   if (def.featured) {
+    const bestsellers = products.filter(p => p.isBestseller);
+    if (bestsellers.length > 0) return bestsellers.slice(0, 6);
     if (popularIds.length > 0) {
       const map = new Map(products.map(p => [p.id, p]));
       return popularIds.map(id => map.get(id)).filter((p): p is Product => !!p).slice(0, 6);
     }
-    const promo = products.filter(p => normalize(p.categorySlug).includes('promocao'));
+    const promo = products.filter(p => p.isPromoActive || normalize(p.categorySlug).includes('promocao'));
     if (promo.length > 0) return promo.slice(0, 6);
     return [...products].sort((a, b) => a.displayOrder - b.displayOrder).slice(0, 6);
   }
 
   if (def.highlight) {
-    const promo = products.filter(p => normalize(p.categorySlug).includes('promocao'));
+    const featured = products.filter(p => p.isFeatured);
+    if (featured.length > 0) return featured.slice(0, 6);
+    const promo = products.filter(p => p.isPromoActive || normalize(p.categorySlug).includes('promocao'));
     if (promo.length > 0) return promo.slice(0, 6);
     return [...products].sort((a, b) => a.displayOrder - b.displayOrder).slice(0, 4);
   }
 
   if (def.newest) {
+    const news = products.filter(p => p.isNew);
+    if (news.length > 0) return news.slice(0, 6);
     return [...products].sort((a, b) => b.id - a.id).slice(0, 6);
   }
 
@@ -119,9 +125,25 @@ export function buildHomeSections(
 ): HomeSection[] {
   const sections: HomeSection[] = [];
 
+  const promos = products.filter(p => p.isPromoActive && (p.isPromotion || p.isFlashOffer));
+  if (promos.length > 0) {
+    sections.push({
+      id: 'promocoes-do-dia',
+      title: '🔥 Promoções do Dia',
+      products: [...promos].sort((a, b) => a.displayOrder - b.displayOrder),
+    });
+  }
+
   for (const def of SECTION_DEFS) {
     const items = productsForDef(def, categories, products, popularIds);
     if (items.length === 0) continue;
+    // Avoid duplicating promo-of-day items at the top of "destaques"
+    if (def.id === 'destaques' && promos.length > 0) {
+      const filtered = items.filter(p => !promos.some(pr => pr.id === p.id));
+      if (filtered.length === 0) continue;
+      sections.push({ id: def.id, title: def.title, products: filtered });
+      continue;
+    }
     sections.push({ id: def.id, title: def.title, products: items });
   }
 

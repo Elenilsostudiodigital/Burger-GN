@@ -1,12 +1,15 @@
 import React from 'react';
+import { Link } from 'wouter';
 import { motion } from 'framer-motion';
-import { Plus, Minus, Flame, PlayCircle, ListChecks } from 'lucide-react';
+import { Plus, Minus, PlayCircle, ListChecks, Crown } from 'lucide-react';
 import type { Product } from '../lib/api';
+import { formatBrl, productBadgeText, productEffectivePrice } from '../lib/productMarketing';
 
 interface ProductRowCardProps {
   product: Product;
   index?: number;
   quantity?: number;
+  clubeLoggedIn?: boolean;
   onSelect: (product: Product) => void;
   onQuickAdd?: (product: Product) => void;
   onQuantityChange?: (productId: number, delta: number) => void;
@@ -16,6 +19,7 @@ export function ProductRowCard({
   product,
   index = 0,
   quantity = 0,
+  clubeLoggedIn = false,
   onSelect,
   onQuickAdd,
   onQuantityChange,
@@ -23,8 +27,11 @@ export function ProductRowCard({
   const ingredients = Array.isArray(product.ingredients) ? product.ingredients : [];
   const addons = Array.isArray(product.addons) ? product.addons : [];
   const hasCustomization = ingredients.length > 0 || addons.length > 0;
-  const priceNum = Number.parseFloat(String(product.price));
-  const price = `R$ ${(Number.isFinite(priceNum) ? priceNum : 0).toFixed(2).replace('.', ',')}`;
+  const badge = productBadgeText(product);
+  const promoActive = !!product.isPromoActive;
+  const locked = !!product.isClubeExclusive && !clubeLoggedIn;
+  const effective = productEffectivePrice(product);
+  const compareAt = product.compareAtPrice ? parseFloat(String(product.compareAtPrice)) : null;
 
   return (
     <motion.div
@@ -44,15 +51,15 @@ export function ProductRowCard({
     >
       <div className="flex-1 min-w-0 flex flex-col justify-between py-0.5">
         <div className="space-y-1">
-          <div className="flex items-start gap-2">
+          <div className="flex items-start gap-2 flex-wrap">
             <h3 className="text-white font-bold text-[15px] leading-snug tracking-tight line-clamp-2">
               {product.name}
             </h3>
-            {product.categorySlug === 'promocao' && (
+            {badge ? (
               <span className="shrink-0 mt-0.5 inline-flex items-center gap-0.5 rounded-md bg-red-600/90 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-white">
-                <Flame size={10} /> Promo
+                {badge}
               </span>
-            )}
+            ) : null}
           </div>
           {product.description && (
             <p className="text-zinc-500 text-xs leading-relaxed line-clamp-2">
@@ -64,10 +71,28 @@ export function ProductRowCard({
               <ListChecks size={11} /> Personalizável
             </span>
           )}
+          {locked ? (
+            <p className="text-amber-500/90 text-[11px] leading-snug pt-1 flex items-start gap-1">
+              <Crown size={12} className="mt-0.5 shrink-0" />
+              <span>
+                Oferta exclusiva para membros do Clube Burger.{' '}
+                <Link href="/clube" className="underline font-bold" onClick={e => e.stopPropagation()}>
+                  Faça login ou cadastre-se para desbloquear.
+                </Link>
+              </span>
+            </p>
+          ) : null}
         </div>
         <div className="flex items-center justify-between gap-2 pt-2.5">
-          <span className="text-amber-500 font-black text-[15px] tracking-tight">{price}</span>
-          {onQuickAdd && onQuantityChange && (
+          <div className="flex items-baseline gap-2 min-w-0">
+            {promoActive && compareAt !== null && Number.isFinite(compareAt) ? (
+              <span className="text-zinc-500 text-xs line-through">{formatBrl(compareAt)}</span>
+            ) : null}
+            <span className={`font-black text-[15px] tracking-tight ${locked ? 'text-zinc-500' : 'text-amber-500'}`}>
+              {locked ? 'Exclusivo' : formatBrl(effective)}
+            </span>
+          </div>
+          {!locked && onQuickAdd && onQuantityChange && (
             quantity === 0 ? (
               <button
                 type="button"
@@ -106,7 +131,7 @@ export function ProductRowCard({
         <img
           src={product.image || 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=400&h=400&fit=crop'}
           alt={product.name}
-          className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+          className={`w-full h-full object-cover transition-transform duration-500 group-hover:scale-105 ${locked ? 'opacity-70' : ''}`}
           loading="lazy"
         />
         {product.videoUrl && (

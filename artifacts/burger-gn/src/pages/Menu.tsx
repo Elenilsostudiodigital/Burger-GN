@@ -3,6 +3,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useCart } from '../context/CartContext';
 import { getCategories, getProducts, getExternalLinks, getCompanyProfile, Category, Product, ExternalLink, Addon, CompanyProfile } from '../lib/api';
 import { filterProductsByQuery } from '../lib/homeSections';
+import { isPromoOfTheDay, productEffectivePrice } from '../lib/productMarketing';
+import { getSavedClubePhone } from '../lib/clubeCliente';
 import { BottomNav } from '../components/BottomNav';
 import { WhatsAppButton } from '../components/WhatsAppButton';
 import { PageTransition } from '../components/PageTransition';
@@ -22,7 +24,18 @@ export default function Menu() {
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [detailProduct, setDetailProduct] = useState<Product | null>(null);
+  const [clubeLoggedIn, setClubeLoggedIn] = useState(() => !!getSavedClubePhone());
   const { cartItems, addItem, updateQuantity, totalItems } = useCart();
+
+  useEffect(() => {
+    const sync = () => setClubeLoggedIn(!!getSavedClubePhone());
+    window.addEventListener('bgn:clube-session-changed', sync);
+    window.addEventListener('storage', sync);
+    return () => {
+      window.removeEventListener('bgn:clube-session-changed', sync);
+      window.removeEventListener('storage', sync);
+    };
+  }, []);
 
   useEffect(() => {
     Promise.all([
@@ -51,6 +64,11 @@ export default function Menu() {
     return products.filter(p => p.categorySlug === activeCategory);
   }, [products, activeCategory, search]);
 
+  const promoOfTheDay = useMemo(
+    () => products.filter(isPromoOfTheDay).sort((a, b) => a.displayOrder - b.displayOrder),
+    [products],
+  );
+
   const quantityForProduct = (productId: number) =>
     cartItems.filter(ci => ci.item.id === productId && ci.selectedAddons.length === 0 && !ci.notes)
       .reduce((acc, ci) => acc + ci.quantity, 0);
@@ -59,22 +77,24 @@ export default function Menu() {
     cartItems.find(ci => ci.item.id === productId && ci.selectedAddons.length === 0 && !ci.notes)?.lineId;
 
   const handleQuickAdd = (product: Product) => {
+    if (product.isClubeExclusive && !clubeLoggedIn) return;
     addItem({
       id: product.id,
       name: product.name,
       description: product.description,
-      price: parseFloat(product.price),
+      price: productEffectivePrice(product),
       image: product.image,
       available: product.available,
     });
   };
 
   const handleModalAdd = (product: Product, addons: Addon[], notes: string, quantity: number) => {
+    if (product.isClubeExclusive && !clubeLoggedIn) return;
     addItem({
       id: product.id,
       name: product.name,
       description: product.description,
-      price: parseFloat(product.price),
+      price: productEffectivePrice(product),
       image: product.image,
       available: product.available,
     }, { addons, notes, quantity });
@@ -180,34 +200,62 @@ export default function Menu() {
             <div className="w-8 h-8 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
           </div>
         ) : (
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={search || activeCategory}
-              initial={{ opacity: 0, y: 12 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -8 }}
-              transition={{ duration: 0.22 }}
-              className="space-y-2.5"
-            >
-              {filteredItems.length === 0 ? (
-                <p className="text-zinc-500 text-center py-12">
-                  {search ? 'Nenhum produto encontrado.' : 'Nenhum item nesta categoria.'}
-                </p>
-              ) : (
-                filteredItems.map((item, idx) => (
+          <div className="space-y-6">
+            {!search && promoOfTheDay.length > 0 && (
+              <section className="space-y-2.5">
+                <h2 className="text-white font-black uppercase text-sm tracking-wider px-0.5">
+                  🔥 Promoções do Dia
+                </h2>
+                {promoOfTheDay.map((item, idx) => (
                   <ProductRowCard
-                    key={item.id}
+                    key={`promo-${item.id}`}
                     product={item}
                     index={idx}
                     quantity={quantityForProduct(item.id)}
+                    clubeLoggedIn={clubeLoggedIn}
                     onSelect={setDetailProduct}
                     onQuickAdd={handleQuickAdd}
                     onQuantityChange={handleQuantityChange}
                   />
-                ))
-              )}
-            </motion.div>
-          </AnimatePresence>
+                ))}
+              </section>
+            )}
+
+            <AnimatePresence mode="wait">
+              <motion.div
+                key={search || activeCategory}
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -8 }}
+                transition={{ duration: 0.22 }}
+                className="space-y-2.5"
+              >
+                {!search && (
+                  <h2 className="text-zinc-400 font-bold uppercase text-xs tracking-wider px-0.5">
+                    {categories.find(c => c.slug === activeCategory)?.name || 'Cardápio'}
+                  </h2>
+                )}
+                {filteredItems.length === 0 ? (
+                  <p className="text-zinc-500 text-center py-12">
+                    {search ? 'Nenhum produto encontrado.' : 'Nenhum item nesta categoria.'}
+                  </p>
+                ) : (
+                  filteredItems.map((item, idx) => (
+                    <ProductRowCard
+                      key={item.id}
+                      product={item}
+                      index={idx}
+                      quantity={quantityForProduct(item.id)}
+                      clubeLoggedIn={clubeLoggedIn}
+                      onSelect={setDetailProduct}
+                      onQuickAdd={handleQuickAdd}
+                      onQuantityChange={handleQuantityChange}
+                    />
+                  ))
+                )}
+              </motion.div>
+            </AnimatePresence>
+          </div>
         )}
 
         {externalLinks.length > 0 && (
@@ -277,7 +325,12 @@ export default function Menu() {
         )}
       </main>
 
-      <ProductDetailModal product={detailProduct} onClose={() => setDetailProduct(null)} onAdd={handleModalAdd} />
+      <ProductDetailModal
+        product={detailProduct}
+        onClose={() => setDetailProduct(null)}
+        onAdd={handleModalAdd}
+        clubeLoggedIn={clubeLoggedIn}
+      />
 
       <WhatsAppButton />
       <BottomNav />
