@@ -1073,6 +1073,11 @@ export const getWhatsappSettings = () => api.get("/whatsapp-settings") as Promis
 export const getAdminWhatsappSettings = () => api.get("/admin/whatsapp-settings") as Promise<WhatsappSettings>;
 export const updateWhatsappSettings = (d: { number: string }) => api.put("/admin/whatsapp-settings", d) as Promise<WhatsappSettings>;
 
+export const getAdminNotificationSettings = () =>
+  api.get("/admin/notification-settings") as Promise<{ config: Record<string, unknown> }>;
+export const updateAdminNotificationSettings = (config: Record<string, unknown>) =>
+  api.put("/admin/notification-settings", { config }) as Promise<{ config: Record<string, unknown> }>;
+
 // ── Business Hours / Store Status ─────────────────────────────────────────────
 export type WeekdayKey =
   | "monday" | "tuesday" | "wednesday" | "thursday" | "friday" | "saturday" | "sunday";

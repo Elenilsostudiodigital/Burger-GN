@@ -548,7 +548,7 @@ export default function SettingsHub() {
     { id: 'preparo', label: 'Preparo', icon: <Clock size={16} /> },
     { id: 'pagamento', label: 'Pagamentos', icon: <CreditCard size={16} /> },
     { id: 'whatsapp', label: 'WhatsApp', icon: <MessageCircle size={16} /> },
-    { id: 'notificacoes', label: 'Notificações', icon: <Bell size={16} /> },
+    { id: 'notificacoes', label: 'Notificações e Sons', icon: <Bell size={16} /> },
     { id: 'links', label: 'Links', icon: <LinkIcon size={16} /> },
     { id: 'ruas', label: 'Ruas', icon: <MapPin size={16} /> },
   ];

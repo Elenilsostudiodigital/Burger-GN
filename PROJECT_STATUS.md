@@ -22,9 +22,10 @@ Atualizar esta lista conforme o andamento do projeto.
 - 🔄 Clientes
 - 🔄 Mercado Pago
 - 🔄 Segurança
-- 🔄 Configurações (Perfil + Segurança dentro de Config)
+- 🔄 Configurações (Perfil + Segurança + Notificações e Sons)
 - 🔄 PWA (Progressive Web App)
 - 🔄 Produtos e Promoções (Marketing)
+- 🔄 Notificações e Sons
 
 ---
 
@@ -39,4 +40,4 @@ _Nenhum bug aberto registrado neste momento. Incluir aqui qualquer falha reprodu
 
 ## PRÓXIMA ETAPA
 
-Deploy + validação manual do proprietário: módulo **Promoções dos Produtos** (texto, % automático, Clube, datas, Promoções do Dia).
+Deploy + validação manual do proprietário: módulo **Notificações e Sons** (Configurações).

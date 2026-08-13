@@ -17,6 +17,7 @@ import OrderTracking, { MyOrderPage } from "./pages/OrderTracking";
 import ClubeCliente from "./pages/ClubeCliente";
 import { MyOrderFab } from "./components/MyOrderFab";
 import { AdminPanelScroll } from "./components/AdminPanelScroll";
+import { AdminNotificationEngine } from "./components/AdminNotificationEngine";
 import AdminLogin from "./pages/admin/Login";
 import AdminForgotPassword from "./pages/admin/ForgotPassword";
 import AdminSecurity from "./pages/admin/Security";
@@ -69,6 +70,7 @@ function ProtectedAdminRoute({ component: Component }: { component: React.Compon
   return (
     <>
       <AdminPanelScroll />
+      <AdminNotificationEngine />
       <Component />
     </>
   );

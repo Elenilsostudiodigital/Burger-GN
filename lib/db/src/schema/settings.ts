@@ -1,4 +1,4 @@
-import { pgTable, serial, text, boolean, integer, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, boolean, integer, timestamp, jsonb } from "drizzle-orm/pg-core";
 import { companiesTable } from "./company";
 
 export const paymentSettingsTable = pgTable("payment_settings", {
@@ -31,6 +31,15 @@ export const externalLinksTable = pgTable("external_links", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
+/** Company-scoped admin notification & sound preferences (JSON document). */
+export const notificationSettingsTable = pgTable("notification_settings", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id").notNull().unique().references(() => companiesTable.id, { onDelete: "cascade" }),
+  config: jsonb("config").$type<Record<string, unknown>>().notNull().default({}),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
 export type PaymentSettings = typeof paymentSettingsTable.$inferSelect;
 export type ExternalLink = typeof externalLinksTable.$inferSelect;
 export type WhatsappSettings = typeof whatsappSettingsTable.$inferSelect;
+export type NotificationSettingsRow = typeof notificationSettingsTable.$inferSelect;

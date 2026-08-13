@@ -1,7 +1,7 @@
 /* Burger GN PWA — network-safe service worker.
  * Never intercepts /api (incl. SSE). Does not alter app business logic.
  */
-const CACHE_VERSION = "burger-gn-pwa-v1";
+const CACHE_VERSION = "burger-gn-pwa-v2";
 const PRECACHE_URLS = [
   "/",
   "/index.html",
@@ -85,6 +85,22 @@ self.addEventListener("fetch", (event) => {
           return response;
         })
         .catch(() => cached);
+    }),
+  );
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const targetUrl = (event.notification.data && event.notification.data.url) || "/admin/pedidos";
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientList) => {
+      for (const client of clientList) {
+        if ("focus" in client) {
+          client.navigate?.(targetUrl);
+          return client.focus();
+        }
+      }
+      if (self.clients.openWindow) return self.clients.openWindow(targetUrl);
     }),
   );
 });
