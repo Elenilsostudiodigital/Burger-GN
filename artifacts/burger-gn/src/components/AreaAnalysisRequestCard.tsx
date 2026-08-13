@@ -101,13 +101,27 @@ export function AreaAnalysisRequestCard({
 
       <div>
         <p className="text-zinc-500 text-[10px] font-bold uppercase mb-1.5 flex items-center gap-1">
-          <MapPin size={12} /> Ver localização no mapa
+          <MapPin size={12} /> Localização
         </p>
         <StreetMapPreview
           lat={lat}
           lng={lng}
           message="Sem coordenadas para exibir o mapa."
         />
+        <a
+          href={lat != null && lng != null
+            ? `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}#map=17/${lat}/${lng}`
+            : undefined}
+          target="_blank"
+          rel="noreferrer"
+          className={`mt-2 inline-flex h-10 w-full items-center justify-center rounded-xl border border-zinc-700 text-xs font-black uppercase ${
+            lat != null && lng != null
+              ? 'text-amber-400 hover:bg-zinc-900'
+              : 'pointer-events-none opacity-40 text-zinc-500'
+          }`}
+        >
+          Ver no mapa
+        </a>
       </div>
 
       <div className="grid grid-cols-2 gap-2">
