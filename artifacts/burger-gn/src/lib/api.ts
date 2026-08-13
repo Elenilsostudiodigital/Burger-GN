@@ -93,10 +93,14 @@ export interface Product {
   promoStartsAt?: string | null;
   promoEndsAt?: string | null;
   marketingBadge?: string;
+  promoText?: string;
   isPromoActive?: boolean;
   displayPrice?: string;
   compareAtPrice?: string | null;
   badgeLabel?: string;
+  discountPercent?: number | null;
+  discountLabel?: string | null;
+  savedAmount?: number | null;
 }
 
 /** Normalize API product payloads so null JSON fields never crash the mobile UI. */
@@ -116,10 +120,14 @@ export function normalizeProduct(p: Product): Product {
     isFlashOffer: !!p.isFlashOffer,
     isClubeExclusive: !!p.isClubeExclusive,
     marketingBadge: p.marketingBadge ?? "",
+    promoText: p.promoText ?? "",
     isPromoActive: !!p.isPromoActive,
     displayPrice: p.displayPrice ?? p.price ?? "0",
     compareAtPrice: p.compareAtPrice ?? null,
     badgeLabel: p.badgeLabel ?? "",
+    discountPercent: typeof p.discountPercent === "number" ? p.discountPercent : null,
+    discountLabel: p.discountLabel ?? null,
+    savedAmount: typeof p.savedAmount === "number" ? p.savedAmount : null,
   };
 }
 
@@ -136,6 +144,7 @@ export const updateProductPromotion = (
     promoPrice?: string | number;
     promoStartsAt?: string | null;
     promoEndsAt?: string | null;
+    promoText?: string | null;
     clear?: boolean;
   },
 ) => api.patch(`/admin/products/${id}/promotion`, d) as Promise<Product>;

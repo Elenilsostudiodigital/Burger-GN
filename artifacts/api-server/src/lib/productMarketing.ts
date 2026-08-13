@@ -1,22 +1,4 @@
-/** Shared product marketing helpers (API). */
-
-export type MarketingBadge =
-  | ""
-  | "promotion"
-  | "featured"
-  | "flash"
-  | "new"
-  | "bestseller"
-  | "clube";
-
-export const MARKETING_BADGE_LABELS: Record<Exclude<MarketingBadge, "">, string> = {
-  promotion: "🔥 Promoção",
-  featured: "⭐ Destaque",
-  flash: "💥 Oferta Relâmpago",
-  new: "🆕 Novidade",
-  bestseller: "📈 Mais Vendido",
-  clube: "👑 Exclusivo Clube Burger",
-};
+/** Shared product promotion helpers (API). */
 
 export type ProductMarketingRow = {
   price: string | number;
@@ -31,6 +13,7 @@ export type ProductMarketingRow = {
   promoStartsAt?: Date | string | null;
   promoEndsAt?: Date | string | null;
   marketingBadge?: string | null;
+  promoText?: string | null;
 };
 
 function num(v: string | number | null | undefined): number | null {
@@ -64,18 +47,10 @@ export function isPromoExpired(row: ProductMarketingRow, now = new Date()): bool
   return !!(end && now > end);
 }
 
-export function resolveBadge(row: ProductMarketingRow): string {
-  const raw = (row.marketingBadge || "").trim() as MarketingBadge;
-  if (raw && MARKETING_BADGE_LABELS[raw as Exclude<MarketingBadge, "">]) {
-    return MARKETING_BADGE_LABELS[raw as Exclude<MarketingBadge, "">];
-  }
-  if (row.isClubeExclusive) return MARKETING_BADGE_LABELS.clube;
-  if (row.isFlashOffer) return MARKETING_BADGE_LABELS.flash;
-  if (row.isPromotion && isPromoActiveNow(row)) return MARKETING_BADGE_LABELS.promotion;
-  if (row.isFeatured) return MARKETING_BADGE_LABELS.featured;
-  if (row.isNew) return MARKETING_BADGE_LABELS.new;
-  if (row.isBestseller) return MARKETING_BADGE_LABELS.bestseller;
-  return "";
+/** Automatic discount % from original vs promo — never set manually. */
+export function calcDiscountPercent(original: number, promo: number): number | null {
+  if (!(original > 0) || !(promo >= 0) || promo >= original) return null;
+  return Math.round(((original - promo) / original) * 100);
 }
 
 export function enrichProductMarketing<T extends ProductMarketingRow>(row: T, now = new Date()) {
@@ -84,6 +59,14 @@ export function enrichProductMarketing<T extends ProductMarketingRow>(row: T, no
   const active = !expired && isPromoActiveNow(row, now);
   const original = num(row.promoOriginalPrice) ?? basePrice;
   const promo = num(row.promoPrice);
+  const discountPercent =
+    active && promo !== null ? calcDiscountPercent(original, promo) : null;
+  const savedAmount =
+    active && promo !== null && original > promo
+      ? Number((original - promo).toFixed(2))
+      : null;
+
+  const promoText = String(row.promoText || "").trim();
 
   return {
     isFeatured: !!row.isFeatured,
@@ -106,24 +89,19 @@ export function enrichProductMarketing<T extends ProductMarketingRow>(row: T, no
       ? (row.promoEndsAt instanceof Date ? row.promoEndsAt.toISOString() : String(row.promoEndsAt))
       : null,
     marketingBadge: (row.marketingBadge || "") as string,
+    promoText,
     isPromoActive: active,
     displayPrice: active && promo !== null ? promo.toFixed(2) : basePrice.toFixed(2),
     compareAtPrice: active ? original.toFixed(2) : null,
-    badgeLabel: resolveBadge({ ...row, isPromotion: !!row.isPromotion && !expired }),
+    /** Percentage badge for menu, e.g. "-20%" — computed only */
+    discountPercent,
+    discountLabel: discountPercent != null ? `-${discountPercent}%` : null,
+    savedAmount,
+    /** Prefer promo headline; fallback keeps prior badge labels for legacy rows */
+    badgeLabel:
+      active && discountPercent != null
+        ? `-${discountPercent}%`
+        : promoText || (row.isFeatured ? "⭐ Destaque" : ""),
     promoExpired: expired,
   };
 }
-
-export const PRODUCT_MARKETING_SELECT = {
-  isFeatured: true as const,
-  isPromotion: true as const,
-  isBestseller: true as const,
-  isNew: true as const,
-  isFlashOffer: true as const,
-  isClubeExclusive: true as const,
-  promoOriginalPrice: true as const,
-  promoPrice: true as const,
-  promoStartsAt: true as const,
-  promoEndsAt: true as const,
-  marketingBadge: true as const,
-};

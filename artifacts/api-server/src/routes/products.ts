@@ -21,6 +21,7 @@ const marketingColumns = {
   promoStartsAt: productsTable.promoStartsAt,
   promoEndsAt: productsTable.promoEndsAt,
   marketingBadge: productsTable.marketingBadge,
+  promoText: productsTable.promoText,
 };
 
 async function clearExpiredPromotion(companyId: number, productId: number) {
@@ -199,6 +200,9 @@ function pickMarketing(body: Record<string, unknown>) {
     const b = String(body.marketingBadge || "");
     out.marketingBadge = BADGES.has(b) ? b : "";
   }
+  if (body.promoText !== undefined) {
+    out.promoText = String(body.promoText || "").trim().slice(0, 80);
+  }
   return out;
 }
 
@@ -297,6 +301,7 @@ router.patch("/admin/products/:id/promotion", requireCompanyAuth, async (req, re
       promoPrice?: string | number;
       promoStartsAt?: string | null;
       promoEndsAt?: string | null;
+      promoText?: string | null;
       clear?: boolean;
     };
 
@@ -346,6 +351,10 @@ router.patch("/admin/products/:id/promotion", requireCompanyAuth, async (req, re
         promoOriginalPrice: current.promoOriginalPrice || current.price,
         promoStartsAt: starts,
         promoEndsAt: ends,
+        promoText:
+          body.promoText !== undefined
+            ? String(body.promoText || "").trim().slice(0, 80)
+            : current.promoText || "Promoção",
         marketingBadge: current.marketingBadge || "promotion",
         updatedAt: new Date(),
       })

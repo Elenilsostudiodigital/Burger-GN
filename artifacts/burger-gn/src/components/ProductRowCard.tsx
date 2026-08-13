@@ -3,7 +3,7 @@ import { Link } from 'wouter';
 import { motion } from 'framer-motion';
 import { Plus, Minus, PlayCircle, ListChecks, Crown } from 'lucide-react';
 import type { Product } from '../lib/api';
-import { formatBrl, productBadgeText, productEffectivePrice } from '../lib/productMarketing';
+import { formatBrl, productDiscountLabel, productEffectivePrice, productPromoHeadline } from '../lib/productMarketing';
 
 interface ProductRowCardProps {
   product: Product;
@@ -27,7 +27,8 @@ export function ProductRowCard({
   const ingredients = Array.isArray(product.ingredients) ? product.ingredients : [];
   const addons = Array.isArray(product.addons) ? product.addons : [];
   const hasCustomization = ingredients.length > 0 || addons.length > 0;
-  const badge = productBadgeText(product);
+  const badge = productDiscountLabel(product);
+  const promoHeadline = productPromoHeadline(product);
   const promoActive = !!product.isPromoActive;
   const locked = !!product.isClubeExclusive && !clubeLoggedIn;
   const effective = productEffectivePrice(product);
@@ -56,11 +57,14 @@ export function ProductRowCard({
               {product.name}
             </h3>
             {badge ? (
-              <span className="shrink-0 mt-0.5 inline-flex items-center gap-0.5 rounded-md bg-red-600/90 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-white">
+              <span className="shrink-0 mt-0.5 inline-flex items-center rounded-md bg-red-600 px-1.5 py-0.5 text-[10px] font-black tracking-wide text-white">
                 {badge}
               </span>
             ) : null}
           </div>
+          {promoHeadline ? (
+            <p className="text-amber-400 text-xs font-bold leading-snug">{promoHeadline}</p>
+          ) : null}
           {product.description && (
             <p className="text-zinc-500 text-xs leading-relaxed line-clamp-2">
               {product.description}
@@ -75,9 +79,9 @@ export function ProductRowCard({
             <p className="text-amber-500/90 text-[11px] leading-snug pt-1 flex items-start gap-1">
               <Crown size={12} className="mt-0.5 shrink-0" />
               <span>
-                Oferta exclusiva para membros do Clube Burger.{' '}
+                Promoção exclusiva para membros do Clube Burger.{' '}
                 <Link href="/clube" className="underline font-bold" onClick={e => e.stopPropagation()}>
-                  Faça login ou cadastre-se para desbloquear.
+                  Cadastre-se gratuitamente para desbloquear.
                 </Link>
               </span>
             </p>

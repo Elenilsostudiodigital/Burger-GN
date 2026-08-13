@@ -6,7 +6,7 @@ import {
   createCategory, updateCategory, deleteCategory,
   Product, Category,
 } from '../../lib/api';
-import { MARKETING_BADGE_OPTIONS } from '../../lib/productMarketing';
+import { PROMO_TEXT_SUGGESTIONS, calcDiscountPercent, calcSavedAmount, formatBrl } from '../../lib/productMarketing';
 import { useAdmin } from '../../context/AdminContext';
 import { useLocation } from 'wouter';
 import {
@@ -33,21 +33,18 @@ interface ProductFormData {
   displayOrder: string;
   isFeatured: boolean;
   isPromotion: boolean;
-  isBestseller: boolean;
-  isNew: boolean;
-  isFlashOffer: boolean;
   isClubeExclusive: boolean;
   promoOriginalPrice: string;
   promoPrice: string;
   promoStartsAt: string;
   promoEndsAt: string;
-  marketingBadge: string;
+  promoText: string;
 }
 
 const EMPTY_FORM: ProductFormData = {
   name: '', description: '', price: '', image: '', videoUrl: '', ingredients: '', addons: [], categoryId: '', displayOrder: '0',
-  isFeatured: false, isPromotion: false, isBestseller: false, isNew: false, isFlashOffer: false, isClubeExclusive: false,
-  promoOriginalPrice: '', promoPrice: '', promoStartsAt: '', promoEndsAt: '', marketingBadge: '',
+  isFeatured: false, isPromotion: false, isClubeExclusive: false,
+  promoOriginalPrice: '', promoPrice: '', promoStartsAt: '', promoEndsAt: '', promoText: '',
 };
 
 function toLocalInput(iso: string | null | undefined): string {
@@ -71,15 +68,12 @@ function productToForm(p: Product): ProductFormData {
     displayOrder: String(p.displayOrder),
     isFeatured: !!p.isFeatured,
     isPromotion: !!p.isPromotion,
-    isBestseller: !!p.isBestseller,
-    isNew: !!p.isNew,
-    isFlashOffer: !!p.isFlashOffer,
     isClubeExclusive: !!p.isClubeExclusive,
-    promoOriginalPrice: p.promoOriginalPrice || '',
+    promoOriginalPrice: p.promoOriginalPrice || p.price || '',
     promoPrice: p.promoPrice || '',
     promoStartsAt: toLocalInput(p.promoStartsAt),
     promoEndsAt: toLocalInput(p.promoEndsAt),
-    marketingBadge: p.marketingBadge || '',
+    promoText: p.promoText || '',
   };
 }
 
@@ -117,6 +111,11 @@ function ProductForm({ categories, initial, onSave, onCancel, saving }: {
       ...f,
       addons: f.addons.map((a, i) => i === idx ? { ...a, [field]: field === 'price' ? parseFloat(value) || 0 : value } : a),
     }));
+
+  const originalNum = parseFloat(form.promoOriginalPrice || form.price) || 0;
+  const promoNum = parseFloat(form.promoPrice) || 0;
+  const autoPercent = form.isPromotion ? calcDiscountPercent(originalNum, promoNum) : null;
+  const autoSaved = form.isPromotion ? calcSavedAmount(originalNum, promoNum) : null;
 
   return (
     <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }}
@@ -200,51 +199,81 @@ function ProductForm({ categories, initial, onSave, onCancel, saving }: {
       </div>
 
       <div className="rounded-2xl border border-amber-500/30 bg-zinc-950/60 p-4 space-y-3">
-        <h4 className="text-amber-500 font-black uppercase text-xs tracking-wider">📢 Marketing do Produto</h4>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        <h4 className="text-amber-500 font-black uppercase text-xs tracking-wider">📢 Promoção do Produto</h4>
+        <div className="grid grid-cols-1 gap-2">
+          <CheckboxRow checked={form.isPromotion} onChange={v => setForm(f => ({
+            ...f,
+            isPromotion: v,
+            promoOriginalPrice: f.promoOriginalPrice || f.price,
+          }))} label="Ativar Promoção" />
           <CheckboxRow checked={form.isFeatured} onChange={v => setForm(f => ({ ...f, isFeatured: v }))} label="Produto em Destaque" />
-          <CheckboxRow checked={form.isPromotion} onChange={v => setForm(f => ({ ...f, isPromotion: v }))} label="Produto em Promoção" />
-          <CheckboxRow checked={form.isBestseller} onChange={v => setForm(f => ({ ...f, isBestseller: v }))} label="Mais Vendido" />
-          <CheckboxRow checked={form.isNew} onChange={v => setForm(f => ({ ...f, isNew: v }))} label="Novidade" />
-          <CheckboxRow checked={form.isFlashOffer} onChange={v => setForm(f => ({ ...f, isFlashOffer: v }))} label="Oferta Relâmpago" />
-          <CheckboxRow checked={form.isClubeExclusive} onChange={v => setForm(f => ({ ...f, isClubeExclusive: v }))} label="Oferta Exclusiva Clube Burger" />
+          <CheckboxRow checked={form.isClubeExclusive} onChange={v => setForm(f => ({ ...f, isClubeExclusive: v }))} label="Exclusivo Clube Burger" />
         </div>
-        <div className="space-y-1">
-          <Label className="text-zinc-400 text-xs">Etiqueta exibida</Label>
-          <select
-            value={form.marketingBadge}
-            onChange={set('marketingBadge')}
-            className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 h-10 text-white text-sm focus:border-amber-500 focus:outline-none"
-          >
-            {MARKETING_BADGE_OPTIONS.map(o => (
-              <option key={o.value || 'auto'} value={o.value}>{o.label}</option>
-            ))}
-          </select>
-        </div>
-        {(form.isPromotion || form.isFlashOffer || form.isClubeExclusive) && (
-          <div className="grid grid-cols-2 gap-3 pt-1">
-            <div className="space-y-1">
-              <Label className="text-zinc-400 text-xs">Preço Original</Label>
-              <Input type="number" step="0.01" min="0" value={form.promoOriginalPrice} onChange={set('promoOriginalPrice')}
-                placeholder={form.price || '0.00'}
-                className="bg-zinc-950 border-zinc-800 text-white h-10 text-sm focus:border-amber-500" />
+
+        {(form.isPromotion || form.isClubeExclusive) && (
+          <>
+            <div className="space-y-1.5">
+              <Label className="text-zinc-400 text-xs">Texto da promoção</Label>
+              <Input
+                value={form.promoText}
+                onChange={set('promoText')}
+                placeholder="Ex: Oferta da Semana"
+                className="bg-zinc-950 border-zinc-800 text-white h-10 text-sm focus:border-amber-500"
+              />
+              <div className="flex flex-wrap gap-1.5">
+                {PROMO_TEXT_SUGGESTIONS.map(s => (
+                  <button
+                    key={s}
+                    type="button"
+                    onClick={() => setForm(f => ({ ...f, promoText: s }))}
+                    className="px-2 py-1 rounded-lg text-[10px] font-bold border border-zinc-700 text-zinc-400 hover:border-amber-500/50 hover:text-amber-400"
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
             </div>
-            <div className="space-y-1">
-              <Label className="text-zinc-400 text-xs">Preço Promocional</Label>
-              <Input type="number" step="0.01" min="0" value={form.promoPrice} onChange={set('promoPrice')}
-                className="bg-zinc-950 border-zinc-800 text-white h-10 text-sm focus:border-amber-500" />
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label className="text-zinc-400 text-xs">Preço original</Label>
+                <Input type="number" step="0.01" min="0" value={form.promoOriginalPrice} onChange={set('promoOriginalPrice')}
+                  placeholder={form.price || '0.00'}
+                  className="bg-zinc-950 border-zinc-800 text-white h-10 text-sm focus:border-amber-500" />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-zinc-400 text-xs">Preço promocional</Label>
+                <Input type="number" step="0.01" min="0" value={form.promoPrice} onChange={set('promoPrice')}
+                  className="bg-zinc-950 border-zinc-800 text-white h-10 text-sm focus:border-amber-500" />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-zinc-400 text-xs">Data de início</Label>
+                <Input type="datetime-local" value={form.promoStartsAt} onChange={set('promoStartsAt')}
+                  className="bg-zinc-950 border-zinc-800 text-white h-10 text-sm focus:border-amber-500" />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-zinc-400 text-xs">Data de término</Label>
+                <Input type="datetime-local" value={form.promoEndsAt} onChange={set('promoEndsAt')}
+                  className="bg-zinc-950 border-zinc-800 text-white h-10 text-sm focus:border-amber-500" />
+              </div>
             </div>
-            <div className="space-y-1">
-              <Label className="text-zinc-400 text-xs">Início</Label>
-              <Input type="datetime-local" value={form.promoStartsAt} onChange={set('promoStartsAt')}
-                className="bg-zinc-950 border-zinc-800 text-white h-10 text-sm focus:border-amber-500" />
+
+            <div className="rounded-xl border border-zinc-800 bg-zinc-900/80 px-3 py-2.5 text-xs space-y-1">
+              <p className="text-zinc-500 uppercase font-bold tracking-wider">Cálculo automático</p>
+              <p className="text-white">
+                Desconto:{' '}
+                <span className="text-amber-500 font-black">
+                  {autoPercent != null ? `-${autoPercent}%` : '—'}
+                </span>
+                {' · '}
+                Economia:{' '}
+                <span className="text-emerald-400 font-bold">
+                  {autoSaved != null ? formatBrl(autoSaved) : '—'}
+                </span>
+              </p>
+              <p className="text-zinc-600">A porcentagem não é editável — é calculada pelos preços.</p>
             </div>
-            <div className="space-y-1">
-              <Label className="text-zinc-400 text-xs">Término</Label>
-              <Input type="datetime-local" value={form.promoEndsAt} onChange={set('promoEndsAt')}
-                className="bg-zinc-950 border-zinc-800 text-white h-10 text-sm focus:border-amber-500" />
-            </div>
-          </div>
+          </>
         )}
       </div>
 
@@ -271,10 +300,16 @@ function QuickPromoModal({
   onSaved: (p: Product) => void;
 }) {
   const [promoPrice, setPromoPrice] = useState(product.promoPrice || '');
+  const [promoText, setPromoText] = useState(product.promoText || 'Promoção');
   const [starts, setStarts] = useState(toLocalInput(product.promoStartsAt));
   const [ends, setEnds] = useState(toLocalInput(product.promoEndsAt));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+
+  const original = parseFloat(String(product.promoOriginalPrice || product.price)) || 0;
+  const promoNum = parseFloat(promoPrice) || 0;
+  const pct = calcDiscountPercent(original, promoNum);
+  const saved = calcSavedAmount(original, promoNum);
 
   const save = async () => {
     setError('');
@@ -288,6 +323,7 @@ function QuickPromoModal({
         promoPrice,
         promoStartsAt: starts || null,
         promoEndsAt: ends || null,
+        promoText,
       });
       onSaved(updated);
       onClose();
@@ -310,10 +346,20 @@ function QuickPromoModal({
         </div>
         <p className="text-zinc-500 text-xs">{product.name}</p>
         <div className="space-y-1">
+          <Label className="text-zinc-400 text-xs">Texto da promoção</Label>
+          <Input value={promoText} onChange={e => setPromoText(e.target.value)}
+            className="bg-zinc-900 border-zinc-800 text-white h-11 focus:border-amber-500" />
+        </div>
+        <div className="space-y-1">
           <Label className="text-zinc-400 text-xs">Preço Promocional</Label>
           <Input type="number" step="0.01" min="0" value={promoPrice} onChange={e => setPromoPrice(e.target.value)}
             className="bg-zinc-900 border-zinc-800 text-white h-11 focus:border-amber-500" />
         </div>
+        <p className="text-xs text-zinc-400">
+          Desconto automático:{' '}
+          <span className="text-amber-500 font-black">{pct != null ? `-${pct}%` : '—'}</span>
+          {' · '}Economia: <span className="text-emerald-400 font-bold">{saved != null ? formatBrl(saved) : '—'}</span>
+        </p>
         <div className="grid grid-cols-2 gap-3">
           <div className="space-y-1">
             <Label className="text-zinc-400 text-xs">Data inicial</Label>
@@ -377,15 +423,12 @@ export default function MenuAdmin() {
         displayOrder: parseInt(form.displayOrder) || 0,
         isFeatured: form.isFeatured,
         isPromotion: form.isPromotion,
-        isBestseller: form.isBestseller,
-        isNew: form.isNew,
-        isFlashOffer: form.isFlashOffer,
         isClubeExclusive: form.isClubeExclusive,
         promoOriginalPrice: form.promoOriginalPrice || form.price,
         promoPrice: form.promoPrice || null,
         promoStartsAt: form.promoStartsAt || null,
         promoEndsAt: form.promoEndsAt || null,
-        marketingBadge: form.marketingBadge,
+        promoText: form.promoText || '',
       };
       if (editProduct) {
         const updated = await updateProduct(editProduct.id, payload);
@@ -505,10 +548,21 @@ export default function MenuAdmin() {
                             <span className="text-zinc-600 text-[10px] uppercase tracking-wider">{product.categoryName}</span>
                           )}
                           <p className="text-amber-500 font-black text-base mt-1">
-                            R$ {parseFloat(product.price).toFixed(2).replace('.', ',')}
+                            {product.isPromoActive && product.displayPrice ? (
+                              <>
+                                <span className="text-zinc-500 text-xs line-through mr-1.5 font-medium">
+                                  {formatBrl(product.compareAtPrice || product.price)}
+                                </span>
+                                {formatBrl(product.displayPrice)}
+                              </>
+                            ) : (
+                              formatBrl(product.price)
+                            )}
                           </p>
-                          {product.badgeLabel ? (
-                            <span className="inline-block mt-1 text-[10px] font-bold text-red-400">{product.badgeLabel}</span>
+                          {(product.promoText || product.discountLabel) ? (
+                            <span className="inline-block mt-1 text-[10px] font-bold text-red-400">
+                              {[product.discountLabel, product.promoText].filter(Boolean).join(' · ')}
+                            </span>
                           ) : null}
                         </div>
                         <div className="flex flex-col gap-1.5 shrink-0">

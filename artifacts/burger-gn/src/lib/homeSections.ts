@@ -125,7 +125,7 @@ export function buildHomeSections(
 ): HomeSection[] {
   const sections: HomeSection[] = [];
 
-  const promos = products.filter(p => p.isPromoActive && (p.isPromotion || p.isFlashOffer));
+  const promos = products.filter(p => p.isPromoActive && p.isPromotion);
   if (promos.length > 0) {
     sections.push({
       id: 'promocoes-do-dia',

@@ -3,7 +3,7 @@ import { Link } from 'wouter';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Plus, Minus, Check, Crown } from 'lucide-react';
 import type { Product, Addon } from '../lib/api';
-import { formatBrl, productBadgeText, productEffectivePrice } from '../lib/productMarketing';
+import { formatBrl, productDiscountLabel, productEffectivePrice, productPromoHeadline } from '../lib/productMarketing';
 
 interface ProductDetailModalProps {
   product: Product | null;
@@ -68,7 +68,8 @@ export function ProductDetailModal({ product, onClose, onAdd, clubeLoggedIn = fa
     : 0;
   const totalPrice = unitPrice * quantity;
   const fmt = (v: number) => formatBrl(v);
-  const badge = product ? productBadgeText(product) : '';
+  const badge = product ? productDiscountLabel(product) : '';
+  const promoHeadline = product ? productPromoHeadline(product) : '';
   const compareAt = product?.compareAtPrice ? parseFloat(String(product.compareAtPrice)) : null;
 
   return (
@@ -137,11 +138,14 @@ export function ProductDetailModal({ product, onClose, onAdd, clubeLoggedIn = fa
                   <div className="flex items-start gap-2 flex-wrap">
                     <h2 className="text-white font-black uppercase text-xl leading-tight tracking-tight">{product.name}</h2>
                     {badge ? (
-                      <span className="shrink-0 mt-1 inline-flex rounded-md bg-red-600/90 px-2 py-0.5 text-[10px] font-bold text-white">
+                      <span className="shrink-0 mt-1 inline-flex rounded-md bg-red-600 px-2 py-0.5 text-[11px] font-black text-white">
                         {badge}
                       </span>
                     ) : null}
                   </div>
+                  {promoHeadline ? (
+                    <p className="text-amber-400 text-sm font-bold mt-1">{promoHeadline}</p>
+                  ) : null}
                   <div className="flex items-baseline gap-2 mt-1">
                     {product.isPromoActive && compareAt !== null && Number.isFinite(compareAt) ? (
                       <span className="text-zinc-500 text-sm line-through">{fmt(compareAt)}</span>
@@ -152,9 +156,9 @@ export function ProductDetailModal({ product, onClose, onAdd, clubeLoggedIn = fa
                     <p className="text-amber-500/90 text-sm leading-snug mt-3 flex items-start gap-2">
                       <Crown size={16} className="mt-0.5 shrink-0" />
                       <span>
-                        Oferta exclusiva para membros do Clube Burger.{' '}
+                        Promoção exclusiva para membros do Clube Burger.{' '}
                         <Link href="/clube" className="underline font-bold" onClick={onClose}>
-                          Faça login ou cadastre-se para desbloquear.
+                          Cadastre-se gratuitamente para desbloquear.
                         </Link>
                       </span>
                     </p>

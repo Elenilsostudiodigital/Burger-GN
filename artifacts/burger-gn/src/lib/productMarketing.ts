@@ -1,23 +1,23 @@
 import type { Product } from './api';
 
-export type MarketingBadge =
-  | ''
-  | 'promotion'
-  | 'featured'
-  | 'flash'
-  | 'new'
-  | 'bestseller'
-  | 'clube';
+export const PROMO_TEXT_SUGGESTIONS = [
+  'Descontão $$$',
+  'Oferta da Semana',
+  'Leve 2 Pague 1',
+  'Promoção Imperdível',
+  'Oferta Relâmpago',
+] as const;
 
-export const MARKETING_BADGE_OPTIONS: Array<{ value: MarketingBadge; label: string }> = [
-  { value: '', label: 'Automática (conforme flags)' },
-  { value: 'promotion', label: '🔥 Promoção' },
-  { value: 'featured', label: '⭐ Destaque' },
-  { value: 'flash', label: '💥 Oferta Relâmpago' },
-  { value: 'new', label: '🆕 Novidade' },
-  { value: 'bestseller', label: '📈 Mais Vendido' },
-  { value: 'clube', label: '👑 Exclusivo Clube Burger' },
-];
+/** Automatic discount % — never typed manually. */
+export function calcDiscountPercent(original: number, promo: number): number | null {
+  if (!(original > 0) || !(promo >= 0) || promo >= original) return null;
+  return Math.round(((original - promo) / original) * 100);
+}
+
+export function calcSavedAmount(original: number, promo: number): number | null {
+  if (!(original > promo) || !(promo >= 0)) return null;
+  return Number((original - promo).toFixed(2));
+}
 
 export function productEffectivePrice(p: Product): number {
   if (p.isPromoActive && p.displayPrice) {
@@ -34,9 +34,15 @@ export function formatBrl(value: number | string): string {
 }
 
 export function isPromoOfTheDay(p: Product): boolean {
-  return !!(p.isPromoActive && (p.isPromotion || p.isFlashOffer));
+  return !!(p.isPromoActive && p.isPromotion);
 }
 
-export function productBadgeText(p: Product): string {
-  return (p.badgeLabel || '').trim();
+export function productDiscountLabel(p: Product): string {
+  if (p.discountLabel) return p.discountLabel;
+  if (typeof p.discountPercent === 'number') return `-${p.discountPercent}%`;
+  return '';
+}
+
+export function productPromoHeadline(p: Product): string {
+  return (p.promoText || '').trim();
 }

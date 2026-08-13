@@ -34,6 +34,8 @@ export const productsTable = pgTable("products", {
   promoStartsAt: timestamp("promo_starts_at"),
   promoEndsAt: timestamp("promo_ends_at"),
   marketingBadge: text("marketing_badge").notNull().default(""),
+  /** Free-text promo headline shown on the menu (e.g. "Oferta da Semana") */
+  promoText: text("promo_text").notNull().default(""),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
