@@ -5,7 +5,7 @@ import { PageTransition } from '../components/PageTransition';
 import {
   createOrder, validateCoupon, getDeliveryZones, getDeliveryFee, getKmDeliveryConfig,
   geocodeAddress, reverseGeocode, haversineKm, findKmTier, getPaymentSettings,
-  checkDeliveryStreet, resolveDeliveryArea,
+  checkDeliveryStreet, resolveDeliveryArea, requestDeliveryAreaAnalysis,
   ValidateCouponResult, DeliveryZone, KmDeliveryConfig, PaymentSettingsPublic,
 } from '../lib/api';
 import { saveMyOrder } from '../lib/myOrder';
@@ -83,6 +83,10 @@ export default function Checkout() {
   const [streetPendingMessage, setStreetPendingMessage] = useState('');
   const [streetNotes, setStreetNotes] = useState('');
   const [streetEtaMinutes, setStreetEtaMinutes] = useState<number | null>(null);
+  const [streetBlocked, setStreetBlocked] = useState(false);
+  const [canRequestArea, setCanRequestArea] = useState(false);
+  const [areaRequestStatus, setAreaRequestStatus] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
+  const [areaRequestMessage, setAreaRequestMessage] = useState('');
   const feeDebounce = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const streetDebounce = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
@@ -322,6 +326,8 @@ export default function Checkout() {
       setStreetPendingMessage('');
       setStreetNotes('');
       setStreetEtaMinutes(null);
+      setStreetBlocked(false);
+      setCanRequestArea(false);
       return;
     }
 
@@ -348,6 +354,8 @@ export default function Checkout() {
           setFeeFound(false);
           setDeliveryFee(0);
           setFeeMessage('');
+          setStreetBlocked(true);
+          setCanRequestArea(false);
           setStreetPendingMessage(
             result.message ||
               '🔴 Esta rua está temporariamente fora da área de entrega. Escolha outro endereço ou retire na loja.',
@@ -356,23 +364,26 @@ export default function Checkout() {
           return;
         }
 
+        setStreetBlocked(false);
+
         if (result.known && result.fee != null && Number.isFinite(result.fee)) {
           setDeliveryFee(result.fee);
           setFeeFound(true);
           setFeeMessage('');
           setStreetPendingMessage('');
+          setCanRequestArea(false);
           setStreetEtaMinutes(result.etaMinutes ?? null);
           if (result.distanceKm != null) setDistanceKm(result.distanceKm);
           return;
         }
 
-        if (result.pending) {
-          setStreetPendingMessage(
-            result.message ||
-              '📍 Esta rua ainda não faz parte da nossa área de entrega.\nAguarde um instante enquanto verificamos a disponibilidade.\nO pedido ficará aguardando análise do administrador.',
-          );
+        if (result.canRequest || result.pending) {
+          setCanRequestArea(true);
+          setStreetPendingMessage('');
           setStreetEtaMinutes(result.etaMinutes ?? null);
+          setFeeFound(false);
         } else {
+          setCanRequestArea(false);
           setStreetPendingMessage('');
         }
       } catch {
@@ -393,6 +404,10 @@ export default function Checkout() {
     setStreetPendingMessage('');
     setStreetNotes('');
     setStreetEtaMinutes(null);
+    setStreetBlocked(false);
+    setCanRequestArea(false);
+    setAreaRequestStatus('idle');
+    setAreaRequestMessage('');
     setGpsError('');
     setLocationLabel('');
     setAddressMode(null);
@@ -401,6 +416,50 @@ export default function Checkout() {
       endereco: '', numero: '', complemento: '', bairro: '', referencia: '',
     }));
   };
+
+  const sendAreaAnalysis = async () => {
+    const phone = form.telefone.replace(/\D/g, '');
+    if (!form.nome.trim() || phone.length < 10) {
+      setAreaRequestStatus('error');
+      setAreaRequestMessage('Informe nome e telefone antes de solicitar a análise.');
+      return;
+    }
+    if (!form.endereco.trim() || !form.numero.trim() || !form.bairro.trim() || form.bairro === '__outro__') {
+      setAreaRequestStatus('error');
+      setAreaRequestMessage('Informe rua, número e bairro para solicitar a análise.');
+      return;
+    }
+    setAreaRequestStatus('sending');
+    setAreaRequestMessage('');
+    try {
+      const result = await requestDeliveryAreaAnalysis({
+        streetName: form.endereco.trim(),
+        addressNumber: form.numero.trim(),
+        neighborhood: form.bairro.trim(),
+        city: 'Lauro de Freitas',
+        lat: customerCoords?.lat,
+        lng: customerCoords?.lng,
+        customerName: form.nome.trim(),
+        phone,
+        distanceKm: distanceKm ?? undefined,
+      });
+      setAreaRequestStatus('sent');
+      setAreaRequestMessage(result.message || 'Solicitação enviada com sucesso.');
+      setCanRequestArea(false);
+    } catch (err) {
+      setAreaRequestStatus('error');
+      setAreaRequestMessage(err instanceof Error ? err.message : 'Não foi possível enviar a solicitação.');
+    }
+  };
+
+  const showAreaRequestPanel =
+    isDelivery
+    && !streetBlocked
+    && feeFound === false
+    && !!form.endereco.trim()
+    && !!form.numero.trim()
+    && !!form.bairro.trim()
+    && form.bairro !== '__outro__';
 
   const streetNotesBanner =
     streetNotes.trim().length > 0 ? (
@@ -785,6 +844,7 @@ export default function Checkout() {
   };
 
   const feeBanner = (
+    <>
     <AnimatePresence>
       {feeLoading ? (
         <motion.div key="fee-load" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
@@ -818,7 +878,7 @@ export default function Checkout() {
             <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-amber-200 text-sm whitespace-pre-line leading-relaxed">
               {streetPendingMessage}
             </div>
-          ) : (
+          ) : showAreaRequestPanel ? null : (
             <div className="flex items-start gap-2 bg-orange-900/20 border border-orange-800/40 rounded-xl px-4 py-3">
               <AlertCircle size={16} className="text-orange-400 mt-0.5 shrink-0" />
               <p className="text-orange-400 text-sm">
@@ -840,6 +900,31 @@ export default function Checkout() {
         </motion.div>
       ) : null}
     </AnimatePresence>
+    <div className={showAreaRequestPanel ? 'mt-2' : 'hidden'}>
+      <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 space-y-3">
+        <p className="text-amber-100 text-sm leading-relaxed">
+          Esta região ainda não faz parte da nossa área de entrega.
+        </p>
+        {areaRequestStatus === 'sent' ? (
+          <p className="text-emerald-400 text-sm font-bold">{areaRequestMessage || 'Solicitação enviada com sucesso.'}</p>
+        ) : (
+          <>
+            {areaRequestStatus === 'error' && areaRequestMessage ? (
+              <p className="text-red-400 text-xs">{areaRequestMessage}</p>
+            ) : null}
+            <button
+              type="button"
+              disabled={areaRequestStatus === 'sending'}
+              onClick={() => { void sendAreaAnalysis(); }}
+              className="w-full h-11 rounded-xl bg-amber-500 text-zinc-950 font-black text-sm uppercase tracking-wide disabled:opacity-50"
+            >
+              {areaRequestStatus === 'sending' ? 'Enviando…' : '📍 Solicitar análise da minha região'}
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+    </>
   );
 
   return (

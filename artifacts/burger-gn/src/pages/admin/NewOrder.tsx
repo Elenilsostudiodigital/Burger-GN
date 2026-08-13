@@ -10,7 +10,7 @@ import {
   getCategories, getProducts, getPaymentSettings, getKmDeliveryConfig,
   getPublicClubeMe, createClient, createOrder, trackOrder,
   geocodeAddress, getDeliveryFee, checkDeliveryStreet, resolveDeliveryArea,
-  findKmTier, haversineKm,
+  findKmTier, haversineKm, requestDeliveryAreaAnalysis,
 } from '../../lib/api';
 
 type Step = 'cliente' | 'tipo' | 'produtos' | 'pagamento' | 'pix';
@@ -106,6 +106,9 @@ export default function AdminNewOrder() {
   const [feeMessage, setFeeMessage] = useState('');
   const [feeLoading, setFeeLoading] = useState(false);
   const [streetMsg, setStreetMsg] = useState('');
+  const [streetBlocked, setStreetBlocked] = useState(false);
+  const [areaRequestStatus, setAreaRequestStatus] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
+  const [areaRequestMessage, setAreaRequestMessage] = useState('');
 
   const [categories, setCategories] = useState<Category[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
@@ -337,9 +340,11 @@ export default function AdminNewOrder() {
         if (result.known && result.active === false) {
           setFeeFound(false);
           setDeliveryFee(0);
+          setStreetBlocked(true);
           setStreetMsg(result.message || 'Rua temporariamente fora da área de entrega.');
           return;
         }
+        setStreetBlocked(false);
         if (result.known && result.fee != null && Number.isFinite(result.fee)) {
           setDeliveryFee(result.fee);
           setFeeFound(true);
@@ -348,8 +353,9 @@ export default function AdminNewOrder() {
           if (result.distanceKm != null) setDistanceKm(result.distanceKm);
           return;
         }
-        if (result.pending) {
-          setStreetMsg(result.message || 'Rua em análise — o pedido seguirá para verificação.');
+        if (result.canRequest || result.pending) {
+          setFeeFound(false);
+          setStreetMsg('');
         } else {
           setStreetMsg('');
         }
@@ -769,6 +775,53 @@ export default function AdminNewOrder() {
                   )}
                   {!feeLoading && feeMessage && <p className="text-amber-400">{feeMessage}</p>}
                   {!feeLoading && streetMsg && <p className="text-sky-400 whitespace-pre-line">{streetMsg}</p>}
+                  {isDelivery && feeFound === false && !streetBlocked && endereco.trim() && numero.trim() && bairro.trim() && (
+                    <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-3 space-y-2">
+                      <p className="text-amber-100 text-sm">Esta região ainda não faz parte da nossa área de entrega.</p>
+                      {areaRequestStatus === 'sent' ? (
+                        <p className="text-emerald-400 text-sm font-bold">{areaRequestMessage || 'Solicitação enviada com sucesso.'}</p>
+                      ) : (
+                        <button
+                          type="button"
+                          disabled={areaRequestStatus === 'sending'}
+                          onClick={async () => {
+                            const digits = phoneDigits(phone);
+                            if (!name.trim() || digits.length < 10) {
+                              setAreaRequestStatus('error');
+                              setAreaRequestMessage('Informe nome e telefone do cliente.');
+                              return;
+                            }
+                            setAreaRequestStatus('sending');
+                            try {
+                              const result = await requestDeliveryAreaAnalysis({
+                                streetName: endereco.trim(),
+                                addressNumber: numero.trim(),
+                                neighborhood: bairro.trim(),
+                                city: CITY,
+                                cep: phoneDigits(cep) || undefined,
+                                lat: coords?.lat,
+                                lng: coords?.lng,
+                                customerName: name.trim(),
+                                phone: digits,
+                                distanceKm: distanceKm ?? undefined,
+                              });
+                              setAreaRequestStatus('sent');
+                              setAreaRequestMessage(result.message || 'Solicitação enviada com sucesso.');
+                            } catch (err) {
+                              setAreaRequestStatus('error');
+                              setAreaRequestMessage(err instanceof Error ? err.message : 'Falha ao enviar solicitação.');
+                            }
+                          }}
+                          className="w-full rounded-xl bg-amber-500 text-zinc-950 font-black text-xs uppercase py-2.5 disabled:opacity-50"
+                        >
+                          {areaRequestStatus === 'sending' ? 'Enviando…' : '📍 Solicitar análise da minha região'}
+                        </button>
+                      )}
+                      {areaRequestStatus === 'error' && areaRequestMessage ? (
+                        <p className="text-red-400 text-xs">{areaRequestMessage}</p>
+                      ) : null}
+                    </div>
+                  )}
                 </div>
               </div>
             )}

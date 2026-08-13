@@ -13,6 +13,7 @@ import {
   Order, WorkflowStage, PrepDayStats,
   ORDER_TYPE_LABELS, PAYMENT_STATUS_LABELS, WORKFLOW_LABELS,
   formatPaymentMethod, orderHasReceipt,
+  getAdminStreetRequests, DeliveryStreetRequest,
 } from '../../lib/api';
 import {
   LayoutDashboard, UtensilsCrossed, LogOut, Bell, BellOff,
@@ -21,6 +22,7 @@ import {
   ChevronLeft, ChevronRight, GripVertical, X, Crown, Filter, ImageIcon, CheckCircle2, Check, Ban, Star, Users, Plus,
 } from 'lucide-react';
 import { PrepCountdown, prepCardBorderClass } from '../../components/PrepCountdown';
+import { AreaAnalysisRequestCard } from '../../components/AreaAnalysisRequestCard';
 import {
   computePrepRemainingSeconds,
   formatPrepDuration,
@@ -569,6 +571,7 @@ export default function AdminDashboard() {
     orderNumber: number;
     durationSeconds: number;
   } | null>(null);
+  const [streetRequests, setStreetRequests] = useState<DeliveryStreetRequest[]>([]);
   const soundEnabledRef = useRef(soundEnabled);
 
   useEffect(() => { soundEnabledRef.current = soundEnabled; }, [soundEnabled]);
@@ -582,15 +585,24 @@ export default function AdminDashboard() {
     try { setPrepStats(await getPrepStats()); } catch { /* ignore */ }
   }, []);
 
+  const fetchStreetRequests = useCallback(async () => {
+    try {
+      const list = await getAdminStreetRequests('pending');
+      setStreetRequests(Array.isArray(list) ? list : []);
+    } catch { /* ignore */ }
+  }, []);
+
   useEffect(() => {
     fetchOrders();
     fetchPrepStats();
+    fetchStreetRequests();
     const interval = setInterval(() => {
       fetchOrders();
       fetchPrepStats();
+      fetchStreetRequests();
     }, 30000);
     return () => clearInterval(interval);
-  }, [fetchOrders, fetchPrepStats]);
+  }, [fetchOrders, fetchPrepStats, fetchStreetRequests]);
 
   useEffect(() => {
     fetchOrders();
@@ -637,9 +649,32 @@ export default function AdminDashboard() {
       setNotification('🔔 Status de pagamento atualizado');
       setTimeout(() => setNotification(null), 4000);
     });
+    es.addEventListener('street_request', (e) => {
+      try {
+        const data = JSON.parse((e as MessageEvent).data) as DeliveryStreetRequest;
+        if (soundEnabledRef.current) playBeep();
+        setStreetRequests((prev) => [data, ...prev.filter((r) => r.id !== data.id)]);
+        setNotification('🔔 Nova solicitação de área de entrega.');
+        setTimeout(() => setNotification(null), 6000);
+      } catch {
+        void fetchStreetRequests();
+      }
+    });
+    es.addEventListener('street_request_resolved', (e) => {
+      try {
+        const data = JSON.parse((e as MessageEvent).data) as { id?: number };
+        if (typeof data.id === 'number') {
+          setStreetRequests((prev) => prev.filter((r) => r.id !== data.id));
+        } else {
+          void fetchStreetRequests();
+        }
+      } catch {
+        void fetchStreetRequests();
+      }
+    });
 
     return () => es.close();
-  }, [fetchOrders]);
+  }, [fetchOrders, fetchStreetRequests]);
 
   const applyUpdated = (id: number, updated: Order) => {
     setOrders(prev => prev.map(o => o.id === id ? { ...o, ...updated, items: updated.items?.length ? updated.items : o.items } : o));
@@ -946,6 +981,22 @@ export default function AdminDashboard() {
         )}
       </header>
 
+      <div className={`px-4 pt-4 ${streetRequests.length ? '' : 'hidden'}`}>
+        <div className="max-w-[1800px] mx-auto space-y-3">
+          {streetRequests.map((req) => (
+            <AreaAnalysisRequestCard
+              key={req.id}
+              request={req}
+              onResolved={(id) => setStreetRequests((prev) => prev.filter((r) => r.id !== id))}
+              onError={(message) => {
+                setNotification(message);
+                setTimeout(() => setNotification(null), 4000);
+              }}
+            />
+          ))}
+        </div>
+      </div>
+
       <main className="flex-1 px-4 py-5 overflow-hidden">
         {loading ? (
           <div className="flex justify-center py-16">
@@ -1130,9 +1181,16 @@ export default function AdminDashboard() {
             { href: '/admin/importar', icon: Upload, label: 'Importar' },
           ].map(item => (
             <Link key={item.href} href={item.href} className="flex-1 min-w-[64px]">
-              <div className={`flex flex-col items-center gap-0.5 py-2.5 ${item.active ? 'text-amber-500' : 'text-zinc-500 hover:text-white'}`}>
+              <div className={`relative flex flex-col items-center gap-0.5 py-2.5 ${item.active ? 'text-amber-500' : 'text-zinc-500 hover:text-white'}`}>
                 <item.icon size={18} />
                 <span className="text-[9px] font-bold uppercase">{item.label}</span>
+                <span
+                  className={`absolute top-1 right-1 min-w-[14px] h-3.5 px-0.5 rounded-full bg-red-500 text-white text-[8px] font-black flex items-center justify-center ${
+                    item.href === '/admin/pedidos' && streetRequests.length > 0 ? '' : 'invisible'
+                  }`}
+                >
+                  {streetRequests.length > 9 ? '9+' : streetRequests.length || 0}
+                </span>
               </div>
             </Link>
           ))}

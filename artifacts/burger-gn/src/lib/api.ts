@@ -150,6 +150,8 @@ export interface DeliveryStreetRequest {
 export interface StreetCheckResult {
   known: boolean;
   pending: boolean;
+  alreadyRequested?: boolean;
+  canRequest?: boolean;
   active?: boolean;
   street?: DeliveryStreet;
   requestId?: number | null;
@@ -179,6 +181,26 @@ export const checkDeliveryStreet = (d: {
   phone?: string;
   distanceKm?: number;
 }) => api.post("/delivery/streets/check", d) as Promise<StreetCheckResult>;
+
+export const requestDeliveryAreaAnalysis = (d: {
+  streetName: string;
+  addressNumber?: string;
+  neighborhood?: string;
+  city?: string;
+  cep?: string;
+  lat?: number;
+  lng?: number;
+  customerName: string;
+  phone: string;
+  distanceKm?: number;
+}) =>
+  api.post("/delivery/streets/request-analysis", d) as Promise<{
+    ok: boolean;
+    created: boolean;
+    requestId: number;
+    message: string;
+    request: DeliveryStreetRequest;
+  }>;
 
 export const getAdminStreetRequests = (status = "pending") =>
   api.get(`/admin/delivery-street-requests?status=${encodeURIComponent(status)}`) as Promise<DeliveryStreetRequest[]>;

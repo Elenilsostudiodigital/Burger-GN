@@ -13,6 +13,7 @@ import {
 import { and, asc, desc, eq, ilike, or, sql } from "drizzle-orm";
 import { requireCompanyAuth } from "../middlewares/auth";
 import { resolvePublicCompany } from "../middlewares/company";
+import { broadcastSSE } from "../lib/sse";
 import {
   displayStreetName,
   estimateEtaMinutes,
@@ -219,7 +220,7 @@ router.post("/delivery/streets/check", resolvePublicCompany, async (req, res) =>
       distanceKm != null ? suggestFeeFromDistance(distanceKm, tiers) : null;
     const etaMinutes = distanceKm != null ? estimateEtaMinutes(distanceKm) : null;
 
-    // Upsert pending request (one open request per street key)
+    // Lookup only — the customer must click "Solicitar análise" to create a request.
     const [existingPending] = await db
       .select()
       .from(deliveryStreetRequestsTable)
@@ -232,65 +233,174 @@ router.post("/delivery/streets/check", resolvePublicCompany, async (req, res) =>
       )
       .limit(1);
 
-    let request = existingPending;
-    if (existingPending) {
-      const [updated] = await db
-        .update(deliveryStreetRequestsTable)
-        .set({
-          streetName,
-          addressNumber: String(body.addressNumber || existingPending.addressNumber || ""),
-          neighborhood: neighborhood || existingPending.neighborhood,
-          city,
-          cep: cep || existingPending.cep,
-          lat: lat != null ? String(lat) : existingPending.lat,
-          lng: lng != null ? String(lng) : existingPending.lng,
-          distanceKm: distanceKm != null ? String(distanceKm) : existingPending.distanceKm,
-          etaMinutes: etaMinutes ?? existingPending.etaMinutes,
-          suggestedFee: suggestedFee != null ? String(suggestedFee) : existingPending.suggestedFee,
-          customerName: String(body.customerName || existingPending.customerName || ""),
-          phone: String(body.phone || existingPending.phone || ""),
-          updatedAt: new Date(),
-        })
-        .where(eq(deliveryStreetRequestsTable.id, existingPending.id))
-        .returning();
-      request = updated ?? existingPending;
-    } else {
-      const [created] = await db
-        .insert(deliveryStreetRequestsTable)
-        .values({
-          companyId,
-          streetName,
-          streetKey,
-          addressNumber: String(body.addressNumber || ""),
-          neighborhood,
-          city,
-          cep,
-          lat: lat != null ? String(lat) : null,
-          lng: lng != null ? String(lng) : null,
-          distanceKm: distanceKm != null ? String(distanceKm) : null,
-          etaMinutes,
-          suggestedFee: suggestedFee != null ? String(suggestedFee) : null,
-          customerName: String(body.customerName || ""),
-          phone: String(body.phone || ""),
-          status: "pending",
-        })
-        .returning();
-      request = created!;
-    }
-
     res.json({
       known: false,
-      pending: true,
-      requestId: request?.id ?? null,
+      pending: !!existingPending,
+      alreadyRequested: !!existingPending,
+      canRequest: true,
+      requestId: existingPending?.id ?? null,
       fee: null,
       etaMinutes,
       distanceKm,
       suggestedFee,
-      message:
-        "📍 Esta rua ainda não faz parte da nossa área de entrega.\nAguarde um instante enquanto verificamos a disponibilidade.\nO pedido ficará aguardando análise do administrador.",
+      message: "Esta região ainda não faz parte da nossa área de entrega.",
     });
   } catch (err) {
     req.log.error({ err }, "Failed to check delivery street");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+type StreetRequestBody = {
+  streetName?: string;
+  addressNumber?: string;
+  neighborhood?: string;
+  city?: string;
+  cep?: string;
+  lat?: number;
+  lng?: number;
+  customerName?: string;
+  phone?: string;
+  distanceKm?: number;
+};
+
+async function upsertPendingAnalysisRequest(
+  companyId: number,
+  body: StreetRequestBody,
+): Promise<{ request: typeof deliveryStreetRequestsTable.$inferSelect; created: boolean } | { error: string; status: number }> {
+  const streetName = displayStreetName(body.streetName || "");
+  const streetKey = normalizeStreetKey(streetName);
+  if (!streetKey || streetKey.length < 3) {
+    return { error: "Informe o nome da rua.", status: 400 };
+  }
+
+  const neighborhood = String(body.neighborhood || "").trim();
+  const city = String(body.city || "Lauro de Freitas").trim() || "Lauro de Freitas";
+  const cep = String(body.cep || "").replace(/\D/g, "").slice(0, 8);
+  const lat = typeof body.lat === "number" && Number.isFinite(body.lat) ? body.lat : null;
+  const lng = typeof body.lng === "number" && Number.isFinite(body.lng) ? body.lng : null;
+  const customerName = String(body.customerName || "").trim();
+  const phone = String(body.phone || "").replace(/\D/g, "");
+  if (!customerName || phone.length < 10) {
+    return { error: "Informe nome e telefone para solicitar a análise.", status: 400 };
+  }
+
+  const [knownAny] = await db
+    .select()
+    .from(deliveryStreetsTable)
+    .where(
+      and(
+        eq(deliveryStreetsTable.companyId, companyId),
+        eq(deliveryStreetsTable.streetKey, streetKey),
+      ),
+    )
+    .limit(1);
+  if (knownAny?.active) {
+    return { error: "Esta região já está na área de entrega.", status: 409 };
+  }
+  if (knownAny && !knownAny.active) {
+    return {
+      error: "Esta rua está temporariamente fora da área de entrega. Escolha outro endereço ou retire na loja.",
+      status: 400,
+    };
+  }
+
+  const { config, tiers } = await loadKmContext(companyId);
+  let distanceKm =
+    typeof body.distanceKm === "number" && Number.isFinite(body.distanceKm)
+      ? body.distanceKm
+      : null;
+  if (distanceKm == null && lat != null && lng != null && config) {
+    const baseLat = parseFloat(String(config.baseLat));
+    const baseLng = parseFloat(String(config.baseLng));
+    if (Number.isFinite(baseLat) && Number.isFinite(baseLng) && !(baseLat === 0 && baseLng === 0)) {
+      distanceKm = parseFloat(haversineKm(baseLat, baseLng, lat, lng).toFixed(2));
+    }
+  }
+  const suggestedFee = distanceKm != null ? suggestFeeFromDistance(distanceKm, tiers) : null;
+  const etaMinutes = distanceKm != null ? estimateEtaMinutes(distanceKm) : null;
+
+  const [existingPending] = await db
+    .select()
+    .from(deliveryStreetRequestsTable)
+    .where(
+      and(
+        eq(deliveryStreetRequestsTable.companyId, companyId),
+        eq(deliveryStreetRequestsTable.streetKey, streetKey),
+        eq(deliveryStreetRequestsTable.status, "pending"),
+      ),
+    )
+    .limit(1);
+
+  if (existingPending) {
+    const [updated] = await db
+      .update(deliveryStreetRequestsTable)
+      .set({
+        streetName,
+        addressNumber: String(body.addressNumber || existingPending.addressNumber || ""),
+        neighborhood: neighborhood || existingPending.neighborhood,
+        city,
+        cep: cep || existingPending.cep,
+        lat: lat != null ? String(lat) : existingPending.lat,
+        lng: lng != null ? String(lng) : existingPending.lng,
+        distanceKm: distanceKm != null ? String(distanceKm) : existingPending.distanceKm,
+        etaMinutes: etaMinutes ?? existingPending.etaMinutes,
+        suggestedFee: suggestedFee != null ? String(suggestedFee) : existingPending.suggestedFee,
+        customerName,
+        phone,
+        updatedAt: new Date(),
+      })
+      .where(eq(deliveryStreetRequestsTable.id, existingPending.id))
+      .returning();
+    return { request: updated ?? existingPending, created: false };
+  }
+
+  const [created] = await db
+    .insert(deliveryStreetRequestsTable)
+    .values({
+      companyId,
+      streetName,
+      streetKey,
+      addressNumber: String(body.addressNumber || ""),
+      neighborhood,
+      city,
+      cep,
+      lat: lat != null ? String(lat) : null,
+      lng: lng != null ? String(lng) : null,
+      distanceKm: distanceKm != null ? String(distanceKm) : null,
+      etaMinutes,
+      suggestedFee: suggestedFee != null ? String(suggestedFee) : null,
+      customerName,
+      phone,
+      status: "pending",
+    })
+    .returning();
+  return { request: created!, created: true };
+}
+
+/** Customer explicitly requests analysis of an unserved region. */
+router.post("/delivery/streets/request-analysis", resolvePublicCompany, async (req, res) => {
+  try {
+    const companyId = req.companyId!;
+    const result = await upsertPendingAnalysisRequest(companyId, req.body as StreetRequestBody);
+    if ("error" in result) {
+      res.status(result.status).json({ error: result.error });
+      return;
+    }
+    const payload = serializeRequest(result.request);
+    broadcastSSE(companyId, "street_request", {
+      ...payload,
+      created: result.created,
+    });
+    res.status(result.created ? 201 : 200).json({
+      ok: true,
+      created: result.created,
+      requestId: result.request.id,
+      message: "Solicitação enviada com sucesso.",
+      request: payload,
+    });
+  } catch (err) {
+    req.log.error({ err }, "Failed to request street analysis");
     res.status(500).json({ error: "Internal server error" });
   }
 });
@@ -588,6 +698,11 @@ router.post("/admin/delivery-street-requests/:id/approve", requireCompanyAuth, a
       request: serializeRequest(updatedReq!),
       street: serializeStreet(street),
     });
+    broadcastSSE(req.companyId!, "street_request_resolved", {
+      id,
+      status: "approved",
+      streetId: street.id,
+    });
   } catch (err) {
     req.log.error({ err }, "Failed to approve street request");
     res.status(500).json({ error: "Internal server error" });
@@ -626,6 +741,10 @@ router.post("/admin/delivery-street-requests/:id/reject", requireCompanyAuth, as
       .returning();
 
     res.json({ ok: true, request: serializeRequest(updated!) });
+    broadcastSSE(req.companyId!, "street_request_resolved", {
+      id,
+      status: "rejected",
+    });
   } catch (err) {
     req.log.error({ err }, "Failed to reject street request");
     res.status(500).json({ error: "Internal server error" });

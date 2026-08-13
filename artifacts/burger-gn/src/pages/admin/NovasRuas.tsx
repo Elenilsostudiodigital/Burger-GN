@@ -46,6 +46,10 @@ export default function AdminNovasRuas() {
 
   useEffect(() => {
     void refresh();
+    const es = new EventSource('/api/orders/stream', { withCredentials: true });
+    es.addEventListener('street_request', () => { void refresh(); });
+    es.addEventListener('street_request_resolved', () => { void refresh(); });
+    return () => es.close();
   }, []);
 
   const openAnalyze = async (id: number) => {
