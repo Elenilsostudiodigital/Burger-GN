@@ -91,7 +91,7 @@ export function ClubeCelebration({
             {cashbackLabel ? ` (${cashbackLabel})` : ''}.
           </p>
           <p className="text-zinc-400 text-sm leading-relaxed px-1">
-            Seu próximo selo estará disponível na primeira compra realizada após completar 24 horas.
+            Seu próximo selo estará disponível na primeira compra de outro dia elegível.
           </p>
         </div>
         {onContinue ? (

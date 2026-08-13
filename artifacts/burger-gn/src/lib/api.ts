@@ -749,6 +749,7 @@ export interface Order {
   needsChange?: boolean | null;
   receiptDataUrl?: string | null;
   receiptUploadedAt?: string | null;
+  hasReceipt?: boolean;
   receiptRejectReason?: string | null;
   receiptRejectedAt?: string | null;
   rejectReason?: string | null;
@@ -1105,12 +1106,29 @@ export const PAYMENT_STATUS_LABELS: Record<PaymentStatus, string> = {
   failed: "Pagamento recusado",
 };
 
-export const RECEIPT_ACCEPT = "image/png,image/jpeg,image/jpg,image/webp";
+export const RECEIPT_ACCEPT = "image/png,image/jpeg,image/jpg,image/webp,image/heic,image/heif";
 export function isAllowedReceiptFile(file: File): boolean {
   const type = (file.type || "").toLowerCase();
-  if (type === "image/png" || type === "image/jpeg" || type === "image/jpg" || type === "image/webp") return true;
+  if (
+    type === "image/png"
+    || type === "image/jpeg"
+    || type === "image/jpg"
+    || type === "image/webp"
+    || type === "image/heic"
+    || type === "image/heif"
+  ) return true;
   const name = file.name.toLowerCase();
-  return /\.(png|jpe?g|webp)$/.test(name);
+  if (/\.(png|jpe?g|webp|heic|heif)$/.test(name)) return true;
+  // iOS sometimes sends an empty MIME type for camera/gallery photos.
+  return !type && !name.includes(".");
+}
+
+export function orderHasReceipt(order: {
+  hasReceipt?: boolean | null;
+  receiptDataUrl?: string | null;
+  receiptUploadedAt?: string | null;
+}): boolean {
+  return !!(order.hasReceipt || order.receiptDataUrl || order.receiptUploadedAt);
 }
 
 // ── Financial Report ────────────────────────────────────────────────────────

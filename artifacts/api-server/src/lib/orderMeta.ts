@@ -48,7 +48,7 @@ export interface OrderMeta {
   clientMemberId?: number;
   /** Idempotency: stamp already awarded for this order. */
   stampsAwarded?: boolean;
-  /** Stamp was evaluated but blocked by the 24h fidelity rule. */
+  /** Stamp was evaluated but blocked by the 1-selo-per-calendar-day fidelity rule. */
   stampSkipped?: boolean;
   /** Customer-facing message when stampSkipped. */
   stampSkipMessage?: string;

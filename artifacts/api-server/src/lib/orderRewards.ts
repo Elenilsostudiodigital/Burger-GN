@@ -2,8 +2,9 @@
  * Automatic fidelity (stamps) + cashback when an order reaches "done".
  * Idempotent per order via order meta flags AND client ledger.
  *
- * Fidelity rule: at most 1 stamp per rolling 24 hours (from last selo_pedido).
- * Cashback: every completed order (no daily limit).
+ * Fidelity rule: at most 1 stamp per America/Sao_Paulo calendar day (selo_pedido only).
+ * Cashback: every eligible completed order (no daily limit); each order at most once.
+ * Admin edits of points/cashback become the new base; future awards add on top.
  */
 import { db, clubeMembersTable, clubeSettingsTable } from "@workspace/db";
 import { and, eq } from "drizzle-orm";
@@ -27,6 +28,8 @@ export type OrderForRewards = {
   phone: string;
   total: string | number;
   status: string;
+  paymentMethod?: string;
+  paymentStatus?: string;
 };
 
 export type ApplyRewardsResult = {
@@ -41,6 +44,17 @@ export type ApplyRewardsResult = {
 
 function roundMoney(n: number): number {
   return Math.round(n * 100) / 100;
+}
+
+/** Cashback/stamps only after a completed sale — never for unpaid PIX, cancelled, or refused. */
+export function isEligibleForOrderRewards(order: {
+  status: string;
+  paymentMethod?: string;
+  paymentStatus?: string;
+}): boolean {
+  if (order.status !== "done") return false;
+  if (order.paymentMethod === "pix" && order.paymentStatus !== "paid") return false;
+  return true;
 }
 
 async function ensureClubeSettings(companyId: number) {
@@ -75,7 +89,7 @@ export async function applyOrderCompletionRewards(
     memberId: typeof meta.clientMemberId === "number" ? meta.clientMemberId : null,
   };
 
-  if (order.status !== "done") {
+  if (!isEligibleForOrderRewards(order)) {
     return result;
   }
 
@@ -120,7 +134,7 @@ export async function applyOrderCompletionRewards(
   const now = new Date().toISOString();
   const nowMs = Date.now();
 
-  // ── Stamps (+1, max 1 per 24h) ──────────────────────────────────────────────
+  // ── Stamps (+1, max 1 per SP calendar day) ─────────────────────────────────
   if (needStamps) {
     const alreadyInLedger = hasLedgerForOrder(workingMeta, order.id, "selo_pedido");
     const alreadyBlocked = hasLedgerForOrder(workingMeta, order.id, "selo_bloqueado");
@@ -133,14 +147,14 @@ export async function applyOrderCompletionRewards(
       nextMeta.stampSkipMessage = nextMeta.stampSkipMessage || STAMP_SKIPPED_MESSAGE;
       result.stampSkipped = true;
     } else if (!canAwardFidelityStamp(workingMeta, nowMs)) {
-      // Within 24h of last stamp — cashback still applies below.
+      // Already earned a purchase stamp today — cashback still applies below.
       workingMeta = appendClientLedger(workingMeta, {
         at: now,
         type: "selo_bloqueado",
         orderId: order.id,
         orderNumber: order.orderNumber,
         stampsDelta: 0,
-        description: `Selo bloqueado (aguarda 24h) — pedido #${order.orderNumber}`,
+        description: `Selo bloqueado (já ganhou neste dia) — pedido #${order.orderNumber}`,
       });
       nextMeta.stampsAwarded = true;
       nextMeta.stampSkipped = true;

@@ -1,24 +1,39 @@
 /**
- * Sanity checks for Clube fidelity 24h stamp cooldown helpers.
+ * Clube fidelity: 1 purchase stamp per America/Sao_Paulo calendar day.
+ * Admin ajuste_selo changes balance but does not lock the day.
  * Run: node scripts/fidelity-stamp-selftest.mjs
  */
 
-const FIDELITY_STAMP_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+const FIDELITY_TZ = "America/Sao_Paulo";
 
-function lastFidelityStampAt(meta) {
-  for (const entry of meta.ledger ?? []) {
-    if (entry.type === "selo_pedido" && entry.at) return entry.at;
-  }
-  return null;
+function calendarDateSP(ms) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: FIDELITY_TZ,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date(ms));
+}
+
+function nextCalendarDateSP(dayIso) {
+  const noon = new Date(`${dayIso}T12:00:00-03:00`);
+  return calendarDateSP(noon.getTime() + 24 * 60 * 60 * 1000);
+}
+
+function hasFidelityStampOnCalendarDay(meta, dayIso) {
+  return (meta.ledger ?? []).some((entry) => {
+    if (entry.type !== "selo_pedido" || !entry.at) return false;
+    const at = Date.parse(entry.at);
+    if (!Number.isFinite(at)) return false;
+    return calendarDateSP(at) === dayIso;
+  });
 }
 
 function nextFidelityStampAvailableAt(meta, nowMs = Date.now()) {
-  const last = lastFidelityStampAt(meta);
-  if (!last) return null;
-  const next = new Date(last).getTime() + FIDELITY_STAMP_COOLDOWN_MS;
-  if (!Number.isFinite(next)) return null;
-  if (nowMs >= next) return null;
-  return new Date(next).toISOString();
+  const today = calendarDateSP(nowMs);
+  if (!hasFidelityStampOnCalendarDay(meta, today)) return null;
+  const tomorrow = nextCalendarDateSP(today);
+  return new Date(`${tomorrow}T00:00:00-03:00`).toISOString();
 }
 
 function canAwardFidelityStamp(meta, nowMs = Date.now()) {
@@ -53,16 +68,27 @@ function assert(cond, msg) {
   if (!cond) throw new Error(msg);
 }
 
-const t0 = Date.parse("2026-08-11T10:00:00.000Z");
+// 2026-08-11 10:00 SP = 13:00 UTC
+const t0 = Date.parse("2026-08-11T13:00:00.000Z");
 const meta = {
-  ledger: [{ type: "selo_pedido", at: "2026-08-11T10:00:00.000Z" }],
+  ledger: [{ type: "selo_pedido", at: "2026-08-11T13:00:00.000Z" }],
 };
 
-assert(!canAwardFidelityStamp(meta, t0 + 1 * 3600_000), "blocked at +1h");
-assert(!canAwardFidelityStamp(meta, t0 + 14 * 3600_000), "blocked at +14h");
-assert(canAwardFidelityStamp(meta, t0 + 24 * 3600_000), "allowed at +24h");
-assert(canAwardFidelityStamp(meta, t0 + 30 * 24 * 3600_000), "allowed after many days");
+assert(!canAwardFidelityStamp(meta, t0 + 1 * 3600_000), "blocked later same SP day");
+assert(!canAwardFidelityStamp(meta, t0 + 10 * 3600_000), "blocked evening same SP day");
+// Next SP calendar day 00:00 = 2026-08-12T03:00:00.000Z
+assert(canAwardFidelityStamp(meta, Date.parse("2026-08-12T03:00:00.000Z")), "allowed next SP day");
 assert(canAwardFidelityStamp({ ledger: [] }, t0), "first stamp always allowed");
+
+// Admin zeroing stamps must NOT unlock another purchase stamp the same day
+const afterAdminZero = {
+  ledger: [
+    { type: "ajuste_selo", at: "2026-08-11T18:00:00.000Z", stampsDelta: -3 },
+    { type: "selo_pedido", at: "2026-08-11T13:00:00.000Z" },
+  ],
+};
+assert(!canAwardFidelityStamp(afterAdminZero, t0 + 6 * 3600_000), "admin zero does not unlock same day");
+assert(canAwardFidelityStamp(afterAdminZero, Date.parse("2026-08-12T03:00:00.000Z")), "next day after admin zero");
 
 assert(isFidelityFreeBurgerProduct({ categorySlug: "hamburguer-artesanal", productName: "GN Classic" }), "burger ok");
 assert(isFidelityFreeBurgerProduct({ categorySlug: "smash", productName: "Smash Duplo" }), "smash ok");

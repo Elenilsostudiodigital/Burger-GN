@@ -97,8 +97,8 @@ export function publicClubRules(settings: Awaited<ReturnType<typeof ensureSettin
       stampsRequired,
       stampRewardTitle,
       howItWorks: [
-        "Você ganha no máximo 1 selo a cada 24 horas, na primeira compra após completar esse período.",
-        "Pedidos extras no mesmo período de 24 horas geram Cashback normalmente, mas não geram novo selo.",
+        "Você ganha no máximo 1 selo por dia elegível (fuso de Brasília), na primeira compra do dia.",
+        "Pedidos extras no mesmo dia geram Cashback normalmente, mas não geram novo selo.",
         `Ao completar ${stampsRequired} selos, você desbloqueia: ${stampRewardTitle}.`,
         "O prêmio vale para qualquer hambúrguer do cardápio (não inclui Combos). Na entrega, cobra-se apenas a taxa quando houver.",
         "Os selos reiniciam o ciclo após a recompensa ser conquistada.",

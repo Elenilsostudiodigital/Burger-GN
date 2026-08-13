@@ -28,7 +28,7 @@ const STATUS_LABEL: Record<string, string> = {
 
 const LEDGER_LABEL: Record<ClientLedgerType, string> = {
   selo_pedido: 'Selo recebido',
-  selo_bloqueado: 'Selo bloqueado (24h)',
+  selo_bloqueado: 'Selo bloqueado (mesmo dia)',
   cashback_pedido: 'Cashback recebido',
   cashback_utilizado: 'Cashback utilizado',
   ajuste_selo: 'Ajuste de selos',

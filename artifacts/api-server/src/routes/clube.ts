@@ -12,6 +12,7 @@ import { eq, and, sql, desc } from "drizzle-orm";
 import { requireCompanyAuth } from "../middlewares/auth";
 import { resolvePublicCompany } from "../middlewares/company";
 import {
+  appendClientLedger,
   isPlaceholderPhone,
   normalizeClientPhone,
   parseClientNotes,
@@ -77,8 +78,8 @@ function publicClubRules(settings: Awaited<ReturnType<typeof ensureSettings>>) {
       stampsRequired,
       stampRewardTitle,
       howItWorks: [
-        "Você ganha no máximo 1 selo a cada 24 horas, na primeira compra após completar esse período.",
-        "Pedidos extras no mesmo período de 24 horas geram Cashback normalmente, mas não geram novo selo.",
+        "Você ganha no máximo 1 selo por dia elegível (fuso de Brasília), na primeira compra do dia.",
+        "Pedidos extras no mesmo dia geram Cashback normalmente, mas não geram novo selo.",
         `Ao completar ${stampsRequired} selos, você desbloqueia: ${stampRewardTitle}.`,
         "O prêmio vale para qualquer hambúrguer do cardápio (não inclui Combos). Na entrega, cobra-se apenas a taxa quando houver.",
         "Os selos reiniciam o ciclo após a recompensa ser conquistada.",
@@ -367,31 +368,67 @@ router.put("/admin/clube/members/:id", requireCompanyAuth, async (req, res) => {
       active: boolean;
       notes: string;
     }>;
-    const updateData: Record<string, unknown> = { ...body };
+
+    const [existing] = await db
+      .select()
+      .from(clubeMembersTable)
+      .where(
+        and(
+          eq(clubeMembersTable.id, id),
+          eq(clubeMembersTable.companyId, req.companyId!),
+        ),
+      );
+    if (!existing) {
+      res.status(404).json({ error: "Not found" });
+      return;
+    }
+
+    const updateData: Record<string, unknown> = {};
+    if (body.name !== undefined) updateData["name"] = body.name.trim();
     if (body.email !== undefined) updateData["email"] = body.email.trim().toLowerCase();
     if (body.phone !== undefined) {
       const raw = body.phone.trim();
       updateData["phone"] = raw ? normalizeClientPhone(raw) || raw : "";
     }
-    if (body.name !== undefined) updateData["name"] = body.name.trim();
     if (body.birthDate !== undefined) updateData["birthDate"] = body.birthDate || null;
+    if (body.tier !== undefined) updateData["tier"] = body.tier;
+    if (body.active !== undefined) updateData["active"] = body.active;
 
-    // Preserve CRM origin meta embedded in notes (Clientes module).
-    if (body.notes !== undefined) {
-      const [existing] = await db
-        .select()
-        .from(clubeMembersTable)
-        .where(
-          and(
-            eq(clubeMembersTable.id, id),
-            eq(clubeMembersTable.companyId, req.companyId!),
-          ),
-        );
-      if (existing) {
-        const { meta } = parseClientNotes(existing.notes);
-        updateData["notes"] = serializeClientNotes(String(body.notes || ""), meta);
+    const { publicNotes, meta } = parseClientNotes(existing.notes);
+    let nextMeta = { ...meta };
+    const now = new Date().toISOString();
+    const notesPublic =
+      body.notes !== undefined ? String(body.notes || "") : publicNotes;
+
+    if (body.points !== undefined) {
+      const stamps = Math.max(0, Math.min(500, Math.round(Number(body.points) || 0)));
+      const prev = existing.points ?? 0;
+      if (stamps !== prev) {
+        nextMeta = appendClientLedger(nextMeta, {
+          at: now,
+          type: "ajuste_selo",
+          stampsDelta: stamps - prev,
+          description: "Ajuste manual de selos (Clube admin)",
+        });
       }
+      updateData["points"] = stamps;
     }
+
+    if (body.cashbackBalance !== undefined) {
+      const cash = Math.max(0, Number(body.cashbackBalance) || 0);
+      const prev = parseFloat(String(existing.cashbackBalance)) || 0;
+      if (Math.abs(cash - prev) > 0.001) {
+        nextMeta = appendClientLedger(nextMeta, {
+          at: now,
+          type: "ajuste_cashback",
+          cashbackDelta: Math.round((cash - prev) * 100) / 100,
+          description: "Ajuste manual de cashback (Clube admin)",
+        });
+      }
+      updateData["cashbackBalance"] = cash.toFixed(2);
+    }
+
+    updateData["notes"] = serializeClientNotes(notesPublic, nextMeta);
 
     const [member] = await db
       .update(clubeMembersTable)

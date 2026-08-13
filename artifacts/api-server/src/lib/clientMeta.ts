@@ -30,11 +30,14 @@ export type ClientLedgerType =
   | "recompensa_disponivel"
   | "recompensa_resgatada";
 
-/** Rolling window between fidelity stamps (ms). */
+/** @deprecated Kept for older callers; fidelity uses calendar day (America/Sao_Paulo). */
 export const FIDELITY_STAMP_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 
+/** Business timezone for "1 selo por dia elegível". */
+export const FIDELITY_TZ = "America/Sao_Paulo";
+
 export const STAMP_SKIPPED_MESSAGE =
-  "🍔 Você já conquistou o selo referente a este período.\n💰 Seu Cashback foi adicionado normalmente.\nSeu próximo selo estará disponível na primeira compra realizada após completar 24 horas.";
+  "🍔 Você já conquistou o selo referente a este dia.\n💰 Seu Cashback foi adicionado normalmente.\nSeu próximo selo estará disponível na primeira compra de outro dia elegível.";
 
 export interface ClientLedgerEntry {
   id: string;
@@ -344,17 +347,50 @@ export function lastFidelityStampAt(meta: ClientMeta): string | null {
   return null;
 }
 
-/** ISO timestamp when the next stamp becomes available (after 24h), or null if available now. */
+/** Calendar date YYYY-MM-DD in America/Sao_Paulo. */
+export function calendarDateSP(ms: number = Date.now()): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: FIDELITY_TZ,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date(ms));
+}
+
+function nextCalendarDateSP(dayIso: string): string {
+  // Noon SP avoids DST edge cases when stepping +1 day.
+  const noon = new Date(`${dayIso}T12:00:00-03:00`);
+  return calendarDateSP(noon.getTime() + 24 * 60 * 60 * 1000);
+}
+
+/** True when a purchase-earned stamp (`selo_pedido`) already exists on that SP calendar day. */
+export function hasFidelityStampOnCalendarDay(
+  meta: ClientMeta,
+  dayIso: string,
+): boolean {
+  return (meta.ledger ?? []).some((entry) => {
+    if (entry.type !== "selo_pedido" || !entry.at) return false;
+    const at = Date.parse(entry.at);
+    if (!Number.isFinite(at)) return false;
+    return calendarDateSP(at) === dayIso;
+  });
+}
+
+/**
+ * ISO timestamp when the next stamp becomes available (start of next SP calendar day),
+ * or null if available now.
+ *
+ * Admin adjustments (`ajuste_selo`) change the stamp balance but do NOT count as a
+ * day stamp — only `selo_pedido` from completed orders locks the day.
+ */
 export function nextFidelityStampAvailableAt(
   meta: ClientMeta,
   nowMs: number = Date.now(),
 ): string | null {
-  const last = lastFidelityStampAt(meta);
-  if (!last) return null;
-  const next = new Date(last).getTime() + FIDELITY_STAMP_COOLDOWN_MS;
-  if (!Number.isFinite(next)) return null;
-  if (nowMs >= next) return null;
-  return new Date(next).toISOString();
+  const today = calendarDateSP(nowMs);
+  if (!hasFidelityStampOnCalendarDay(meta, today)) return null;
+  const tomorrow = nextCalendarDateSP(today);
+  return new Date(`${tomorrow}T00:00:00-03:00`).toISOString();
 }
 
 export function canAwardFidelityStamp(
@@ -488,9 +524,15 @@ export function phoneIdentityKeys(phone: string): string[] {
 
 /** Placeholder / local-store phones that must not create CRM clients. */
 export function isPlaceholderPhone(phone: string): boolean {
+  const digits = String(phone || "").replace(/\D/g, "").replace(/^0+/, "");
+  if (!digits) return true;
+  if (/^0+$/.test(digits)) return true;
   const key = phoneIdentityKey(phone);
-  if (!key || key.length < 10) return true;
+  if (!key) return true;
   if (/^0+$/.test(key)) return true;
+  // Only skip junk like "123". Real orders (including slightly short WhatsApp
+  // numbers used in checkout) must still earn cashback/stamps.
+  if (key.length < 8) return true;
   return false;
 }
 
