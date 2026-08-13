@@ -87,7 +87,17 @@ export function BusinessHoursTab() {
       try {
         const payload = await getAdminBusinessHours();
         if (!alive) return;
-        setData(payload);
+        // Update live status only — do not clobber in-progress schedule edits.
+        setData((prev) => (prev ? {
+          ...prev,
+          manualMode: payload.manualMode,
+          status: payload.status,
+          exceptionDate: payload.exceptionDate,
+          exceptionClosed: payload.exceptionClosed,
+          exceptionOpen: payload.exceptionOpen,
+          exceptionClose: payload.exceptionClose,
+          updatedAt: payload.updatedAt,
+        } : payload));
         const at = payload.status.nextTransitionAt
           ? Date.parse(payload.status.nextTransitionAt)
           : NaN;

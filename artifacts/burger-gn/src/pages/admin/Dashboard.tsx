@@ -1,6 +1,5 @@
 import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { Link, useLocation } from 'wouter';
-import { motion, AnimatePresence } from 'framer-motion';
 import {
   DndContext, DragOverlay, PointerSensor, TouchSensor, useSensor, useSensors,
   useDraggable, useDroppable, closestCenter, type DragEndEvent, type DragStartEvent,
@@ -219,15 +218,12 @@ function OrderCard({ order, highlight, dragging, onAccept, onRefuse, onAdvance, 
   };
 
   return (
-    <motion.div
+    <div
       ref={setNodeRef}
       style={style}
-      layout
-      initial={{ opacity: 0, y: -10 }}
-      animate={{ opacity: isDragging ? 0.3 : 1, y: 0 }}
       className={`rounded-2xl border overflow-hidden transition-colors touch-none ${
         prepCardBorderClass(prepVisual, highlight)
-      } ${dragging ? 'shadow-2xl ring-2 ring-amber-500/60' : ''}`}
+      } ${dragging ? 'shadow-2xl ring-2 ring-amber-500/60' : ''} ${isDragging ? 'opacity-30' : ''}`}
     >
       <div className="p-3 pb-2 flex items-start gap-2">
         {!dragDisabled && (
@@ -472,37 +468,37 @@ function OrderCard({ order, highlight, dragging, onAccept, onRefuse, onAdvance, 
         </div>
       )}
 
-      <AnimatePresence>
-        {showReceipt && order.receiptDataUrl && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[80] bg-black/80 flex items-center justify-center p-4"
-            onClick={() => setShowReceipt(false)}>
-            <div className="bg-zinc-950 border border-zinc-800 rounded-2xl p-3 max-w-md w-full" onClick={e => e.stopPropagation()}>
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-white font-bold text-sm">Comprovante #{order.orderNumber}</p>
-                <button onClick={() => setShowReceipt(false)} className="text-zinc-500 hover:text-white"><X size={18} /></button>
-              </div>
-              <img src={order.receiptDataUrl} alt="Comprovante" className="w-full rounded-xl max-h-[70vh] object-contain bg-zinc-900" />
-              <p className="text-zinc-500 text-[11px] mt-2 text-center">
-                Confirme o pagamento para enviar o pedido à fila Pendente. Depois a loja poderá aceitar.
-              </p>
-              {order.paymentStatus !== 'paid' && (
-                <div className="mt-3 grid grid-cols-2 gap-2">
-                  <button type="button" onClick={() => { onRefuseReceipt(order); setShowReceipt(false); }}
-                    className="h-11 rounded-xl bg-red-950/50 border border-red-800/50 text-red-400 font-bold text-xs flex items-center justify-center gap-1">
-                    <Ban size={14} /> Recusar
-                  </button>
-                  <button type="button" onClick={() => { onConfirmPayment(order); setShowReceipt(false); }}
-                    className="h-11 rounded-xl bg-green-500 text-zinc-950 font-bold text-xs flex items-center justify-center gap-1">
-                    <CheckCircle2 size={14} /> Confirmar
-                  </button>
-                </div>
-              )}
+      <div
+        className={`fixed inset-0 z-[80] bg-black/80 flex items-center justify-center p-4 ${showReceipt && order.receiptDataUrl ? '' : 'hidden'}`}
+        onClick={() => setShowReceipt(false)}
+        aria-hidden={!(showReceipt && order.receiptDataUrl)}
+      >
+        <div className="bg-zinc-950 border border-zinc-800 rounded-2xl p-3 max-w-md w-full" onClick={e => e.stopPropagation()}>
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-white font-bold text-sm">Comprovante #{order.orderNumber}</p>
+            <button type="button" onClick={() => setShowReceipt(false)} className="text-zinc-500 hover:text-white"><X size={18} /></button>
+          </div>
+          {order.receiptDataUrl ? (
+            <img src={order.receiptDataUrl} alt="Comprovante" className="w-full rounded-xl max-h-[70vh] object-contain bg-zinc-900" />
+          ) : null}
+          <p className="text-zinc-500 text-[11px] mt-2 text-center">
+            Confirme o pagamento para enviar o pedido à fila Pendente. Depois a loja poderá aceitar.
+          </p>
+          {order.paymentStatus !== 'paid' && (
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <button type="button" onClick={() => { onRefuseReceipt(order); setShowReceipt(false); }}
+                className="h-11 rounded-xl bg-red-950/50 border border-red-800/50 text-red-400 font-bold text-xs flex items-center justify-center gap-1">
+                <Ban size={14} /> Recusar
+              </button>
+              <button type="button" onClick={() => { onConfirmPayment(order); setShowReceipt(false); }}
+                className="h-11 rounded-xl bg-green-500 text-zinc-950 font-bold text-xs flex items-center justify-center gap-1">
+                <CheckCircle2 size={14} /> Confirmar
+              </button>
             </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </motion.div>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -528,15 +524,18 @@ function Column({ col, orders, newOrderIds, onAccept, onRefuse, onAdvance, onBac
         className={`flex-1 border border-t-0 rounded-b-2xl p-3 space-y-3 overflow-y-auto min-h-[200px] transition-colors ${
           isOver ? 'bg-amber-500/[0.08] border-amber-500/40' : 'border-zinc-800 bg-zinc-950/40'
         }`}>
-        <AnimatePresence mode="popLayout">
-          {orders.length === 0 ? (
-            <div className="text-center py-10"><p className="text-zinc-700 text-xs font-medium">Nenhum pedido</p></div>
-          ) : orders.map(order => (
-            <OrderCard key={order.id} order={order} highlight={newOrderIds.has(order.id)}
-              onAccept={onAccept} onRefuse={onRefuse} onAdvance={onAdvance} onBack={onBack}
-              onConfirmPayment={onConfirmPayment} onRefuseReceipt={onRefuseReceipt} />
-          ))}
-        </AnimatePresence>
+        {/*
+          Stable list (no AnimatePresence/popLayout).
+          Exit/layout animations raced React + dnd-kit → insertBefore/removeChild
+          when confirming/refusing PIX receipts moved cards between columns.
+        */}
+        {orders.length === 0 ? (
+          <div className="text-center py-10"><p className="text-zinc-700 text-xs font-medium">Nenhum pedido</p></div>
+        ) : orders.map(order => (
+          <OrderCard key={order.id} order={order} highlight={newOrderIds.has(order.id)}
+            onAccept={onAccept} onRefuse={onRefuse} onAdvance={onAdvance} onBack={onBack}
+            onConfirmPayment={onConfirmPayment} onRefuseReceipt={onRefuseReceipt} />
+        ))}
       </div>
     </div>
   );
@@ -847,23 +846,17 @@ export default function AdminDashboard() {
 
   return (
     <div className="min-h-screen bg-[#0a0a0a] flex flex-col">
-      <AnimatePresence>
+      
         {notification && (
-          <motion.div initial={{ y: -60 }} animate={{ y: 0 }} exit={{ y: -60 }}
-            className="fixed top-0 left-0 right-0 z-50 bg-amber-500 text-zinc-950 text-center font-bold text-sm py-3 px-4 shadow-lg">
+          <div className="fixed top-0 left-0 right-0 z-50 bg-amber-500 text-zinc-950 text-center font-bold text-sm py-3 px-4 shadow-lg">
             {notification}
-          </motion.div>
+          </div>
         )}
-      </AnimatePresence>
+      
 
-      <AnimatePresence>
+      
         {prepCelebration && (
-          <motion.div
-            initial={{ opacity: 0, y: -20, scale: 0.96 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -12 }}
-            className="fixed top-14 left-1/2 -translate-x-1/2 z-50 w-[min(92vw,380px)] rounded-2xl border border-emerald-500/40 bg-zinc-950/95 px-4 py-3 shadow-xl shadow-emerald-500/10 backdrop-blur"
-          >
+          <div className="fixed top-14 left-1/2 -translate-x-1/2 z-50 w-[min(92vw,380px)] rounded-2xl border border-emerald-500/40 bg-zinc-950/95 px-4 py-3 shadow-xl shadow-emerald-500/10 backdrop-blur">
             <p className="text-emerald-300 font-black text-sm">🎉 Excelente!</p>
             <p className="text-zinc-300 text-xs mt-1 leading-relaxed">
               Pedido #{prepCelebration.orderNumber} finalizado antes do prazo estimado.
@@ -871,9 +864,9 @@ export default function AdminDashboard() {
             <p className="text-white text-xs font-bold mt-1.5">
               Tempo total de preparo: {formatPrepDuration(prepCelebration.durationSeconds)}
             </p>
-          </motion.div>
+          </div>
         )}
-      </AnimatePresence>
+      
 
       <header className="sticky top-0 z-40 bg-zinc-950/95 backdrop-blur border-b border-zinc-800 px-4 py-3">
         <div className="max-w-[1800px] mx-auto flex items-center justify-between gap-3">
@@ -1030,13 +1023,10 @@ export default function AdminDashboard() {
       </main>
 
       {/* Refuse modal */}
-      <AnimatePresence>
-        {refuseOrder && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[90] bg-black/75 flex items-end sm:items-center justify-center p-0 sm:p-4"
+      {refuseOrder && (
+          <div className="fixed inset-0 z-[90] bg-black/75 flex items-end sm:items-center justify-center p-0 sm:p-4"
             onClick={() => !refuseSaving && setRefuseOrder(null)}>
-            <motion.div initial={{ y: 40 }} animate={{ y: 0 }} exit={{ y: 40 }}
-              className="bg-zinc-950 border border-zinc-800 rounded-t-3xl sm:rounded-3xl w-full sm:max-w-md p-5 space-y-4"
+            <div className="bg-zinc-950 border border-zinc-800 rounded-t-3xl sm:rounded-3xl w-full sm:max-w-md p-5 space-y-4"
               onClick={e => e.stopPropagation()}>
               <div className="flex items-center justify-between">
                 <h2 className="text-white font-black uppercase text-sm">Recusar pedido #{refuseOrder.orderNumber}</h2>
@@ -1072,19 +1062,15 @@ export default function AdminDashboard() {
                 className="w-full h-12 rounded-xl bg-red-500 hover:bg-red-400 text-white font-black uppercase text-sm tracking-wide disabled:opacity-50">
                 {refuseSaving ? 'Recusando...' : 'Confirmar recusa'}
               </button>
-            </motion.div>
-          </motion.div>
+            </div>
+          </div>
         )}
-      </AnimatePresence>
 
       {/* Refuse receipt modal */}
-      <AnimatePresence>
-        {receiptRefuseOrder && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[90] bg-black/75 flex items-end sm:items-center justify-center p-0 sm:p-4"
+      {receiptRefuseOrder && (
+          <div className="fixed inset-0 z-[90] bg-black/75 flex items-end sm:items-center justify-center p-0 sm:p-4"
             onClick={() => !receiptRefuseSaving && setReceiptRefuseOrder(null)}>
-            <motion.div initial={{ y: 40 }} animate={{ y: 0 }} exit={{ y: 40 }}
-              className="bg-zinc-950 border border-zinc-800 rounded-t-3xl sm:rounded-3xl w-full sm:max-w-md p-5 space-y-4"
+            <div className="bg-zinc-950 border border-zinc-800 rounded-t-3xl sm:rounded-3xl w-full sm:max-w-md p-5 space-y-4"
               onClick={e => e.stopPropagation()}>
               <div className="flex items-center justify-between">
                 <h2 className="text-white font-black uppercase text-sm">
@@ -1131,24 +1117,22 @@ export default function AdminDashboard() {
                 className="w-full h-12 rounded-xl bg-red-500 hover:bg-red-400 text-white font-black uppercase text-sm tracking-wide disabled:opacity-50">
                 {receiptRefuseSaving ? 'Enviando...' : 'Recusar comprovante'}
               </button>
-            </motion.div>
-          </motion.div>
+            </div>
+          </div>
         )}
-      </AnimatePresence>
 
-      <AnimatePresence>
-        {showCancelled && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+      {showCancelled && (
+          <div
             className="fixed inset-0 z-50 bg-black/70 flex items-end sm:items-center justify-center p-0 sm:p-4"
             onClick={() => setShowCancelled(false)}>
-            <motion.div initial={{ y: 40 }} animate={{ y: 0 }} exit={{ y: 40 }}
+            <div
               className="bg-zinc-950 border border-zinc-800 rounded-t-3xl sm:rounded-3xl w-full sm:max-w-lg max-h-[80vh] overflow-y-auto p-4"
               onClick={e => e.stopPropagation()}>
               <div className="flex items-center justify-between mb-3">
                 <h2 className="text-white font-black uppercase flex items-center gap-2">
                   <XCircle size={18} className="text-red-500" /> Recusados
                 </h2>
-                <button onClick={() => setShowCancelled(false)} className="p-2 text-zinc-500 hover:text-white"><X size={18} /></button>
+                <button type="button" onClick={() => setShowCancelled(false)} className="p-2 text-zinc-500 hover:text-white"><X size={18} /></button>
               </div>
               {cancelledOrders.length === 0 ? (
                 <p className="text-zinc-600 text-sm text-center py-10">Nenhum pedido recusado.</p>
@@ -1159,10 +1143,9 @@ export default function AdminDashboard() {
                     onConfirmPayment={handleConfirmPayment} onRefuseReceipt={openRefuseReceipt} />
                 </div>
               ))}
-            </motion.div>
-          </motion.div>
+            </div>
+          </div>
         )}
-      </AnimatePresence>
 
       <nav className="sticky bottom-0 left-0 right-0 bg-zinc-950/95 backdrop-blur border-t border-zinc-800 z-40">
         <div className="max-w-[1800px] mx-auto flex overflow-x-auto no-scrollbar">

@@ -24,7 +24,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 
 type OrderType = 'delivery' | 'pickup' | 'local';
 type CheckoutPayKey = 'pix_online' | 'pix_manual' | 'cash' | 'card' | 'card_online';
@@ -854,15 +854,13 @@ export default function Checkout() {
 
   const feeBanner = (
     <>
-    <AnimatePresence>
+    
       {feeLoading ? (
-        <motion.div key="fee-load" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-          className="flex items-center gap-2 text-zinc-500 text-sm">
+        <div className="space-y-2">
           <Loader2 size={14} className="animate-spin" /> Calculando taxa de entrega...
-        </motion.div>
+        </div>
       ) : feeFound === true ? (
-        <motion.div key="fee-ok" initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
-          className="space-y-2">
+        <div className="space-y-2">
           <div className="flex items-center justify-between bg-green-900/20 border border-green-800/40 rounded-xl px-4 py-3">
             <div className="flex items-center gap-2 text-green-400">
               <CheckCircle2 size={16} />
@@ -879,10 +877,9 @@ export default function Checkout() {
               {streetPendingMessage}
             </div>
           ) : null}
-        </motion.div>
+        </div>
       ) : feeFound === false ? (
-        <motion.div key="fee-warn" initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
-          className="space-y-2">
+        <div className="space-y-2">
           {streetPendingMessage ? (
             <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-amber-200 text-sm whitespace-pre-line leading-relaxed">
               {streetPendingMessage}
@@ -896,19 +893,18 @@ export default function Checkout() {
             </div>
           )}
           {streetNotesBanner}
-        </motion.div>
+        </div>
       ) : streetPendingMessage || streetNotesBanner ? (
-        <motion.div key="street-pending" initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
-          className="space-y-2">
+        <div className="space-y-2">
           {streetPendingMessage ? (
             <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-amber-200 text-sm whitespace-pre-line leading-relaxed">
               {streetPendingMessage}
             </div>
           ) : null}
           {streetNotesBanner}
-        </motion.div>
+        </div>
       ) : null}
-    </AnimatePresence>
+    
     <div className={showAreaRequestPanel ? 'mt-2' : 'hidden'}>
       <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 space-y-3">
         <p className="text-amber-100 text-sm leading-relaxed">
@@ -954,11 +950,10 @@ export default function Checkout() {
 
       <main className="max-w-md mx-auto px-4 py-6 pb-36 space-y-4">
         <StoreClosedBanner />
-        <AnimatePresence mode="wait">
+        <>
           {/* ── 1. Fulfillment ─────────────────────────────────────────── */}
           {step === 'fulfillment' && (
-            <motion.section key="fulfillment"
-              initial={{ opacity: 0, x: 24 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -24 }}
+            <section key="fulfillment"
               className="space-y-5">
               <div className="space-y-2">
                 <h2 className="text-2xl font-black text-white leading-tight">
@@ -1014,13 +1009,12 @@ export default function Checkout() {
                   </motion.button>
                 ))}
               </div>
-            </motion.section>
+            </section>
           )}
 
           {/* ── 2. Contact ─────────────────────────────────────────────── */}
           {step === 'contact' && (
-            <motion.section key="contact"
-              initial={{ opacity: 0, x: 24 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -24 }}
+            <section key="contact"
               className="space-y-5">
               <div className="space-y-2">
                 <h2 className="text-2xl font-black text-white leading-tight">Seus dados</h2>
@@ -1063,13 +1057,12 @@ export default function Checkout() {
                 className="w-full min-h-[52px] font-bold tracking-wider rounded-xl bg-amber-500 hover:bg-amber-400 text-zinc-950">
                 Continuar
               </Button>
-            </motion.section>
+            </section>
           )}
 
           {/* ── 3. Address method ──────────────────────────────────────── */}
           {step === 'address_method' && (
-            <motion.section key="address_method"
-              initial={{ opacity: 0, x: 24 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -24 }}
+            <section key="address_method"
               className="space-y-5">
               <div className="space-y-2">
                 <h2 className="text-2xl font-black text-white leading-tight">Onde entregar?</h2>
@@ -1103,13 +1096,12 @@ export default function Checkout() {
                   </div>
                 </button>
               </div>
-            </motion.section>
+            </section>
           )}
 
           {/* ── 4. GPS confirm ─────────────────────────────────────────── */}
           {step === 'gps' && (
-            <motion.section key="gps"
-              initial={{ opacity: 0, x: 24 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -24 }}
+            <section key="gps"
               className="space-y-4">
               <div className="space-y-2">
                 <h2 className="text-2xl font-black text-white leading-tight">Confirme sua localização</h2>
@@ -1182,13 +1174,12 @@ export default function Checkout() {
                   </Button>
                 </>
               )}
-            </motion.section>
+            </section>
           )}
 
           {/* ── 5. Manual address ──────────────────────────────────────── */}
           {step === 'manual' && (
-            <motion.section key="manual"
-              initial={{ opacity: 0, x: 24 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -24 }}
+            <section key="manual"
               className="space-y-4">
               <div className="space-y-2">
                 <h2 className="text-2xl font-black text-white leading-tight">Endereço de entrega</h2>
@@ -1276,13 +1267,12 @@ export default function Checkout() {
                 className="w-full min-h-[52px] font-bold tracking-wider rounded-xl bg-amber-500 hover:bg-amber-400 text-zinc-950">
                 Continuar para pagamento
               </Button>
-            </motion.section>
+            </section>
           )}
 
           {/* ── 6. Payment ─────────────────────────────────────────────── */}
           {step === 'payment' && (
-            <motion.section key="payment"
-              initial={{ opacity: 0, x: 24 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -24 }}
+            <section key="payment"
               className="space-y-6">
               <div className="space-y-2">
                 <h2 className="text-2xl font-black text-white leading-tight">Forma de pagamento</h2>
@@ -1537,9 +1527,9 @@ export default function Checkout() {
               {submitError && (
                 <div className="bg-red-900/30 border border-red-800 rounded-xl p-4 text-red-400 text-sm text-center">{submitError}</div>
               )}
-            </motion.section>
+            </section>
           )}
-        </AnimatePresence>
+        </>
       </main>
 
       {/* Sticky footer summary — payment step */}
