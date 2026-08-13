@@ -948,6 +948,65 @@ export const getWhatsappSettings = () => api.get("/whatsapp-settings") as Promis
 export const getAdminWhatsappSettings = () => api.get("/admin/whatsapp-settings") as Promise<WhatsappSettings>;
 export const updateWhatsappSettings = (d: { number: string }) => api.put("/admin/whatsapp-settings", d) as Promise<WhatsappSettings>;
 
+// ── Business Hours / Store Status ─────────────────────────────────────────────
+export type WeekdayKey =
+  | "monday" | "tuesday" | "wednesday" | "thursday" | "friday" | "saturday" | "sunday";
+
+export interface BusinessHoursDaySchedule {
+  active: boolean;
+  open: string;
+  close: string;
+}
+
+export type WeeklySchedule = Record<WeekdayKey, BusinessHoursDaySchedule>;
+export type BusinessHoursManualMode = "auto" | "open" | "closed";
+
+export interface StoreStatusPublic {
+  isOpen: boolean;
+  acceptingOrders?: boolean;
+  reason: string;
+  message: string;
+  nextOpenTime: string | null;
+  nextOpenLabel: string | null;
+  timezone: string;
+  manualMode: BusinessHoursManualMode;
+  localTime?: string;
+  localDate?: string;
+}
+
+export interface BusinessHoursAdmin {
+  id: number;
+  companyId: number;
+  timezone: string;
+  manualMode: BusinessHoursManualMode;
+  weeklySchedule: WeeklySchedule;
+  exceptionDate: string | null;
+  exceptionClosed: boolean;
+  exceptionOpen: string | null;
+  exceptionClose: string | null;
+  updatedAt: string;
+  status: StoreStatusPublic & {
+    today?: { active: boolean; open: string; close: string; source: string; closedAllDay: boolean };
+  };
+  weekdayLabels: Record<WeekdayKey, string>;
+}
+
+export const getStoreStatus = () => api.get("/store-status") as Promise<StoreStatusPublic>;
+export const getAdminBusinessHours = () => api.get("/admin/business-hours") as Promise<BusinessHoursAdmin>;
+export const updateBusinessHours = (d: {
+  manualMode?: BusinessHoursManualMode;
+  weeklySchedule?: WeeklySchedule;
+  exceptionDate?: string | null;
+  exceptionClosed?: boolean;
+  exceptionOpen?: string | null;
+  exceptionClose?: string | null;
+  clearException?: boolean;
+}) => api.put("/admin/business-hours", d) as Promise<BusinessHoursAdmin>;
+export const openStoreNow = () => api.post("/admin/business-hours/open-now", {}) as Promise<BusinessHoursAdmin>;
+export const closeStoreNow = () => api.post("/admin/business-hours/close-now", {}) as Promise<BusinessHoursAdmin>;
+export const followBusinessHoursSchedule = () =>
+  api.post("/admin/business-hours/follow-schedule", {}) as Promise<BusinessHoursAdmin>;
+
 // ── Config ────────────────────────────────────────────────────────────────────
 // Fallback used only until the value configured in the admin panel is fetched.
 export const WHATSAPP_NUMBER = "5571996981707";

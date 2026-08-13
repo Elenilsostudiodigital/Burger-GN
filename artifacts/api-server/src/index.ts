@@ -6,6 +6,7 @@ import { ensureClubeSchema } from "./lib/ensureClubeSchema";
 import { ensureDeliveryStreetsSchema } from "./lib/ensureDeliveryStreetsSchema";
 import { ensureDeliveryAreasSchema } from "./lib/ensureDeliveryAreasSchema";
 import { ensurePaymentSettingsSchema } from "./lib/ensurePaymentSettingsSchema";
+import { ensureBusinessHoursSchema } from "./lib/ensureBusinessHoursSchema";
 
 // On Vercel/serverless the platform invokes the exported app; do not call listen()
 const isServerless = Boolean(process.env["VERCEL"] || process.env["AWS_LAMBDA_FUNCTION_NAME"]);
@@ -16,6 +17,7 @@ async function bootstrapData() {
   await ensureDeliveryStreetsSchema();
   await ensureDeliveryAreasSchema();
   await ensurePaymentSettingsSchema();
+  await ensureBusinessHoursSchema();
   await runSeed();
 }
 

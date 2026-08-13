@@ -16,6 +16,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { BusinessHoursTab } from './BusinessHoursTab';
 
 function AdminNav({ active }: { active: string }) {
   const items = [
@@ -47,7 +48,7 @@ function AdminNav({ active }: { active: string }) {
   );
 }
 
-type Tab = 'pagamento' | 'preparo' | 'links' | 'whatsapp' | 'ruas';
+type Tab = 'pagamento' | 'preparo' | 'horario' | 'links' | 'whatsapp' | 'ruas';
 
 function PrepTimeTab() {
   const [loading, setLoading] = useState(true);
@@ -535,7 +536,7 @@ export default function SettingsHub() {
             <Settings size={20} className="text-amber-500" />
             <div>
               <h1 className="text-white font-black uppercase text-base leading-none">Configurações</h1>
-              <p className="text-zinc-600 text-xs">Pagamento, preparo e links</p>
+              <p className="text-zinc-600 text-xs">Pagamento, horário e links</p>
             </div>
           </div>
           <button onClick={handleLogout} className="p-2 text-zinc-400 hover:text-red-400 transition-colors">
@@ -554,6 +555,10 @@ export default function SettingsHub() {
             className={`shrink-0 flex-1 min-w-[7rem] h-11 rounded-xl font-bold text-sm uppercase tracking-wide transition-all flex items-center justify-center gap-2 ${tab === 'preparo' ? 'bg-amber-500 text-zinc-950' : 'bg-zinc-900 text-zinc-400 border border-zinc-800'}`}>
             <Clock size={16} /> Tempo de Preparo
           </button>
+          <button onClick={() => setTab('horario')}
+            className={`shrink-0 flex-1 min-w-[7rem] h-11 rounded-xl font-bold text-sm uppercase tracking-wide transition-all flex items-center justify-center gap-2 ${tab === 'horario' ? 'bg-amber-500 text-zinc-950' : 'bg-zinc-900 text-zinc-400 border border-zinc-800'}`}>
+            <Clock size={16} /> Horário
+          </button>
           <button onClick={() => setTab('links')}
             className={`shrink-0 flex-1 min-w-[7rem] h-11 rounded-xl font-bold text-sm uppercase tracking-wide transition-all flex items-center justify-center gap-2 ${tab === 'links' ? 'bg-amber-500 text-zinc-950' : 'bg-zinc-900 text-zinc-400 border border-zinc-800'}`}>
             <LinkIcon size={16} /> Links Externos
@@ -568,7 +573,11 @@ export default function SettingsHub() {
           </button>
         </div>
 
-        {tab === 'pagamento' ? <PaymentTab /> : tab === 'preparo' ? <PrepTimeTab /> : tab === 'links' ? <LinksTab /> : tab === 'whatsapp' ? <WhatsappTab /> : (
+        {tab === 'pagamento' ? <PaymentTab />
+          : tab === 'preparo' ? <PrepTimeTab />
+            : tab === 'horario' ? <BusinessHoursTab />
+              : tab === 'links' ? <LinksTab />
+                : tab === 'whatsapp' ? <WhatsappTab /> : (
           <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-5 space-y-3">
             <h3 className="text-white font-black uppercase text-sm">Ruas de Entrega</h3>
             <p className="text-zinc-400 text-sm leading-relaxed">

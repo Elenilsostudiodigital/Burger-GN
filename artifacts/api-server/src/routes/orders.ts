@@ -28,6 +28,8 @@ import {
 } from "../lib/clientMeta";
 import { applyOrderCompletionRewards } from "../lib/orderRewards";
 import { buildPublicClubeMe, type PublicClubeMePayload } from "../lib/clubePublicMe";
+import { getOrCreateBusinessHours } from "../lib/businessHoursStore";
+import { evaluateStoreStatus } from "../lib/businessHours";
 import {
   computePrepDayStats,
   finishPrepTimer,
@@ -189,6 +191,24 @@ router.post("/orders", resolvePublicCompany, async (req, res) => {
       body.source === "attendant"
       && !!adminSession
       && adminSession.companyId === companyId;
+
+    // Online storefront must respect business hours / manual close.
+    // Attendant panel orders (authenticated) may still be placed when closed.
+    if (!isAttendantOrder) {
+      const hours = await getOrCreateBusinessHours(companyId);
+      const storeStatus = evaluateStoreStatus(hours);
+      if (!storeStatus.isOpen) {
+        const detail = storeStatus.nextOpenLabel ? ` ${storeStatus.nextOpenLabel}` : "";
+        res.status(403).json({
+          error: `${storeStatus.message}${detail}`.trim(),
+          storeClosed: true,
+          reason: storeStatus.reason,
+          nextOpenTime: storeStatus.nextOpenTime,
+          nextOpenLabel: storeStatus.nextOpenLabel,
+        });
+        return;
+      }
+    }
 
     if (body.orderType === "delivery" && body.paymentMethod === "cash") {
       const [paySettings] = await db.select().from(paymentSettingsTable).where(eq(paymentSettingsTable.companyId, companyId));

@@ -4,12 +4,14 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useCart } from '../context/CartContext';
 import { BottomNav } from '../components/BottomNav';
 import { PageTransition } from '../components/PageTransition';
+import { StoreClosedBanner, useStoreStatus } from '../components/StoreClosedBanner';
 import { ArrowLeft, Trash2, Plus, Minus, ShoppingBag, Tag, Bike } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 export default function Cart() {
   const [, setLocation] = useLocation();
   const { cartItems, updateQuantity, removeItem, subtotal, totalItems } = useCart();
+  const { isClosed, status } = useStoreStatus(true);
 
   const lineTotal = (item: (typeof cartItems)[number]) => {
     const addons = Array.isArray(item.selectedAddons) ? item.selectedAddons : [];
@@ -139,11 +141,22 @@ export default function Cart() {
               </div>
             </div>
 
-            <Link href="/checkout" className="block">
-              <Button size="lg" className="w-full min-h-[58px] text-base font-bold tracking-wider rounded-2xl shadow-lg shadow-amber-500/20">
-                FINALIZAR PEDIDO
+            <StoreClosedBanner className="mb-3" />
+            {isClosed ? (
+              <Button
+                size="lg"
+                disabled
+                className="w-full min-h-[58px] text-base font-bold tracking-wider rounded-2xl opacity-50 cursor-not-allowed"
+              >
+                {status?.message || 'Loja fechada'}
               </Button>
-            </Link>
+            ) : (
+              <Link href="/checkout" className="block">
+                <Button size="lg" className="w-full min-h-[58px] text-base font-bold tracking-wider rounded-2xl shadow-lg shadow-amber-500/20">
+                  FINALIZAR PEDIDO
+                </Button>
+              </Link>
+            )}
             <Link href="/cardapio" className="block text-center text-zinc-500 text-sm font-bold uppercase tracking-wider hover:text-amber-500 transition-colors py-1">
               Continuar comprando
             </Link>

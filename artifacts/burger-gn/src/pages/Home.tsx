@@ -10,6 +10,7 @@ import { PageTransition } from '../components/PageTransition';
 import { ProductDetailModal } from '../components/ProductDetailModal';
 import { ProductRowCard } from '../components/ProductRowCard';
 import { ClubeHomeCard } from '../components/ClubeHomeCard';
+import { StoreClosedBanner } from '../components/StoreClosedBanner';
 import { Button } from '@/components/ui/button';
 
 export default function Home() {
@@ -107,7 +108,8 @@ export default function Home() {
         </div>
       </header>
 
-      <div className="max-w-md mx-auto px-4 pt-3">
+      <div className="max-w-md mx-auto px-4 pt-3 space-y-3">
+        <StoreClosedBanner />
         <ClubeHomeCard />
       </div>
 

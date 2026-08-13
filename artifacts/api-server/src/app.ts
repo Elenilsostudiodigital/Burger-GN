@@ -11,6 +11,7 @@ import { ensureClubeSchema } from "./lib/ensureClubeSchema";
 import { ensureDeliveryStreetsSchema } from "./lib/ensureDeliveryStreetsSchema";
 import { ensureDeliveryAreasSchema } from "./lib/ensureDeliveryAreasSchema";
 import { ensurePaymentSettingsSchema } from "./lib/ensurePaymentSettingsSchema";
+import { ensureBusinessHoursSchema } from "./lib/ensureBusinessHoursSchema";
 
 const app: Express = express();
 
@@ -107,6 +108,24 @@ app.use("/api", async (req, res, next) => {
   } catch (err) {
     logger.error({ err }, "Failed to ensure payment settings schema");
     res.status(500).json({ error: "Falha ao preparar o banco de pagamentos." });
+  }
+});
+
+/** Ensures business-hours table before store-status / order creation. */
+app.use("/api", async (req, res, next) => {
+  const p = req.path || "";
+  const needsHours =
+    p.startsWith("/store-status") ||
+    p.startsWith("/business-hours") ||
+    p.startsWith("/admin/business-hours") ||
+    p === "/orders";
+  if (!needsHours) return next();
+  try {
+    await ensureBusinessHoursSchema();
+    next();
+  } catch (err) {
+    logger.error({ err }, "Failed to ensure business hours schema");
+    res.status(500).json({ error: "Falha ao preparar o horário de funcionamento." });
   }
 });
 

@@ -11,6 +11,7 @@ import {
 import { saveMyOrder } from '../lib/myOrder';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import { StreetMapPreview } from '../components/StreetMapPreview';
+import { StoreClosedBanner, useStoreStatus } from '../components/StoreClosedBanner';
 import {
   ClubeFidelityRedeemPrompt,
   FidelityRedeemSelection,
@@ -62,6 +63,7 @@ function formatPhone(v: string | null | undefined) {
 export default function Checkout() {
   const [, setLocation] = useLocation();
   const { cartItems, subtotal, addItem } = useCart();
+  const { isClosed, status: storeStatus } = useStoreStatus(true);
 
   const [step, setStep] = useState<CheckoutStep>('fulfillment');
   const [orderType, setOrderType] = useState<OrderType | null>(null);
@@ -649,6 +651,13 @@ export default function Checkout() {
   };
 
   const onConfirmOrder = async () => {
+    if (isClosed) {
+      const detail = storeStatus?.nextOpenLabel && storeStatus.reason !== 'manual_closed'
+        ? ` ${storeStatus.nextOpenLabel}`
+        : '';
+      setSubmitError(`${storeStatus?.message || 'Estamos fechados no momento.'}${detail}`.trim());
+      return;
+    }
     if (cartItems.length === 0) { setLocation('/cardapio'); return; }
     if (!orderType) { setStep('fulfillment'); return; }
 
@@ -943,7 +952,8 @@ export default function Checkout() {
         </div>
       </header>
 
-      <main className="max-w-md mx-auto px-4 py-6 pb-36">
+      <main className="max-w-md mx-auto px-4 py-6 pb-36 space-y-4">
+        <StoreClosedBanner />
         <AnimatePresence mode="wait">
           {/* ── 1. Fulfillment ─────────────────────────────────────────── */}
           {step === 'fulfillment' && (
@@ -1555,12 +1565,14 @@ export default function Checkout() {
             <Button
               type="button"
               onClick={onConfirmOrder}
-              disabled={submitting || !hasValidDeliveryFee || feeLoading}
+              disabled={submitting || !hasValidDeliveryFee || feeLoading || isClosed}
               size="lg"
               className="w-full min-h-[52px] font-bold tracking-wider rounded-xl bg-amber-500 hover:bg-amber-400 text-zinc-950 text-base disabled:opacity-50 disabled:pointer-events-none">
               {submitting
                 ? <><Loader2 size={20} className="animate-spin mr-2" /> Enviando...</>
-                : 'CONFIRMAR PEDIDO'}
+                : isClosed
+                  ? (storeStatus?.message || 'Loja fechada')
+                  : 'CONFIRMAR PEDIDO'}
             </Button>
           </div>
         </div>
