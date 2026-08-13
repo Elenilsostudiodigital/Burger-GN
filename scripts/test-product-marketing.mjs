@@ -25,20 +25,15 @@ async function json(method, path, body, cookie) {
 }
 
 async function waitReady() {
-  for (let i = 0; i < 30; i++) {
+  for (let i = 0; i < 40; i++) {
     const r = await json("GET", "/api/products");
-    if (r.status === 200 && Array.isArray(r.data) && r.data[0] && "isPromoActive" in r.data[0]) {
+    if (r.status === 200 && Array.isArray(r.data) && r.data[0] && "promoText" in r.data[0] && "discountLabel" in r.data[0]) {
       return r.data;
     }
-    // schema may exist with defaults even if field missing until new deploy
-    if (r.status === 200 && Array.isArray(r.data) && r.data.length > 0) {
-      const sample = r.data[0];
-      if ("isFeatured" in sample || "isPromotion" in sample || "displayPrice" in sample) return r.data;
-    }
-    console.log("waiting marketing fields...", r.status);
-    await new Promise((r) => setTimeout(r, 8000));
+    console.log("waiting promoText/discountLabel deploy...", r.status);
+    await new Promise((r) => setTimeout(r, 10000));
   }
-  throw new Error("marketing deploy not ready");
+  throw new Error("promoText deploy not ready");
 }
 
 async function main() {
@@ -54,7 +49,13 @@ async function main() {
   assert(login.status === 200 && login.data.ok, "login");
   const cookie = (login.setCookie || []).map((c) => c.split(";")[0]).filter(Boolean).join("; ");
 
-  const target = products[0];
+  const target =
+    products.find((p) => parseFloat(String(p.price)) >= 20) ||
+    [...products].sort((a, b) => parseFloat(String(b.price)) - parseFloat(String(a.price)))[0];
+  const original = parseFloat(String(target.price));
+  const promoValue = Number((original * 0.8).toFixed(2));
+  const promoPriceStr = promoValue.toFixed(2);
+  const expectedPct = Math.round(((original - promoValue) / original) * 100);
   const ends = new Date(Date.now() + 60 * 60 * 1000).toISOString();
   const starts = new Date(Date.now() - 60 * 1000).toISOString();
 
@@ -62,7 +63,7 @@ async function main() {
     "PATCH",
     `/api/admin/products/${target.id}/promotion`,
     {
-      promoPrice: "9.90",
+      promoPrice: promoPriceStr,
       promoStartsAt: starts,
       promoEndsAt: ends,
       promoText: "Oferta da Semana",
@@ -73,11 +74,8 @@ async function main() {
   assert(promo.data.promoText === "Oferta da Semana", "promoText");
   assert(typeof promo.data.discountPercent === "number" && promo.data.discountPercent > 0, "auto %");
   assert(String(promo.data.discountLabel || "").startsWith("-"), "discountLabel -X%");
-  console.log("✓ promoção rápida / texto / % automático");
-
-  const original = parseFloat(String(target.price));
-  const expectedPct = Math.round(((original - 9.9) / original) * 100);
   assert(promo.data.discountPercent === expectedPct, `expected -${expectedPct}% got ${promo.data.discountPercent}`);
+  console.log("✓ promoção rápida / texto / % automático");
 
   const featured = await json(
     "PUT",
@@ -87,7 +85,7 @@ async function main() {
       isClubeExclusive: true,
       isPromotion: true,
       promoText: "Descontão $$$",
-      promoPrice: "9.90",
+      promoPrice: promoPriceStr,
       promoOriginalPrice: target.price,
       promoStartsAt: starts,
       promoEndsAt: ends,
@@ -105,7 +103,10 @@ async function main() {
   assert(pubItem?.isPromoActive, "public promo active");
   assert(pubItem?.promoText === "Descontão $$$", "public promoText");
   assert(pubItem?.discountLabel === `-${expectedPct}%`, "public -X%");
-  assert(pubItem?.displayPrice === "9.90" || pubItem?.displayPrice === 9.9, "display price");
+  assert(
+    String(pubItem?.displayPrice) === promoPriceStr || Number(pubItem?.displayPrice) === promoValue,
+    "display price",
+  );
   assert(pubItem?.compareAtPrice, "compareAt strikethrough");
   console.log("✓ Promoções do Dia (API public) + cardápio fields");
 
@@ -114,7 +115,7 @@ async function main() {
   await json(
     "PATCH",
     `/api/admin/products/${target.id}/promotion`,
-    { promoPrice: "9.90", promoStartsAt: starts, promoEndsAt: expiredEnd },
+    { promoPrice: promoPriceStr, promoStartsAt: starts, promoEndsAt: expiredEnd },
     cookie,
   );
   const afterExpire = await json("GET", `/api/admin/products`, null, cookie);
@@ -142,6 +143,25 @@ async function main() {
     },
     cookie,
   );
+  // also clear leftover bad promo on cheapest products from prior runs
+  const leftover = products.find((p) => p.id === 1);
+  if (leftover) {
+    await json(
+      "PUT",
+      `/api/admin/products/1`,
+      {
+        isFeatured: false,
+        isPromotion: false,
+        isClubeExclusive: false,
+        marketingBadge: "",
+        promoText: "",
+        promoPrice: null,
+        promoStartsAt: null,
+        promoEndsAt: null,
+      },
+      cookie,
+    );
+  }
   console.log("✓ cleanup flags");
 
   const again = await json("GET", "/api/products");

@@ -336,6 +336,12 @@ router.patch("/admin/products/:id/promotion", requireCompanyAuth, async (req, re
       res.status(400).json({ error: "Informe o preço promocional." });
       return;
     }
+    const originalNum = parseFloat(String(current.promoOriginalPrice || current.price));
+    const promoNum = parseFloat(promoPrice);
+    if (!(promoNum < originalNum)) {
+      res.status(400).json({ error: "O preço promocional deve ser menor que o preço original." });
+      return;
+    }
     const starts = parseOptionalDate(body.promoStartsAt);
     const ends = parseOptionalDate(body.promoEndsAt);
     if (starts && ends && ends < starts) {

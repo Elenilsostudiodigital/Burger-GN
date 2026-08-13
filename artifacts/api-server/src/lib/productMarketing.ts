@@ -28,11 +28,13 @@ function asDate(v: Date | string | null | undefined): Date | null {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
-/** True when promotion window is active and promo price is set. */
+/** True when promotion window is active and promo price is a real discount. */
 export function isPromoActiveNow(row: ProductMarketingRow, now = new Date()): boolean {
   if (!row.isPromotion) return false;
   const promo = num(row.promoPrice);
   if (promo === null || promo < 0) return false;
+  const base = num(row.promoOriginalPrice) ?? num(row.price) ?? 0;
+  if (!(promo < base)) return false;
   const start = asDate(row.promoStartsAt);
   const end = asDate(row.promoEndsAt);
   if (start && now < start) return false;
