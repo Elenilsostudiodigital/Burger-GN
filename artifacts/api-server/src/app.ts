@@ -97,6 +97,7 @@ app.use("/api", async (req, res, next) => {
   const p = req.path || "";
   const needsAnalysis =
     p.includes("delivery-analysis") ||
+    p.startsWith("/delivery/checkout-analysis") ||
     p.startsWith("/orders/track");
   if (!needsAnalysis) return next();
   try {

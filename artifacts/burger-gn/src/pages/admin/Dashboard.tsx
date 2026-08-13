@@ -587,6 +587,7 @@ export default function AdminDashboard() {
   const [analysisRejectReason, setAnalysisRejectReason] = useState('');
   const [analysisActionError, setAnalysisActionError] = useState('');
   const [analysisSaving, setAnalysisSaving] = useState(false);
+  const [analysisFee, setAnalysisFee] = useState('');
   const [soundEnabled, setSoundEnabled] = useState<boolean>(() => {
     const stored = localStorage.getItem(SOUND_STORAGE_KEY);
     return stored === null ? true : stored === 'true';
@@ -733,15 +734,28 @@ export default function AdminDashboard() {
   };
 
   const handleApproveAnalysis = async (row: DeliveryAnalysisRequest) => {
+    const isCheckout = row.source === 'checkout' || row.orderId == null;
+    let fee: number | undefined;
+    if (isCheckout) {
+      fee = parseFloat(analysisFee.replace(',', '.'));
+      if (!Number.isFinite(fee) || fee < 0) {
+        setAnalysisActionError('Informe a taxa de entrega para aprovar.');
+        return;
+      }
+    }
     setAnalysisSaving(true);
     setAnalysisActionError('');
     try {
-      const res = await approveDeliveryAnalysis(row.id);
+      const res = await approveDeliveryAnalysis(row.id, fee != null ? { fee } : undefined);
       setPendingAnalyses(prev => prev.filter(r => r.id !== row.id));
       setOpenAnalysis(null);
       setAnalysisRejecting(false);
       setAnalysisRejectReason('');
-      setNotification(`Análise de entrega #${res.deliveryAnalysis.orderNumber} aprovada`);
+      setAnalysisFee('');
+      const label = res.deliveryAnalysis.orderNumber
+        ? `#${res.deliveryAnalysis.orderNumber}`
+        : res.deliveryAnalysis.customerName;
+      setNotification(`Entrega aprovada ${label}${fee != null ? ` · taxa ${fmt(String(fee))}` : ''}`);
       setTimeout(() => setNotification(null), 4000);
     } catch (err) {
       setAnalysisActionError(err instanceof Error ? err.message : 'Não foi possível aprovar a análise.');
@@ -915,7 +929,10 @@ export default function AdminDashboard() {
   }, [orders]);
 
   const cancelledOrders = useMemo(() => orders.filter(o => o.status === 'cancelled'), [orders]);
-  const analysisOrderIds = useMemo(() => new Set(pendingAnalyses.map(r => r.orderId)), [pendingAnalyses]);
+  const analysisOrderIds = useMemo(
+    () => new Set(pendingAnalyses.map(r => r.orderId).filter((id): id is number => typeof id === 'number')),
+    [pendingAnalyses],
+  );
   const activeCount = orders.filter(o => o.status !== 'cancelled' && o.status !== 'done').length;
   const newCount = ordersByColumn.new.length;
   const receiptPending = orders.filter(o => o.receiptDataUrl && o.paymentStatus !== 'paid').length;
@@ -1072,6 +1089,7 @@ export default function AdminDashboard() {
                         setAnalysisRejecting(false);
                         setAnalysisRejectReason('');
                         setAnalysisActionError('');
+                        setAnalysisFee('');
                       }}
                       className="w-full text-left rounded-2xl border-2 border-amber-400 bg-amber-500/15 p-4 shadow-[0_0_24px_rgba(251,191,36,0.28)]"
                     >
@@ -1079,15 +1097,15 @@ export default function AdminDashboard() {
                         <AlertTriangle size={16} /> Atenção — nova análise de entrega
                       </p>
                       <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 text-xs text-zinc-200">
-                        <p><span className="text-zinc-500">Pedido:</span> #{row.orderNumber}</p>
-                        <p><span className="text-zinc-500">Cliente:</span> {row.customerName}</p>
+                        <p><span className="text-zinc-500">Pedido:</span> {row.orderNumber ? `#${row.orderNumber}` : 'Checkout (antes do pedido)'}</p>
+                        <p><span className="text-zinc-500">Cliente:</span> {row.customerName || '—'}</p>
                         <p className="sm:col-span-2">
                           <span className="text-zinc-500">Endereço:</span>{' '}
                           {row.address}{row.addressNumber ? `, ${row.addressNumber}` : ''}
                           {row.neighborhood ? ` — ${row.neighborhood}` : ''}
+                          {row.complement ? ` (${row.complement})` : ''}
                         </p>
-                        <p><span className="text-zinc-500">Taxa:</span> {fmt(row.deliveryFee)}</p>
-                        <p><span className="text-zinc-500">Pagamento:</span> {row.paymentMethod} · {row.paymentStatus}</p>
+                        <p><span className="text-zinc-500">Telefone:</span> {row.phone || '—'}</p>
                         <p><span className="text-zinc-500">Solicitado:</span> {formatTime(String(row.requestedAt))} · {timeAgo(String(row.requestedAt))}</p>
                         {row.customerNote && (
                           <p className="sm:col-span-2"><span className="text-zinc-500">Motivo:</span> {row.customerNote}</p>
@@ -1130,22 +1148,28 @@ export default function AdminDashboard() {
               onClick={e => e.stopPropagation()}>
               <div className="flex items-center justify-between">
                 <h2 className="text-amber-300 font-black uppercase text-sm flex items-center gap-2">
-                  <AlertTriangle size={16} /> Análise de entrega #{openAnalysis.orderNumber}
+                  <AlertTriangle size={16} />{' '}
+                  {openAnalysis.orderNumber ? `Análise de entrega #${openAnalysis.orderNumber}` : 'Análise de entrega — checkout'}
                 </h2>
                 <button type="button" disabled={analysisSaving} onClick={() => setOpenAnalysis(null)} className="text-zinc-500 hover:text-white"><X size={18} /></button>
               </div>
               <p className="text-zinc-500 text-xs">
-                Recusar esta análise não cancela o pedido e não gera reembolso.
+                {openAnalysis.source === 'checkout' || openAnalysis.orderId == null
+                  ? 'Aceitar define a taxa e libera o cliente para continuar o checkout. Recusar não cria pedido nem reembolso.'
+                  : 'Recusar esta análise não cancela o pedido e não gera reembolso.'}
               </p>
               <div className="text-sm text-zinc-200 space-y-1">
-                <p><span className="text-zinc-500">Cliente:</span> {openAnalysis.customerName}</p>
+                <p><span className="text-zinc-500">Cliente:</span> {openAnalysis.customerName || '—'}</p>
+                <p><span className="text-zinc-500">Telefone:</span> {openAnalysis.phone || '—'}</p>
                 <p>
                   <span className="text-zinc-500">Endereço:</span>{' '}
                   {openAnalysis.address}{openAnalysis.addressNumber ? `, ${openAnalysis.addressNumber}` : ''}
                   {openAnalysis.neighborhood ? ` — ${openAnalysis.neighborhood}` : ''}
+                  {openAnalysis.complement ? ` (${openAnalysis.complement})` : ''}
                 </p>
-                <p><span className="text-zinc-500">Taxa:</span> {fmt(openAnalysis.deliveryFee)}</p>
-                <p><span className="text-zinc-500">Pagamento:</span> {openAnalysis.paymentMethod} · {openAnalysis.paymentStatus}</p>
+                {openAnalysis.reference && (
+                  <p><span className="text-zinc-500">Referência:</span> {openAnalysis.reference}</p>
+                )}
                 <p><span className="text-zinc-500">Solicitado:</span> {formatTime(String(openAnalysis.requestedAt))}</p>
                 {openAnalysis.customerNote && (
                   <p><span className="text-zinc-500">Observação do cliente:</span> {openAnalysis.customerNote}</p>
@@ -1158,7 +1182,7 @@ export default function AdminDashboard() {
                   <textarea
                     value={analysisRejectReason}
                     onChange={e => { setAnalysisRejectReason(e.target.value); setAnalysisActionError(''); }}
-                    placeholder="Informe o motivo da recusa da análise..."
+                    placeholder="Ex: Entrega não disponível para este endereço"
                     className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 text-white text-sm resize-none h-24 focus:border-amber-500 focus:outline-none"
                   />
                   {analysisActionError && <p className="text-red-400 text-sm">{analysisActionError}</p>}
@@ -1169,21 +1193,46 @@ export default function AdminDashboard() {
                     </button>
                     <button type="button" disabled={analysisSaving} onClick={handleRejectAnalysis}
                       className="h-12 rounded-xl bg-red-500 hover:bg-red-400 text-white font-black uppercase text-sm disabled:opacity-50">
-                      Confirmar recusa
+                      Recusar entrega
                     </button>
                   </div>
                 </div>
               ) : (
-                <div className="space-y-2">
+                <div className="space-y-3">
+                  {(openAnalysis.source === 'checkout' || openAnalysis.orderId == null) && (
+                    <div className="space-y-2">
+                      <label className="block text-zinc-400 text-xs font-bold uppercase tracking-wide">Taxa de entrega — R$</label>
+                      <div className="flex flex-wrap gap-2">
+                        {[5, 8, 10, 12, 15].map(v => (
+                          <button key={v} type="button"
+                            onClick={() => { setAnalysisFee(String(v)); setAnalysisActionError(''); }}
+                            className={`px-3 py-2 rounded-lg border text-xs font-black ${
+                              analysisFee === String(v)
+                                ? 'border-amber-500 bg-amber-500/15 text-amber-300'
+                                : 'border-zinc-800 bg-zinc-900 text-zinc-300'
+                            }`}>
+                            R$ {v.toFixed(2).replace('.', ',')}
+                          </button>
+                        ))}
+                      </div>
+                      <input
+                        value={analysisFee}
+                        onChange={e => { setAnalysisFee(e.target.value); setAnalysisActionError(''); }}
+                        inputMode="decimal"
+                        placeholder="Ex: 10,00"
+                        className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 h-12 text-white text-sm focus:border-amber-500 focus:outline-none"
+                      />
+                    </div>
+                  )}
                   {analysisActionError && <p className="text-red-400 text-sm">{analysisActionError}</p>}
                   <div className="grid grid-cols-2 gap-2">
                     <button type="button" disabled={analysisSaving} onClick={() => handleApproveAnalysis(openAnalysis)}
-                      className="h-12 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-black uppercase text-sm disabled:opacity-50">
-                      Aceitar
+                      className="min-h-12 px-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-black uppercase text-xs sm:text-sm whitespace-normal leading-snug disabled:opacity-50">
+                      Aceitar entrega
                     </button>
                     <button type="button" disabled={analysisSaving} onClick={() => { setAnalysisRejecting(true); setAnalysisActionError(''); }}
-                      className="h-12 rounded-xl bg-red-500 hover:bg-red-400 text-white font-black uppercase text-sm disabled:opacity-50">
-                      Recusar
+                      className="min-h-12 px-2 rounded-xl bg-red-500 hover:bg-red-400 text-white font-black uppercase text-xs sm:text-sm whitespace-normal leading-snug disabled:opacity-50">
+                      Recusar entrega
                     </button>
                   </div>
                 </div>

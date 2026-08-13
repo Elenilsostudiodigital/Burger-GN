@@ -219,75 +219,19 @@ router.post("/delivery/streets/check", resolvePublicCompany, async (req, res) =>
       distanceKm != null ? suggestFeeFromDistance(distanceKm, tiers) : null;
     const etaMinutes = distanceKm != null ? estimateEtaMinutes(distanceKm) : null;
 
-    // Upsert pending request (one open request per street key)
-    const [existingPending] = await db
-      .select()
-      .from(deliveryStreetRequestsTable)
-      .where(
-        and(
-          eq(deliveryStreetRequestsTable.companyId, companyId),
-          eq(deliveryStreetRequestsTable.streetKey, streetKey),
-          eq(deliveryStreetRequestsTable.status, "pending"),
-        ),
-      )
-      .limit(1);
-
-    let request = existingPending;
-    if (existingPending) {
-      const [updated] = await db
-        .update(deliveryStreetRequestsTable)
-        .set({
-          streetName,
-          addressNumber: String(body.addressNumber || existingPending.addressNumber || ""),
-          neighborhood: neighborhood || existingPending.neighborhood,
-          city,
-          cep: cep || existingPending.cep,
-          lat: lat != null ? String(lat) : existingPending.lat,
-          lng: lng != null ? String(lng) : existingPending.lng,
-          distanceKm: distanceKm != null ? String(distanceKm) : existingPending.distanceKm,
-          etaMinutes: etaMinutes ?? existingPending.etaMinutes,
-          suggestedFee: suggestedFee != null ? String(suggestedFee) : existingPending.suggestedFee,
-          customerName: String(body.customerName || existingPending.customerName || ""),
-          phone: String(body.phone || existingPending.phone || ""),
-          updatedAt: new Date(),
-        })
-        .where(eq(deliveryStreetRequestsTable.id, existingPending.id))
-        .returning();
-      request = updated ?? existingPending;
-    } else {
-      const [created] = await db
-        .insert(deliveryStreetRequestsTable)
-        .values({
-          companyId,
-          streetName,
-          streetKey,
-          addressNumber: String(body.addressNumber || ""),
-          neighborhood,
-          city,
-          cep,
-          lat: lat != null ? String(lat) : null,
-          lng: lng != null ? String(lng) : null,
-          distanceKm: distanceKm != null ? String(distanceKm) : null,
-          etaMinutes,
-          suggestedFee: suggestedFee != null ? String(suggestedFee) : null,
-          customerName: String(body.customerName || ""),
-          phone: String(body.phone || ""),
-          status: "pending",
-        })
-        .returning();
-      request = created!;
-    }
-
+    // Do not auto-create an admin request while the customer is only typing.
+    // Checkout must show SOLICITAR ANÁLISE and use delivery_analysis.
     res.json({
       known: false,
-      pending: true,
-      requestId: request?.id ?? null,
+      pending: false,
+      needsAnalysis: true,
+      requestId: null,
       fee: null,
       etaMinutes,
       distanceKm,
       suggestedFee,
       message:
-        "📍 Esta rua ainda não faz parte da nossa área de entrega.\nAguarde um instante enquanto verificamos a disponibilidade.\nO pedido ficará aguardando análise do administrador.",
+        "Esta rua ainda não faz parte da nossa área de entrega. Solicite uma análise da equipe para verificarmos a disponibilidade e a taxa.",
     });
   } catch (err) {
     req.log.error({ err }, "Failed to check delivery street");

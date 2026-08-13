@@ -150,6 +150,7 @@ export interface DeliveryStreetRequest {
 export interface StreetCheckResult {
   known: boolean;
   pending: boolean;
+  needsAnalysis?: boolean;
   active?: boolean;
   street?: DeliveryStreet;
   requestId?: number | null;
@@ -780,14 +781,20 @@ export interface Order {
 export type DeliveryAnalysisStatus = "pending" | "approved" | "rejected";
 export interface DeliveryAnalysisRequest {
   id: number;
-  orderId: number;
-  orderNumber: number;
+  orderId: number | null;
+  orderNumber: number | null;
   trackingId: string;
+  source?: "order" | "checkout";
   customerName: string;
   phone: string;
   address: string;
   addressNumber: string;
   neighborhood: string;
+  city?: string;
+  complement?: string;
+  reference?: string;
+  lat?: number | null;
+  lng?: number | null;
   deliveryFee: string;
   paymentMethod: string;
   paymentStatus: string;
@@ -831,6 +838,7 @@ export interface CreateOrderPayload {
   couponCode?: string;
   fidelityRewardId?: string;
   fidelityFreeProductId?: number;
+  checkoutAnalysisToken?: string;
   items: Array<{ productId?: number; productName: string; productPrice: number; quantity: number; addons?: Addon[]; notes?: string }>;
 }
 export interface PixPaymentResult { paymentId: string; qrCode: string; qrCodeBase64: string; pixKey?: string; }
@@ -849,12 +857,32 @@ export const requestDeliveryAnalysis = (trackingId: string, note?: string) =>
   }>;
 export const getDeliveryAnalysisRequests = (status: DeliveryAnalysisStatus | "all" = "pending") =>
   api.get(`/admin/delivery-analysis-requests?status=${encodeURIComponent(status)}`) as Promise<DeliveryAnalysisRequest[]>;
-export const approveDeliveryAnalysis = (id: number) =>
-  api.post(`/admin/delivery-analysis-requests/${id}/approve`, {}) as Promise<{
+export const approveDeliveryAnalysis = (id: number, d?: { fee?: number }) =>
+  api.post(`/admin/delivery-analysis-requests/${id}/approve`, d ?? {}) as Promise<{
     ok: boolean; deliveryAnalysis: DeliveryAnalysisRequest;
   }>;
 export const rejectDeliveryAnalysis = (id: number, reason: string) =>
   api.post(`/admin/delivery-analysis-requests/${id}/reject`, { reason }) as Promise<{
+    ok: boolean; deliveryAnalysis: DeliveryAnalysisRequest;
+  }>;
+export const requestCheckoutDeliveryAnalysis = (d: {
+  token?: string;
+  customerName?: string;
+  phone?: string;
+  address: string;
+  addressNumber: string;
+  neighborhood: string;
+  city?: string;
+  complement?: string;
+  reference?: string;
+  lat?: number;
+  lng?: number;
+  note?: string;
+}) => api.post("/delivery/checkout-analysis", d) as Promise<{
+  ok: boolean; token: string; deliveryAnalysis: DeliveryAnalysisRequest;
+}>;
+export const getCheckoutDeliveryAnalysis = (token: string) =>
+  api.get(`/delivery/checkout-analysis/${token}`) as Promise<{
     ok: boolean; deliveryAnalysis: DeliveryAnalysisRequest;
   }>;
 
