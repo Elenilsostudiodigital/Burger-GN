@@ -40,6 +40,16 @@ export interface OrderMeta {
   pixMode?: "online" | "manual";
   /** Present when the order was refused by an attendant. */
   rejectReason?: string;
+  /** Snapshot of the Mercado Pago payment ID used for refunds. */
+  mpPaymentId?: string;
+  /** Real MP refund outcome — never set to refunded without MP confirmation. */
+  refundStatus?: "processing" | "refunded" | "failed";
+  /** Refund resource id returned by Mercado Pago, when available. */
+  mpRefundId?: string;
+  /** Admin-only error from the last refund attempt. */
+  refundError?: string;
+  refundedAt?: string;
+  refundAttemptedAt?: string;
   /** Customer review after delivery confirmation. */
   review?: OrderReview;
   /** When admin marked as delivered (ISO). Used for post-delivery UX timing. */
@@ -128,6 +138,14 @@ export function serializeOrderNotes(publicNotes: string, meta: OrderMeta): strin
   if (meta.pixKey) cleanMeta.pixKey = meta.pixKey;
   if (meta.pixMode === "online" || meta.pixMode === "manual") cleanMeta.pixMode = meta.pixMode;
   if (meta.rejectReason) cleanMeta.rejectReason = meta.rejectReason;
+  if (meta.mpPaymentId) cleanMeta.mpPaymentId = String(meta.mpPaymentId).slice(0, 80);
+  if (meta.refundStatus === "processing" || meta.refundStatus === "refunded" || meta.refundStatus === "failed") {
+    cleanMeta.refundStatus = meta.refundStatus;
+  }
+  if (meta.mpRefundId) cleanMeta.mpRefundId = String(meta.mpRefundId).slice(0, 80);
+  if (meta.refundError) cleanMeta.refundError = String(meta.refundError).slice(0, 500);
+  if (meta.refundedAt) cleanMeta.refundedAt = meta.refundedAt;
+  if (meta.refundAttemptedAt) cleanMeta.refundAttemptedAt = meta.refundAttemptedAt;
   if (meta.review) cleanMeta.review = meta.review;
   if (meta.deliveredAt) cleanMeta.deliveredAt = meta.deliveredAt;
   if (typeof meta.clientMemberId === "number") cleanMeta.clientMemberId = meta.clientMemberId;
@@ -197,6 +215,7 @@ export function buildCustomerNotifyMessage(
   customerName: string,
   workflow: WorkflowStage | "cancelled" | "payment_confirmed" | "receipt_refused",
   rejectReason?: string | null,
+  refundConfirmed?: boolean,
 ): string {
   const name = (customerName || "cliente").trim().split(/\s+/)[0] || "cliente";
   switch (workflow) {
@@ -224,7 +243,7 @@ export function buildCustomerNotifyMessage(
     case "cancelled":
       return `Olá ${name}! Infelizmente seu pedido #${orderNumber} foi recusado.${
         rejectReason ? ` Motivo: ${rejectReason}.` : ""
-      } — The Burger GN`;
+      }${refundConfirmed ? " O pagamento via PIX foi reembolsado." : ""} — The Burger GN`;
     case "awaiting_payment":
       return `Olá ${name}! Recebemos o comprovante do pedido #${orderNumber}. Estamos conferindo o pagamento. — The Burger GN`;
     case "new":

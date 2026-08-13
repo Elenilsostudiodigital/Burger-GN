@@ -9,13 +9,76 @@ import { logger } from "./logger";
 
 export function mapMpStatus(mpStatus: string): "paid" | "failed" | "pending" {
   if (mpStatus === "approved") return "paid";
-  if (mpStatus === "rejected" || mpStatus === "cancelled" || mpStatus === "refunded") return "failed";
+  if (mpStatus === "refunded" || mpStatus === "charged_back") return "paid";
+  if (mpStatus === "rejected" || mpStatus === "cancelled") return "failed";
   return "pending";
+}
+
+function snapshot(existing: typeof ordersTable.$inferSelect, meta: OrderMeta) {
+  return {
+    id: existing.id,
+    trackingId: existing.trackingId,
+    paymentStatus: existing.paymentStatus,
+    workflow: resolveWorkflow(existing.status, meta),
+  };
+}
+
+async function confirmRefundFromWebhook(params: {
+  companyId: number;
+  existing: typeof ordersTable.$inferSelect;
+  paymentId: string;
+  mpStatus: string;
+}): Promise<{ id: number; trackingId: string; paymentStatus: string; workflow: string } | null> {
+  const { publicNotes, meta } = parseOrderNotes(params.existing.notes);
+  if (meta.refundStatus === "refunded") {
+    return snapshot(params.existing, meta);
+  }
+
+  let nextMeta: OrderMeta = {
+    ...meta,
+    pixMode: meta.pixMode ?? "online",
+    refundStatus: "refunded",
+    refundedAt: new Date().toISOString(),
+    mpPaymentId: meta.mpPaymentId || params.paymentId,
+  };
+  delete nextMeta.refundError;
+  nextMeta = appendHistory(nextMeta, params.existing.status === "cancelled" ? "cancelled" : resolveWorkflow(params.existing.status, meta), "Reembolso confirmado pelo Mercado Pago");
+
+  const [order] = await db.update(ordersTable)
+    .set({
+      mpPaymentId: params.paymentId || params.existing.mpPaymentId,
+      notes: serializeOrderNotes(publicNotes, nextMeta),
+      updatedAt: new Date(),
+    })
+    .where(and(eq(ordersTable.id, params.existing.id), eq(ordersTable.companyId, params.companyId)))
+    .returning();
+
+  if (!order) return null;
+
+  const workflow = resolveWorkflow(order.status, nextMeta);
+  broadcastSSE(params.companyId, "order_status", {
+    id: order.id,
+    trackingId: order.trackingId,
+    status: order.status,
+    workflow,
+    paymentStatus: order.paymentStatus,
+    refundStatus: nextMeta.refundStatus,
+    mpRefundId: nextMeta.mpRefundId ?? null,
+    rejectReason: nextMeta.rejectReason ?? null,
+  });
+
+  logger.info(
+    { trackingId: order.trackingId, mpPaymentId: params.paymentId, mpStatus: params.mpStatus },
+    "Mercado Pago refund confirmed via webhook",
+  );
+
+  return { id: order.id, trackingId: order.trackingId, paymentStatus: order.paymentStatus, workflow };
 }
 
 /**
  * Reconcile a Mercado Pago payment against the matching order.
  * On approved: mark paid, leave awaiting_payment, surface in the admin queue.
+ * On refunded: confirm refund meta only — never treat a confirmed refund as a failed payment.
  */
 export async function applyMercadoPagoStatus(params: {
   companyId: number;
@@ -40,19 +103,28 @@ export async function applyMercadoPagoStatus(params: {
   const existing = byRef ?? byMp;
   if (!existing) return null;
 
+  if (params.mpStatus === "refunded" || params.mpStatus === "charged_back") {
+    return confirmRefundFromWebhook({
+      companyId: params.companyId,
+      existing,
+      paymentId: params.paymentId,
+      mpStatus: params.mpStatus,
+    });
+  }
+
+  // A refused order must not be reopened or flipped to failed by later MP events.
+  if (existing.status === "cancelled") {
+    const { meta } = parseOrderNotes(existing.notes);
+    return snapshot(existing, meta);
+  }
+
   if (existing.paymentStatus === paymentStatus && paymentStatus !== "paid") {
     const { meta } = parseOrderNotes(existing.notes);
-    return {
-      id: existing.id,
-      trackingId: existing.trackingId,
-      paymentStatus: existing.paymentStatus,
-      workflow: resolveWorkflow(existing.status, meta),
-    };
+    return snapshot(existing, meta);
   }
   if (existing.paymentStatus === "paid" && paymentStatus === "paid") {
     const { meta } = parseOrderNotes(existing.notes);
-    const workflow = resolveWorkflow(existing.status, meta);
-    return { id: existing.id, trackingId: existing.trackingId, paymentStatus: "paid", workflow };
+    return snapshot(existing, meta);
   }
 
   const { publicNotes, meta } = parseOrderNotes(existing.notes);

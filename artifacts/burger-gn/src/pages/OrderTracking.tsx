@@ -147,7 +147,7 @@ function OrderTimelineView({ trackingId }: { trackingId: string }) {
         });
 
         const wf = data.status === 'cancelled' ? 'cancelled' : (data.workflow || data.status);
-        const payKey = `${data.paymentStatus}:${data.receiptRejectReason || ''}:${data.receiptUploadedAt || ''}`;
+        const payKey = `${data.paymentStatus}:${data.receiptRejectReason || ''}:${data.receiptUploadedAt || ''}:${data.refundStatus || ''}`;
         const statusChanged = lastWorkflow.current && lastWorkflow.current !== wf;
         const paymentChanged = lastPaymentKey.current && lastPaymentKey.current !== payKey;
 
@@ -156,6 +156,7 @@ function OrderTimelineView({ trackingId }: { trackingId: string }) {
             paymentStatus: data.paymentStatus,
             rejectReason: data.rejectReason,
             receiptRejectReason: data.receiptRejectReason,
+            refundStatus: data.refundStatus,
           });
           setStatusToast(msg);
           notifyOrderStatusChange({
@@ -550,6 +551,14 @@ function OrderTimelineView({ trackingId }: { trackingId: string }) {
                   <div className="mt-3 flex items-start gap-2 text-left bg-red-950/40 border border-red-900/50 rounded-xl px-3 py-2.5">
                     <AlertCircle size={16} className="text-red-400 mt-0.5 shrink-0" />
                     <p className="text-red-200 text-sm"><span className="font-bold">Motivo: </span>{order.rejectReason}</p>
+                  </div>
+                )}
+                {order.refundStatus === 'refunded' && (
+                  <div className="mt-3 text-left bg-emerald-950/40 border border-emerald-800/50 rounded-xl px-3 py-2.5">
+                    <p className="text-emerald-300 text-sm font-bold">Pagamento reembolsado</p>
+                    <p className="text-emerald-200/80 text-xs mt-1">
+                      O valor pago via PIX Online foi estornado. A confirmação do reembolso foi recebida do Mercado Pago.
+                    </p>
                   </div>
                 )}
               </>

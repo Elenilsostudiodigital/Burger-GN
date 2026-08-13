@@ -164,8 +164,34 @@ export async function createCardPreference(params: {
   }
 }
 
+export function isRealMpPaymentId(paymentId: string | null | undefined): boolean {
+  const id = String(paymentId || "").trim();
+  return Boolean(id) && !id.startsWith("static_");
+}
+
+export function isConfirmedMpRefund(
+  paymentStatus: string | null | undefined,
+  refundStatus: string | null | undefined,
+): boolean {
+  const pay = String(paymentStatus || "").toLowerCase();
+  const ref = String(refundStatus || "").toLowerCase();
+  if (pay === "refunded" || pay === "charged_back") return true;
+  if (ref === "approved") return true;
+  return false;
+}
+
 export interface MPPaymentInfo {
   id: string; status: string; externalReference: string | null;
+}
+
+export interface MPRefundResult {
+  /** True only after Mercado Pago confirms the refund (payment refunded/charged_back or refund approved). */
+  confirmed: boolean;
+  alreadyRefunded: boolean;
+  refundId: string | null;
+  refundStatus: string | null;
+  paymentStatus: string | null;
+  error: string | null;
 }
 
 export async function fetchMPPayment(
@@ -198,5 +224,222 @@ export async function fetchMPPayment(
   } catch (err) {
     logger.error({ err, paymentId }, "Failed to fetch Mercado Pago payment");
     return null;
+  }
+}
+
+const MP_API_BASE = "https://api.mercadopago.com";
+
+async function parseMpJson(res: Response): Promise<unknown> {
+  const text = await res.text();
+  if (!text) return null;
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return { raw: text };
+  }
+}
+
+function mpErrorMessage(body: unknown, fallback: string): string {
+  if (!body || typeof body !== "object") return fallback;
+  const o = body as Record<string, unknown>;
+  if (typeof o.message === "string" && o.message.trim()) return o.message.slice(0, 400);
+  const cause = o.cause;
+  if (Array.isArray(cause) && cause[0] && typeof cause[0] === "object") {
+    const description = (cause[0] as { description?: string }).description;
+    if (description) return String(description).slice(0, 400);
+  }
+  return fallback;
+}
+
+function looksAlreadyRefunded(message: string): boolean {
+  const s = message.toLowerCase();
+  return (
+    s.includes("already refunded")
+    || s.includes("already been refunded")
+    || s.includes("payment is refunded")
+    || s.includes("já reembolsado")
+  );
+}
+
+function refundIdFromBody(body: unknown): string | null {
+  if (!body || typeof body !== "object") return null;
+  const id = (body as { id?: unknown }).id;
+  if (id == null) return null;
+  const value = String(id).trim();
+  return value || null;
+}
+
+function refundStatusFromBody(body: unknown): string | null {
+  if (!body || typeof body !== "object") return null;
+  const status = (body as { status?: unknown }).status;
+  return typeof status === "string" && status.trim() ? status : null;
+}
+
+/**
+ * Full refund via the official Mercado Pago Payments API:
+ * POST /v1/payments/{id}/refunds
+ *
+ * Uses a stable idempotency key so retries / double-clicks do not create a second refund.
+ * Only reports `confirmed: true` after MP returns a valid refund/payment confirmation.
+ */
+export async function refundMercadoPagoPayment(params: {
+  accessToken: string;
+  paymentId: string;
+  idempotencyKey: string;
+}): Promise<MPRefundResult> {
+  const paymentId = String(params.paymentId || "").trim();
+  const empty: MPRefundResult = {
+    confirmed: false,
+    alreadyRefunded: false,
+    refundId: null,
+    refundStatus: null,
+    paymentStatus: null,
+    error: null,
+  };
+
+  if (!isRealMpPaymentId(paymentId)) {
+    return { ...empty, error: "Payment ID do Mercado Pago inválido." };
+  }
+
+  if (isLocalMpStubToken(params.accessToken)) {
+    const stub = stubPayments.get(paymentId);
+    if (!stub) {
+      return { ...empty, error: "Pagamento stub não encontrado para reembolso." };
+    }
+    if (stub.status === "refunded" || stub.status === "charged_back") {
+      return {
+        confirmed: true,
+        alreadyRefunded: true,
+        refundId: `stub-refund-${paymentId}`,
+        refundStatus: "approved",
+        paymentStatus: stub.status,
+        error: null,
+      };
+    }
+    if (stub.status !== "approved") {
+      return {
+        ...empty,
+        paymentStatus: stub.status,
+        error: `Pagamento não está aprovado para reembolso (${stub.status}).`,
+      };
+    }
+    stub.status = "refunded";
+    logger.info({ paymentId }, "Mercado Pago stub refund confirmed (local token)");
+    return {
+      confirmed: true,
+      alreadyRefunded: false,
+      refundId: `stub-refund-${paymentId}`,
+      refundStatus: "approved",
+      paymentStatus: "refunded",
+      error: null,
+    };
+  }
+
+  try {
+    const before = await fetchMPPayment(params.accessToken, paymentId);
+    if (!before) {
+      return { ...empty, error: "Não foi possível consultar o pagamento no Mercado Pago." };
+    }
+    if (isConfirmedMpRefund(before.status, null)) {
+      return {
+        confirmed: true,
+        alreadyRefunded: true,
+        refundId: null,
+        refundStatus: "approved",
+        paymentStatus: before.status,
+        error: null,
+      };
+    }
+    if (before.status !== "approved") {
+      return {
+        ...empty,
+        paymentStatus: before.status,
+        error: `Pagamento não está aprovado para reembolso (${before.status}).`,
+      };
+    }
+
+    const res = await fetch(`${MP_API_BASE}/v1/payments/${encodeURIComponent(paymentId)}/refunds`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${params.accessToken}`,
+        "Content-Type": "application/json",
+        "X-Idempotency-Key": params.idempotencyKey,
+      },
+      body: JSON.stringify({}),
+    });
+    const body = await parseMpJson(res);
+    const refundId = refundIdFromBody(body);
+    const refundStatus = refundStatusFromBody(body);
+
+    const after = await fetchMPPayment(params.accessToken, paymentId);
+    const paymentStatus = after?.status ?? before.status;
+
+    if (isConfirmedMpRefund(paymentStatus, refundStatus)) {
+      logger.info(
+        { paymentId, refundId, paymentStatus, refundStatus, httpStatus: res.status },
+        "Mercado Pago refund confirmed",
+      );
+      return {
+        confirmed: true,
+        alreadyRefunded: false,
+        refundId,
+        refundStatus: refundStatus ?? "approved",
+        paymentStatus,
+        error: null,
+      };
+    }
+
+    if (!res.ok) {
+      const errMsg = mpErrorMessage(body, `Falha no reembolso Mercado Pago (HTTP ${res.status}).`);
+      if (looksAlreadyRefunded(errMsg) || isConfirmedMpRefund(paymentStatus, null)) {
+        const confirmedPay = await fetchMPPayment(params.accessToken, paymentId);
+        const confirmedStatus = confirmedPay?.status ?? paymentStatus;
+        if (isConfirmedMpRefund(confirmedStatus, null)) {
+          return {
+            confirmed: true,
+            alreadyRefunded: true,
+            refundId,
+            refundStatus: "approved",
+            paymentStatus: confirmedStatus,
+            error: null,
+          };
+        }
+      }
+      logger.error({ paymentId, httpStatus: res.status, body }, "Mercado Pago refund request failed");
+      return {
+        ...empty,
+        refundId,
+        refundStatus,
+        paymentStatus,
+        error: errMsg,
+      };
+    }
+
+    if (refundStatus === "in_process" || refundStatus === "pending") {
+      logger.warn({ paymentId, refundId, refundStatus }, "Mercado Pago refund in process — not yet confirmed");
+      return {
+        confirmed: false,
+        alreadyRefunded: false,
+        refundId,
+        refundStatus,
+        paymentStatus,
+        error: null,
+      };
+    }
+
+    logger.error({ paymentId, refundId, refundStatus, paymentStatus, body }, "Mercado Pago refund not confirmed");
+    return {
+      ...empty,
+      refundId,
+      refundStatus,
+      paymentStatus,
+      error: `Mercado Pago não confirmou o reembolso (pagamento: ${paymentStatus}, reembolso: ${refundStatus || "desconhecido"}).`,
+    };
+  } catch (err) {
+    logger.error({ err, paymentId }, "Failed to refund Mercado Pago payment");
+    return {
+      ...empty,
+      error: err instanceof Error ? err.message.slice(0, 400) : "Falha ao solicitar reembolso no Mercado Pago.",
+    };
   }
 }

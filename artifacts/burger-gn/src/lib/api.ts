@@ -734,6 +734,7 @@ export type CardType = "credit" | "debit";
 
 export interface OrderItem { id: number; orderId: number; productName: string; productPrice: string; quantity: number; addons: Addon[]; notes: string; subtotal: string; }
 export type PaymentStatus = "pending" | "paid" | "failed";
+export type RefundStatus = "processing" | "refunded" | "failed";
 export interface StatusHistoryEntry { stage: WorkflowStage | "cancelled"; label: string; at: string; }
 export interface Order {
   id: number; orderNumber: number; trackingId: string;
@@ -752,6 +753,12 @@ export interface Order {
   receiptRejectReason?: string | null;
   receiptRejectedAt?: string | null;
   rejectReason?: string | null;
+  mpPaymentId?: string | null;
+  refundStatus?: RefundStatus | null;
+  mpRefundId?: string | null;
+  refundError?: string | null;
+  refundedAt?: string | null;
+  refundAttemptedAt?: string | null;
   review?: OrderReview | null;
   deliveredAt?: string | null;
   history?: StatusHistoryEntry[];
@@ -836,6 +843,8 @@ export const updateOrderWorkflow = (
   opts?: { rejectReason?: string },
 ) =>
   api.patch(`/orders/${id}/status`, { workflow, rejectReason: opts?.rejectReason }) as Promise<Order>;
+export const retryOrderMercadoPagoRefund = (id: number) =>
+  api.post(`/orders/${id}/mp-refund`, {}) as Promise<Order>;
 export const uploadOrderReceipt = (trackingId: string, receiptDataUrl: string) =>
   api.post(`/orders/track/${trackingId}/receipt`, { receiptDataUrl }) as Promise<Order>;
 export const submitOrderReview = (
@@ -950,6 +959,7 @@ export function buildCustomerNotifyMessage(
   customerName: string,
   workflow: WorkflowStage | "cancelled" | "payment_confirmed" | "receipt_refused",
   rejectReason?: string | null,
+  refundConfirmed?: boolean,
 ): string {
   const name = (customerName || "cliente").trim().split(/\s+/)[0] || "cliente";
   switch (workflow) {
@@ -977,7 +987,7 @@ export function buildCustomerNotifyMessage(
     case "cancelled":
       return `Olá ${name}! Infelizmente seu pedido #${orderNumber} foi recusado.${
         rejectReason ? ` Motivo: ${rejectReason}.` : ""
-      } — The Burger GN`;
+      }${refundConfirmed ? " O pagamento via PIX foi reembolsado." : ""} — The Burger GN`;
     case "awaiting_payment":
       return `Olá ${name}! Recebemos o comprovante do pedido #${orderNumber}. Estamos conferindo o pagamento. — The Burger GN`;
     default:
@@ -1003,12 +1013,21 @@ export function openCustomerWhatsapp(phone: string, message: string) {
 /** Short in-app labels for Meu Pedido status banners. */
 export function customerInAppStatusMessage(
   workflow: string,
-  opts?: { paymentStatus?: PaymentStatus; rejectReason?: string | null; receiptRejectReason?: string | null },
+  opts?: {
+    paymentStatus?: PaymentStatus;
+    rejectReason?: string | null;
+    receiptRejectReason?: string | null;
+    refundStatus?: RefundStatus | null;
+  },
 ): { title: string; body: string } {
   if (workflow === "cancelled") {
+    const reason = opts?.rejectReason ? `Motivo: ${opts.rejectReason}` : "A loja recusou este pedido.";
+    const refunded = opts?.refundStatus === "refunded"
+      ? " O pagamento foi reembolsado."
+      : "";
     return {
       title: "Pedido recusado",
-      body: opts?.rejectReason ? `Motivo: ${opts.rejectReason}` : "A loja recusou este pedido.",
+      body: `${reason}${refunded}`,
     };
   }
   if (opts?.paymentStatus === "paid" && (workflow === "new" || workflow === "payment_confirmed")) {
@@ -1048,11 +1067,30 @@ export function customerInAppStatusMessage(
 }
 
 export const REJECT_REASON_SUGGESTIONS = [
-  "Produto esgotado",
-  "Fora da área de entrega",
-  "Loja fechando",
-  "Pagamento não confirmado",
+  "Produto indisponível",
+  "Item em falta",
+  "Problema na entrega",
+  "Estabelecimento impossibilitado de atender",
 ] as const;
+
+export function isPaidMercadoPagoPix(order: {
+  paymentMethod: PaymentMethod;
+  paymentStatus: PaymentStatus;
+  pixMode?: PixMode | null;
+  mpPaymentId?: string | null;
+}): boolean {
+  return order.paymentMethod === "pix"
+    && order.pixMode !== "manual"
+    && order.paymentStatus === "paid"
+    && !!order.mpPaymentId
+    && !String(order.mpPaymentId).startsWith("static_");
+}
+
+export function orderNeedsMpRefundRetry(order: Order): boolean {
+  if (order.status !== "cancelled") return false;
+  if (!isPaidMercadoPagoPix(order)) return false;
+  return order.refundStatus !== "refunded";
+}
 
 export const RECEIPT_REJECT_SUGGESTIONS = [
   "Comprovante ilegível",

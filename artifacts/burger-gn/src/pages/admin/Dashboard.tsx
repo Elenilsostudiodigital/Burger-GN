@@ -12,13 +12,14 @@ import {
   REJECT_REASON_SUGGESTIONS, RECEIPT_REJECT_SUGGESTIONS,
   Order, WorkflowStage, PrepDayStats,
   ORDER_TYPE_LABELS, PAYMENT_STATUS_LABELS, WORKFLOW_LABELS,
-  formatPaymentMethod,
+  formatPaymentMethod, retryOrderMercadoPagoRefund, isPaidMercadoPagoPix, orderNeedsMpRefundRetry,
 } from '../../lib/api';
 import {
   LayoutDashboard, UtensilsCrossed, LogOut, Bell, BellOff,
   Printer, Clock, MessageCircle, History,
   XCircle, Tag, MapPin, Navigation, Settings, Route, Upload, TrendingUp,
   ChevronLeft, ChevronRight, GripVertical, X, Crown, Filter, ImageIcon, CheckCircle2, Check, Ban, Star, Users,
+  RotateCcw,
 } from 'lucide-react';
 import { PrepCountdown, prepCardBorderClass } from '../../components/PrepCountdown';
 import {
@@ -164,7 +165,7 @@ function buildReceiptHTML(order: Order): string {
   </body></html>`;
 }
 
-function OrderCard({ order, highlight, dragging, onAccept, onRefuse, onAdvance, onBack, onConfirmPayment, onRefuseReceipt }: {
+function OrderCard({ order, highlight, dragging, onAccept, onRefuse, onAdvance, onBack, onConfirmPayment, onRefuseReceipt, onRetryRefund }: {
   order: Order; highlight: boolean; dragging?: boolean;
   onAccept: (order: Order) => void;
   onRefuse: (order: Order) => void;
@@ -172,6 +173,7 @@ function OrderCard({ order, highlight, dragging, onAccept, onRefuse, onAdvance, 
   onBack: (order: Order, workflow: ColumnKey) => void;
   onConfirmPayment: (order: Order) => void;
   onRefuseReceipt: (order: Order) => void;
+  onRetryRefund: (order: Order) => void;
 }) {
   const [updating, setUpdating] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
@@ -260,6 +262,12 @@ function OrderCard({ order, highlight, dragging, onAccept, onRefuse, onAdvance, 
           {order.rejectReason && (
             <p className="text-red-400 text-[11px] mt-1">Motivo: {order.rejectReason}</p>
           )}
+          {order.mpPaymentId && column === 'cancelled' && isPaidMercadoPagoPix(order) && (
+            <p className="text-zinc-600 text-[10px] mt-0.5 font-mono">Payment ID: {order.mpPaymentId}</p>
+          )}
+          {order.mpRefundId && order.refundStatus === 'refunded' && (
+            <p className="text-zinc-600 text-[10px] mt-0.5 font-mono">Refund ID: {order.mpRefundId}</p>
+          )}
           {order.receiptRejectReason && order.paymentStatus === 'failed' && (
             <p className="text-red-400 text-[11px] mt-1">Comprovante: {order.receiptRejectReason}</p>
           )}
@@ -281,6 +289,21 @@ function OrderCard({ order, highlight, dragging, onAccept, onRefuse, onAdvance, 
         >
           {PAYMENT_STATUS_LABELS[order.paymentStatus]}
         </span>
+        {order.refundStatus === 'refunded' && (
+          <span className="font-black uppercase px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400">
+            Reembolsado
+          </span>
+        )}
+        {order.refundStatus === 'failed' && (
+          <span className="font-black uppercase px-1.5 py-0.5 rounded bg-red-500/20 text-red-400">
+            Falha no reembolso
+          </span>
+        )}
+        {order.refundStatus === 'processing' && (
+          <span className="font-black uppercase px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400">
+            Reembolso em andamento
+          </span>
+        )}
         {order.receiptDataUrl && (
           <button type="button" onClick={() => setShowReceipt(true)}
             className="font-bold uppercase px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 flex items-center gap-1">
@@ -395,6 +418,20 @@ function OrderCard({ order, highlight, dragging, onAccept, onRefuse, onAdvance, 
         </div>
       )}
 
+      {column === 'cancelled' && orderNeedsMpRefundRetry(order) && (
+        <div className="p-3 pt-2 space-y-2">
+          <p className="text-red-300 text-[11px] leading-relaxed">
+            {order.refundError
+              ? `Reembolso não confirmado pelo Mercado Pago: ${order.refundError}`
+              : 'O pedido foi recusado, mas o reembolso ainda não foi confirmado pelo Mercado Pago. O cliente não verá que o dinheiro foi devolvido até a confirmação.'}
+          </p>
+          <button type="button" disabled={updating} onClick={() => run(() => onRetryRefund(order))}
+            className="w-full h-11 rounded-xl bg-amber-500 text-zinc-950 font-black text-[11px] uppercase tracking-wide flex items-center justify-center gap-1.5 hover:bg-amber-400">
+            <RotateCcw size={14} /> Tentar reembolso novamente
+          </button>
+        </div>
+      )}
+
       {!isPending && column !== 'cancelled' && (
         <div className="p-3 pt-2 flex items-center gap-1.5 flex-wrap">
           {WHATSAPP_EXTERNAL_ENABLED && (
@@ -497,7 +534,7 @@ function OrderCard({ order, highlight, dragging, onAccept, onRefuse, onAdvance, 
   );
 }
 
-function Column({ col, orders, newOrderIds, onAccept, onRefuse, onAdvance, onBack, onConfirmPayment, onRefuseReceipt }: {
+function Column({ col, orders, newOrderIds, onAccept, onRefuse, onAdvance, onBack, onConfirmPayment, onRefuseReceipt, onRetryRefund }: {
   col: ColumnDef; orders: Order[]; newOrderIds: Set<number>;
   onAccept: (order: Order) => void;
   onRefuse: (order: Order) => void;
@@ -505,6 +542,7 @@ function Column({ col, orders, newOrderIds, onAccept, onRefuse, onAdvance, onBac
   onBack: (order: Order, workflow: ColumnKey) => void;
   onConfirmPayment: (order: Order) => void;
   onRefuseReceipt: (order: Order) => void;
+  onRetryRefund: (order: Order) => void;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: col.key });
   return (
@@ -525,7 +563,7 @@ function Column({ col, orders, newOrderIds, onAccept, onRefuse, onAdvance, onBac
           ) : orders.map(order => (
             <OrderCard key={order.id} order={order} highlight={newOrderIds.has(order.id)}
               onAccept={onAccept} onRefuse={onRefuse} onAdvance={onAdvance} onBack={onBack}
-              onConfirmPayment={onConfirmPayment} onRefuseReceipt={onRefuseReceipt} />
+              onConfirmPayment={onConfirmPayment} onRefuseReceipt={onRefuseReceipt} onRetryRefund={onRetryRefund} />
           ))}
         </AnimatePresence>
       </div>
@@ -608,13 +646,15 @@ export default function AdminDashboard() {
       fetchOrders();
       try {
         const data = JSON.parse((e as MessageEvent).data) as {
-          workflow?: string; id?: number; orderNumber?: number;
+          workflow?: string; id?: number; orderNumber?: number; refundStatus?: string;
         };
         const wf = data.workflow;
         if (wf === 'ready') setNotification('🔔 Pedido pronto para entrega');
         else if (wf === 'out') setNotification('🔔 Pedido saiu para entrega');
         else if (wf === 'preparing') setNotification('🔔 Pedido em preparo');
         else if (wf === 'new') setNotification('🔔 Pedido aguardando confirmação');
+        else if (wf === 'cancelled' && data.refundStatus === 'failed') setNotification('🔔 Pedido recusado — FALHA no reembolso Mercado Pago');
+        else if (wf === 'cancelled' && data.refundStatus === 'refunded') setNotification('🔔 Pedido recusado e reembolso confirmado');
         else if (wf === 'cancelled') setNotification('🔔 Pedido recusado');
         else if (wf === 'done') setNotification('🔔 Pedido entregue');
         if (wf) setTimeout(() => setNotification(null), 5000);
@@ -751,12 +791,42 @@ export default function AdminDashboard() {
       const updated = await updateOrderWorkflow(refuseOrder.id, 'cancelled', { rejectReason: reason });
       applyUpdated(refuseOrder.id, updated);
       notifyCustomer(refuseOrder, 'cancelled', reason, updated.customerNotifyMessage);
+      if (isPaidMercadoPagoPix(refuseOrder)) {
+        if (updated.refundStatus === 'refunded') {
+          setNotification(`Pedido #${refuseOrder.orderNumber} recusado. Reembolso confirmado pelo Mercado Pago.`);
+        } else if (updated.refundStatus === 'processing') {
+          setNotification(`Pedido #${refuseOrder.orderNumber} recusado. Reembolso aguardando confirmação do Mercado Pago.`);
+        } else {
+          setNotification(`Pedido #${refuseOrder.orderNumber} recusado, mas o reembolso FALHOU. O cliente não verá que o dinheiro foi devolvido. Tente novamente em Recusados.`);
+        }
+        setTimeout(() => setNotification(null), 7000);
+      }
       setRefuseOrder(null);
     } catch (err) {
       setRefuseError(err instanceof Error ? err.message : 'Não foi possível recusar o pedido.');
       fetchOrders();
     } finally {
       setRefuseSaving(false);
+    }
+  };
+
+  const handleRetryRefund = async (order: Order) => {
+    try {
+      const updated = await retryOrderMercadoPagoRefund(order.id);
+      applyUpdated(order.id, updated);
+      if (updated.refundStatus === 'refunded') {
+        notifyCustomer(order, 'cancelled', order.rejectReason, updated.customerNotifyMessage);
+        setNotification(`Reembolso confirmado pelo Mercado Pago — pedido #${order.orderNumber}`);
+      } else if (updated.refundStatus === 'processing') {
+        setNotification(`Reembolso do pedido #${order.orderNumber} aguardando confirmação do Mercado Pago.`);
+      } else {
+        setNotification(`Falha no reembolso do pedido #${order.orderNumber}. ${updated.refundError || 'Tente novamente.'}`);
+      }
+      setTimeout(() => setNotification(null), 7000);
+    } catch (err) {
+      setNotification(err instanceof Error ? err.message : 'Não foi possível tentar o reembolso.');
+      setTimeout(() => setNotification(null), 5000);
+      fetchOrders();
     }
   };
 
@@ -940,7 +1010,7 @@ export default function AdminDashboard() {
               {visibleColumns.map(col => (
                 <Column key={col.key} col={col} orders={ordersByColumn[col.key]} newOrderIds={newOrderIds}
                   onAccept={handleAccept} onRefuse={openRefuse} onAdvance={handleAdvance} onBack={handleBack}
-                  onConfirmPayment={handleConfirmPayment} onRefuseReceipt={openRefuseReceipt} />
+                  onConfirmPayment={handleConfirmPayment} onRefuseReceipt={openRefuseReceipt} onRetryRefund={handleRetryRefund} />
               ))}
             </div>
             <DragOverlay>
@@ -948,7 +1018,7 @@ export default function AdminDashboard() {
                 <div className="w-[300px] rotate-2">
                   <OrderCard order={activeDragOrder} highlight={false} dragging
                     onAccept={handleAccept} onRefuse={openRefuse} onAdvance={handleAdvance} onBack={handleBack}
-                    onConfirmPayment={handleConfirmPayment} onRefuseReceipt={openRefuseReceipt} />
+                    onConfirmPayment={handleConfirmPayment} onRefuseReceipt={openRefuseReceipt} onRetryRefund={handleRetryRefund} />
                 </div>
               )}
             </DragOverlay>
@@ -970,6 +1040,12 @@ export default function AdminDashboard() {
                 <button type="button" disabled={refuseSaving} onClick={() => setRefuseOrder(null)} className="text-zinc-500 hover:text-white"><X size={18} /></button>
               </div>
               <p className="text-zinc-500 text-sm">Informe o motivo. O cliente verá a justificativa em Meu Pedido.</p>
+              {isPaidMercadoPagoPix(refuseOrder) && (
+                <p className="text-amber-300 text-xs leading-relaxed bg-amber-500/10 border border-amber-500/30 rounded-xl px-3 py-2">
+                  Este pedido já está PAGO via PIX Online. Ao recusar, o sistema solicita o reembolso real no Mercado Pago.
+                  Só marcamos como reembolsado depois da confirmação da API. Se o reembolso falhar, o cliente não verá que o dinheiro foi devolvido.
+                </p>
+              )}
               <div className="space-y-2">
                 {REJECT_REASON_SUGGESTIONS.map(reason => (
                   <button key={reason} type="button" onClick={() => { setRejectReason(reason); setRefuseError(''); }}
@@ -997,7 +1073,9 @@ export default function AdminDashboard() {
               {refuseError && <p className="text-red-400 text-sm">{refuseError}</p>}
               <button type="button" disabled={refuseSaving} onClick={confirmRefuse}
                 className="w-full h-12 rounded-xl bg-red-500 hover:bg-red-400 text-white font-black uppercase text-sm tracking-wide disabled:opacity-50">
-                {refuseSaving ? 'Recusando...' : 'Confirmar recusa'}
+                {refuseSaving
+                  ? (isPaidMercadoPagoPix(refuseOrder) ? 'Recusando e reembolsando...' : 'Recusando...')
+                  : (isPaidMercadoPagoPix(refuseOrder) ? 'Confirmar recusa e reembolsar' : 'Confirmar recusa')}
               </button>
             </motion.div>
           </motion.div>
@@ -1083,7 +1161,7 @@ export default function AdminDashboard() {
                 <div key={order.id} className="mb-3">
                   <OrderCard order={order} highlight={false}
                     onAccept={handleAccept} onRefuse={openRefuse} onAdvance={handleAdvance} onBack={handleBack}
-                    onConfirmPayment={handleConfirmPayment} onRefuseReceipt={openRefuseReceipt} />
+                    onConfirmPayment={handleConfirmPayment} onRefuseReceipt={openRefuseReceipt} onRetryRefund={handleRetryRefund} />
                 </div>
               ))}
             </motion.div>
