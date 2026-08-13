@@ -16,6 +16,7 @@ import Confirmation from "./pages/Confirmation";
 import OrderTracking, { MyOrderPage } from "./pages/OrderTracking";
 import ClubeCliente from "./pages/ClubeCliente";
 import { MyOrderFab } from "./components/MyOrderFab";
+import { AdminPanelScroll } from "./components/AdminPanelScroll";
 import AdminLogin from "./pages/admin/Login";
 import AdminSalesDashboard from "./pages/admin/SalesDashboard";
 import AdminDashboard from "./pages/admin/Dashboard";
@@ -62,7 +63,12 @@ function ProtectedAdminRoute({ component: Component }: { component: React.Compon
     );
   }
 
-  return <Component />;
+  return (
+    <>
+      <AdminPanelScroll />
+      <Component />
+    </>
+  );
 }
 
 /** Stable route wrappers — avoid anonymous `() => <ProtectedAdminRoute…/>` remounting the page fiber. */
