@@ -7,7 +7,8 @@ export type WorkflowStage =
   | "preparing"
   | "ready"
   | "out"
-  | "done";
+  | "done"
+  | "finalized";
 export type CardType = "credit" | "debit";
 
 export interface StatusHistoryEntry {
@@ -44,6 +45,8 @@ export interface OrderMeta {
   review?: OrderReview;
   /** When admin marked as delivered (ISO). Used for post-delivery UX timing. */
   deliveredAt?: string;
+  /** When admin finalized the order (removed from operational board). */
+  finalizedAt?: string;
   /** Optional CRM link to clube_members.id (soft; phone match still works for legacy orders). */
   clientMemberId?: number;
   /** Idempotency: stamp already awarded for this order. */
@@ -86,6 +89,7 @@ export const WORKFLOW_LABELS: Record<WorkflowStage | "cancelled", string> = {
   ready: "Pronto",
   out: "Saiu para Entrega",
   done: "Entregue",
+  finalized: "Finalizado",
   cancelled: "Recusado",
 };
 
@@ -98,6 +102,7 @@ export const WORKFLOW_TO_STATUS: Record<WorkflowStage, "new" | "preparing" | "de
   ready: "preparing",
   out: "delivery",
   done: "done",
+  finalized: "done", // kept as done in DB — not deleted; board hides finalized
 };
 
 const META_RE = /<!--BGN_META:([\s\S]*?):BGN_META-->/;
@@ -132,6 +137,7 @@ export function serializeOrderNotes(publicNotes: string, meta: OrderMeta): strin
   if (meta.rejectReason) cleanMeta.rejectReason = meta.rejectReason;
   if (meta.review) cleanMeta.review = meta.review;
   if (meta.deliveredAt) cleanMeta.deliveredAt = meta.deliveredAt;
+  if (meta.finalizedAt) cleanMeta.finalizedAt = meta.finalizedAt;
   if (typeof meta.clientMemberId === "number") cleanMeta.clientMemberId = meta.clientMemberId;
   if (meta.stampsAwarded) cleanMeta.stampsAwarded = true;
   if (meta.stampSkipped) cleanMeta.stampSkipped = true;
@@ -224,6 +230,8 @@ export function buildCustomerNotifyMessage(
       return `Olá ${name}! Seu pedido #${orderNumber} saiu para entrega. — The Burger GN`;
     case "done":
       return `Olá ${name}! Seu pedido #${orderNumber} foi entregue. Bom apetite! — The Burger GN`;
+    case "finalized":
+      return `Olá ${name}! Seu pedido #${orderNumber} foi concluído. Obrigado pela preferência! — The Burger GN`;
     case "cancelled":
       return `Olá ${name}! Infelizmente seu pedido #${orderNumber} foi recusado.${
         rejectReason ? ` Motivo: ${rejectReason}.` : ""

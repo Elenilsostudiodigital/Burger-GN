@@ -18,7 +18,7 @@ import {
   LayoutDashboard, UtensilsCrossed, LogOut, Bell, BellOff,
   Printer, Clock, MessageCircle, History,
   XCircle, Tag, MapPin, Navigation, Settings, Route, Upload, TrendingUp,
-  ChevronLeft, ChevronRight, GripVertical, X, Crown, Filter, ImageIcon, CheckCircle2, Check, Ban, Star, Users, Plus,
+  ChevronLeft, ChevronRight, GripVertical, X, Crown, Filter, ImageIcon, CheckCircle2, Check, Ban, Star, Users, Plus, PackageCheck,
 } from 'lucide-react';
 import { PrepCountdown, prepCardBorderClass } from '../../components/PrepCountdown';
 import { AreaAnalysisRequestCard } from '../../components/AreaAnalysisRequestCard';
@@ -80,8 +80,10 @@ function canAcceptOrder(order: Order): boolean {
 }
 
 /** Pix without receipt stays off the board until the customer sends proof.
- *  Attendant (Novo Pedido) orders appear immediately, including PIX awaiting payment. */
+ *  Attendant (Novo Pedido) orders appear immediately, including PIX awaiting payment.
+ *  Finalized orders leave the operational board (Pedidos Finalizados). */
 function isVisibleOnBoard(order: Order): boolean {
+  if (order.workflow === 'finalized') return false;
   if (order.status === 'cancelled') return true;
   if (order.source === 'attendant') return true;
   if (order.paymentMethod === 'pix' && order.workflow === 'awaiting_payment' && !orderHasReceipt(order)) {
@@ -111,6 +113,7 @@ function playBeep() {
 }
 
 function getBoardColumn(order: Order): ColumnKey | 'cancelled' {
+  if (order.workflow === 'finalized') return 'cancelled'; // unused — hidden by isVisibleOnBoard
   if (order.status === 'cancelled') return 'cancelled';
   const wf = order.workflow === 'accepted' ? 'preparing' : order.workflow;
   if (wf === 'awaiting_payment') return 'new';
@@ -167,7 +170,7 @@ function buildReceiptHTML(order: Order): string {
   </body></html>`;
 }
 
-function OrderCard({ order, highlight, dragging, onAccept, onRefuse, onAdvance, onBack, onConfirmPayment, onRefuseReceipt }: {
+function OrderCard({ order, highlight, dragging, onAccept, onRefuse, onAdvance, onBack, onConfirmPayment, onRefuseReceipt, onFinalize }: {
   order: Order; highlight: boolean; dragging?: boolean;
   onAccept: (order: Order) => void;
   onRefuse: (order: Order) => void;
@@ -175,6 +178,7 @@ function OrderCard({ order, highlight, dragging, onAccept, onRefuse, onAdvance, 
   onBack: (order: Order, workflow: ColumnKey) => void;
   onConfirmPayment: (order: Order) => void;
   onRefuseReceipt: (order: Order) => void;
+  onFinalize: (order: Order) => void;
 }) {
   const [updating, setUpdating] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
@@ -187,7 +191,8 @@ function OrderCard({ order, highlight, dragging, onAccept, onRefuse, onAdvance, 
   const lastChange = order.history?.length ? order.history[order.history.length - 1] : null;
   const awaitingPay = needsPaymentConference(order);
   const isPending = column === 'new' && !awaitingPay && canAcceptOrder(order);
-  const dragDisabled = column === 'cancelled' || awaitingPay || (column === 'new' && !canAcceptOrder(order));
+  const isDelivered = column === 'done';
+  const dragDisabled = column === 'cancelled' || isDelivered || awaitingPay || (column === 'new' && !canAcceptOrder(order));
   const showPrepTimer = !!order.prepStartedAt && (column === 'preparing' || column === 'ready' || !!order.prepFinishedAt);
 
   useEffect(() => {
@@ -400,7 +405,20 @@ function OrderCard({ order, highlight, dragging, onAccept, onRefuse, onAdvance, 
         </div>
       )}
 
-      {!isPending && column !== 'cancelled' && (
+      {!isPending && column !== 'cancelled' && isDelivered && (
+        <div className="p-3 pt-2">
+          <button
+            type="button"
+            onClick={() => run(() => onFinalize(order))}
+            disabled={updating}
+            className="w-full h-11 rounded-xl font-black text-sm uppercase tracking-wide bg-violet-600 hover:bg-violet-500 text-white flex items-center justify-center gap-2 disabled:opacity-50"
+          >
+            <CheckCircle2 size={16} /> Finalizar Pedido
+          </button>
+        </div>
+      )}
+
+      {!isPending && column !== 'cancelled' && !isDelivered && (
         <div className="p-3 pt-2 flex items-center gap-1.5 flex-wrap">
           {WHATSAPP_EXTERNAL_ENABLED && (
             <button onClick={() => {
@@ -502,7 +520,7 @@ function OrderCard({ order, highlight, dragging, onAccept, onRefuse, onAdvance, 
   );
 }
 
-function Column({ col, orders, newOrderIds, onAccept, onRefuse, onAdvance, onBack, onConfirmPayment, onRefuseReceipt }: {
+function Column({ col, orders, newOrderIds, onAccept, onRefuse, onAdvance, onBack, onConfirmPayment, onRefuseReceipt, onFinalize }: {
   col: ColumnDef; orders: Order[]; newOrderIds: Set<number>;
   onAccept: (order: Order) => void;
   onRefuse: (order: Order) => void;
@@ -510,6 +528,7 @@ function Column({ col, orders, newOrderIds, onAccept, onRefuse, onAdvance, onBac
   onBack: (order: Order, workflow: ColumnKey) => void;
   onConfirmPayment: (order: Order) => void;
   onRefuseReceipt: (order: Order) => void;
+  onFinalize: (order: Order) => void;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: col.key });
   return (
@@ -534,7 +553,7 @@ function Column({ col, orders, newOrderIds, onAccept, onRefuse, onAdvance, onBac
         ) : orders.map(order => (
           <OrderCard key={order.id} order={order} highlight={newOrderIds.has(order.id)}
             onAccept={onAccept} onRefuse={onRefuse} onAdvance={onAdvance} onBack={onBack}
-            onConfirmPayment={onConfirmPayment} onRefuseReceipt={onRefuseReceipt} />
+            onConfirmPayment={onConfirmPayment} onRefuseReceipt={onRefuseReceipt} onFinalize={onFinalize} />
         ))}
       </div>
     </div>
@@ -772,6 +791,18 @@ export default function AdminDashboard() {
     }
   };
 
+  const handleFinalize = async (order: Order) => {
+    try {
+      const updated = await updateOrderWorkflow(order.id, 'finalized');
+      // Remove immediately from operational board (finalized is filtered out).
+      setOrders((prev) => prev.map((o) => (o.id === order.id ? { ...o, ...updated } : o)));
+      setNotification(`Pedido #${order.orderNumber} finalizado`);
+      setTimeout(() => setNotification(null), 3500);
+    } catch {
+      fetchOrders();
+    }
+  };
+
   const openRefuse = (order: Order) => {
     setRefuseOrder(order);
     setRejectReason('');
@@ -839,7 +870,12 @@ export default function AdminDashboard() {
   }, [orders]);
 
   const cancelledOrders = useMemo(() => orders.filter(o => o.status === 'cancelled'), [orders]);
-  const activeCount = orders.filter(o => o.status !== 'cancelled' && o.status !== 'done').length;
+  const activeCount = orders.filter(o =>
+    o.status !== 'cancelled' && o.workflow !== 'finalized' && o.status !== 'done' && o.workflow !== 'done',
+  ).length;
+  // Board "total" should reflect operational orders only (not finalized archive).
+  const boardOrders = useMemo(() => orders.filter(isVisibleOnBoard), [orders]);
+  const operationalTotal = boardOrders.filter(o => o.status !== 'cancelled').length;
   const newCount = ordersByColumn.new.length;
   const receiptPending = orders.filter(o => orderHasReceipt(o) && o.paymentStatus !== 'paid').length;
   const visibleColumns = filter === 'all' ? COLUMNS : COLUMNS.filter(c => c.key === filter);
@@ -890,8 +926,8 @@ export default function AdminDashboard() {
               <p className="text-zinc-600 text-[9px] uppercase mt-0.5">Em andamento</p>
             </div>
             <div className="text-center border-l border-zinc-800 pl-4">
-              <p className="text-lg font-black text-white leading-none">{orders.length}</p>
-              <p className="text-zinc-600 text-[9px] uppercase mt-0.5">Total</p>
+              <p className="text-lg font-black text-white leading-none">{operationalTotal}</p>
+              <p className="text-zinc-600 text-[9px] uppercase mt-0.5">Ativos</p>
             </div>
             {receiptPending > 0 && (
               <div className="text-center border-l border-zinc-800 pl-4">
@@ -902,6 +938,14 @@ export default function AdminDashboard() {
           </div>
 
           <div className="flex items-center gap-1 shrink-0">
+            <Link
+              href="/admin/pedidos-finalizados"
+              className="hidden sm:inline-flex items-center gap-1.5 mr-1 px-3 py-1.5 rounded-full bg-violet-600/20 border border-violet-700/40 text-violet-300 text-[10px] font-black uppercase tracking-wider hover:bg-violet-600/30"
+              title="Pedidos finalizados"
+            >
+              <PackageCheck size={14} />
+              Finalizados
+            </Link>
             <Link
               href="/admin/novo-pedido"
               className="hidden sm:inline-flex items-center gap-1.5 mr-1 px-3 py-1.5 rounded-full bg-amber-500 text-zinc-950 text-[10px] font-black uppercase tracking-wider hover:bg-amber-400"
@@ -940,7 +984,7 @@ export default function AdminDashboard() {
           <Filter size={14} className="text-zinc-600 shrink-0" />
           <button type="button" onClick={() => setFilter('all')}
             className={`shrink-0 px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${filter === 'all' ? 'bg-amber-500 text-zinc-950' : 'bg-zinc-900 text-zinc-500 border border-zinc-800'}`}>
-            Todos ({orders.filter(o => o.status !== 'cancelled').length})
+            Todos ({operationalTotal})
           </button>
           {COLUMNS.map(col => (
             <button key={col.key} type="button" onClick={() => setFilter(col.key)}
@@ -1006,7 +1050,7 @@ export default function AdminDashboard() {
               {visibleColumns.map(col => (
                 <Column key={col.key} col={col} orders={ordersByColumn[col.key]} newOrderIds={newOrderIds}
                   onAccept={handleAccept} onRefuse={openRefuse} onAdvance={handleAdvance} onBack={handleBack}
-                  onConfirmPayment={handleConfirmPayment} onRefuseReceipt={openRefuseReceipt} />
+                  onConfirmPayment={handleConfirmPayment} onRefuseReceipt={openRefuseReceipt} onFinalize={handleFinalize} />
               ))}
             </div>
             <DragOverlay>
@@ -1014,7 +1058,7 @@ export default function AdminDashboard() {
                 <div className="w-[300px] rotate-2">
                   <OrderCard order={activeDragOrder} highlight={false} dragging
                     onAccept={handleAccept} onRefuse={openRefuse} onAdvance={handleAdvance} onBack={handleBack}
-                    onConfirmPayment={handleConfirmPayment} onRefuseReceipt={openRefuseReceipt} />
+                    onConfirmPayment={handleConfirmPayment} onRefuseReceipt={openRefuseReceipt} onFinalize={handleFinalize} />
                 </div>
               )}
             </DragOverlay>
@@ -1140,7 +1184,7 @@ export default function AdminDashboard() {
                 <div key={order.id} className="mb-3">
                   <OrderCard order={order} highlight={false}
                     onAccept={handleAccept} onRefuse={openRefuse} onAdvance={handleAdvance} onBack={handleBack}
-                    onConfirmPayment={handleConfirmPayment} onRefuseReceipt={openRefuseReceipt} />
+                    onConfirmPayment={handleConfirmPayment} onRefuseReceipt={openRefuseReceipt} onFinalize={handleFinalize} />
                 </div>
               ))}
             </div>
@@ -1152,6 +1196,7 @@ export default function AdminDashboard() {
           {[
             { href: '/admin', icon: TrendingUp, label: 'Início', active: false },
             { href: '/admin/pedidos', icon: LayoutDashboard, label: 'Pedidos', active: true },
+            { href: '/admin/pedidos-finalizados', icon: PackageCheck, label: 'Finalizados', active: false },
             { href: '/admin/clientes', icon: Users, label: 'Clientes', active: false },
             { href: '/admin/avaliacoes', icon: Star, label: 'Avaliações', active: false },
             { href: '/admin/cardapio', icon: UtensilsCrossed, label: 'Cardápio' },

@@ -43,7 +43,7 @@ import crypto from "node:crypto";
 const router = Router();
 
 const WORKFLOW_VALUES: WorkflowStage[] = [
-  "awaiting_payment", "new", "accepted", "preparing", "ready", "out", "done",
+  "awaiting_payment", "new", "accepted", "preparing", "ready", "out", "done", "finalized",
 ];
 
 const RECEIPT_MIME_RE = /^data:image\/(png|jpe?g|webp);base64,/i;
@@ -72,6 +72,7 @@ function enrichOrder<T extends { notes: string; status: string }>(
     rejectReason: meta.rejectReason ?? null,
     review: meta.review ?? null,
     deliveredAt: meta.deliveredAt ?? null,
+    finalizedAt: meta.finalizedAt ?? null,
     history: meta.history ?? [],
     pixMode: meta.pixMode ?? null,
     pixCopyPaste: meta.pixCopyPaste ?? null,
@@ -869,6 +870,7 @@ router.patch("/orders/:id/status", requireCompanyAuth, async (req, res) => {
     if (!existing) { res.status(404).json({ error: "Not found" }); return; }
 
     const { publicNotes, meta } = parseOrderNotes(existing.notes);
+    const currentWorkflow = resolveWorkflow(existing.status, meta);
     let nextStatus = existing.status as "new" | "preparing" | "delivery" | "done" | "cancelled";
     let nextMeta = { ...meta };
     let notifyStage: WorkflowStage | "cancelled" | null = null;
@@ -879,12 +881,33 @@ router.patch("/orders/:id/status", requireCompanyAuth, async (req, res) => {
       requestedWorkflow = "preparing";
     }
 
+    // Finalized orders are closed — never return to operational stages.
+    if (
+      currentWorkflow === "finalized"
+      && requestedWorkflow
+      && requestedWorkflow !== "finalized"
+    ) {
+      res.status(400).json({
+        error: "Pedido finalizado não pode voltar ao fluxo operacional.",
+      });
+      return;
+    }
+
+    // Finalize only from Entregue (done), or idempotent re-finalize.
+    if (requestedWorkflow === "finalized" && currentWorkflow !== "done" && currentWorkflow !== "finalized") {
+      res.status(400).json({
+        error: "Só é possível finalizar pedidos com status Entregue.",
+      });
+      return;
+    }
+
     // Pix: kitchen accept only after admin confirms payment manually.
     const advancingToKitchen =
       requestedWorkflow === "preparing" ||
       requestedWorkflow === "ready" ||
       requestedWorkflow === "out" ||
       requestedWorkflow === "done" ||
+      requestedWorkflow === "finalized" ||
       body.status === "preparing" ||
       body.status === "delivery" ||
       body.status === "done";
@@ -900,6 +923,12 @@ router.patch("/orders/:id/status", requireCompanyAuth, async (req, res) => {
     }
 
     if (requestedWorkflow === "cancelled" || body.status === "cancelled") {
+      if (currentWorkflow === "finalized") {
+        res.status(400).json({
+          error: "Pedido finalizado não pode ser alterado.",
+        });
+        return;
+      }
       const reason = typeof body.rejectReason === "string" ? body.rejectReason.trim() : "";
       if (!reason) {
         res.status(400).json({ error: "Informe o motivo da recusa do pedido." });
@@ -917,18 +946,27 @@ router.patch("/orders/:id/status", requireCompanyAuth, async (req, res) => {
       nextStatus = WORKFLOW_TO_STATUS[wf];
       nextMeta = appendHistory(nextMeta, wf);
       nextMeta.workflow = wf;
-      notifyStage = wf;
-      if (wf === "done" && !nextMeta.deliveredAt) {
+      notifyStage = wf === "finalized" ? null : wf;
+      if ((wf === "done" || wf === "finalized") && !nextMeta.deliveredAt) {
         nextMeta.deliveredAt = new Date().toISOString();
+      }
+      if (wf === "finalized" && !nextMeta.finalizedAt) {
+        nextMeta.finalizedAt = new Date().toISOString();
       }
       if (wf === "preparing") {
         const times = await loadCompanyPrepTimes(req.companyId!);
         nextMeta = startPrepTimer(nextMeta, times);
       }
-      if (wf === "ready" || wf === "out" || wf === "done") {
+      if (wf === "ready" || wf === "out" || wf === "done" || wf === "finalized") {
         nextMeta = finishPrepTimer(nextMeta);
       }
     } else if (body.status && ["new", "preparing", "delivery", "done"].includes(body.status)) {
+      if (currentWorkflow === "finalized") {
+        res.status(400).json({
+          error: "Pedido finalizado não pode voltar ao fluxo operacional.",
+        });
+        return;
+      }
       nextStatus = body.status;
       const mapped: WorkflowStage =
         body.status === "new" ? "new" :

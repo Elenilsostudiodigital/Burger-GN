@@ -20,6 +20,7 @@ import { AdminPanelScroll } from "./components/AdminPanelScroll";
 import AdminLogin from "./pages/admin/Login";
 import AdminSalesDashboard from "./pages/admin/SalesDashboard";
 import AdminDashboard from "./pages/admin/Dashboard";
+import AdminFinalizedOrders from "./pages/admin/FinalizedOrders";
 import AdminNewOrder from "./pages/admin/NewOrder";
 import AdminMenuAdmin from "./pages/admin/MenuAdmin";
 import AdminCoupons from "./pages/admin/Coupons";
@@ -81,6 +82,12 @@ function AdminNovasRuasRoute() {
 function AdminSettingsHubRoute() {
   return <ProtectedAdminRoute component={AdminSettingsHub} />;
 }
+function AdminFinalizedOrdersRoute() {
+  return <ProtectedAdminRoute component={AdminFinalizedOrders} />;
+}
+function AdminPedidosRoute() {
+  return <ProtectedAdminRoute component={AdminDashboard} />;
+}
 
 function Router() {
   return (
@@ -98,7 +105,8 @@ function Router() {
 
         {/* Admin routes */}
         <Route path="/admin/login" component={AdminLogin} />
-        <Route path="/admin/pedidos" component={() => <ProtectedAdminRoute component={AdminDashboard} />} />
+        <Route path="/admin/pedidos-finalizados" component={AdminFinalizedOrdersRoute} />
+        <Route path="/admin/pedidos" component={AdminPedidosRoute} />
         <Route path="/admin/novo-pedido" component={() => <ProtectedAdminRoute component={AdminNewOrder} />} />
         <Route path="/admin/cardapio" component={() => <ProtectedAdminRoute component={AdminMenuAdmin} />} />
         <Route path="/admin/financeiro" component={() => <ProtectedAdminRoute component={AdminFinancial} />} />

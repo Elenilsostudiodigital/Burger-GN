@@ -46,7 +46,7 @@ const TIMELINE: Array<{ key: TimelineKey; label: string; emoji: string }> = [
 function resolveTimelineIndex(order: Order): number {
   if (order.status === 'cancelled') return -1;
   const wf = order.workflow === 'accepted' ? 'preparing' : order.workflow;
-  if (wf === 'done' || order.status === 'done') return 5;
+  if (wf === 'done' || wf === 'finalized' || order.status === 'done') return 5;
   if (wf === 'out' || order.status === 'delivery') return 4;
   if (wf === 'ready') return 3;
   if (wf === 'preparing') return 2;

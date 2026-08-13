@@ -2,13 +2,14 @@ import { Link } from 'wouter';
 import { useEffect, useState } from 'react';
 import {
   LayoutDashboard, UtensilsCrossed, Tag, MapPin, Settings, Crown,
-  TrendingUp, Star, Upload, Navigation, Users, BarChart3,
+  TrendingUp, Star, Upload, Navigation, Users, BarChart3, PackageCheck,
 } from 'lucide-react';
 import { getAdminStreetRequests } from '../lib/api';
 
 const ITEMS = [
   { href: '/admin', icon: BarChart3, label: 'Início' },
   { href: '/admin/pedidos', icon: LayoutDashboard, label: 'Pedidos' },
+  { href: '/admin/pedidos-finalizados', icon: PackageCheck, label: 'Finalizados' },
   { href: '/admin/clientes', icon: Users, label: 'Clientes' },
   { href: '/admin/avaliacoes', icon: Star, label: 'Avaliações' },
   { href: '/admin/cardapio', icon: UtensilsCrossed, label: 'Cardápio' },
@@ -51,7 +52,10 @@ export function AdminBottomNav({ active }: { active: string }) {
       <div className="max-w-2xl mx-auto flex overflow-x-auto no-scrollbar">
         {ITEMS.map((item) => {
           const isActive = active === item.href
-            || (item.href !== '/admin' && active.startsWith(item.href));
+            || (item.href !== '/admin'
+              && item.href !== '/admin/pedidos'
+              && active.startsWith(item.href))
+            || (item.href === '/admin/pedidos' && active === '/admin/pedidos');
           return (
             <Link key={item.href} href={item.href} className="flex-1 min-w-[64px]">
               <div className={`relative flex flex-col items-center gap-0.5 py-2.5 ${

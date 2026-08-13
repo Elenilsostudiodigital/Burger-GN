@@ -748,7 +748,7 @@ export async function reverseGeocode(lat: number, lng: number): Promise<ReverseG
 
 // ── Orders ────────────────────────────────────────────────────────────────────
 export type OrderStatus = "new" | "preparing" | "delivery" | "done" | "cancelled";
-export type WorkflowStage = "awaiting_payment" | "new" | "accepted" | "preparing" | "ready" | "out" | "done";
+export type WorkflowStage = "awaiting_payment" | "new" | "accepted" | "preparing" | "ready" | "out" | "done" | "finalized";
 export type OrderType = "delivery" | "pickup" | "local";
 export type PaymentMethod = "pix" | "cash" | "card";
 export type PixMode = "online" | "manual";
@@ -777,6 +777,7 @@ export interface Order {
   rejectReason?: string | null;
   review?: OrderReview | null;
   deliveredAt?: string | null;
+  finalizedAt?: string | null;
   history?: StatusHistoryEntry[];
   pixMode?: PixMode | null;
   pixCopyPaste?: string | null;
@@ -1062,6 +1063,8 @@ export function buildCustomerNotifyMessage(
       return `Olá ${name}! Seu pedido #${orderNumber} saiu para entrega. — The Burger GN`;
     case "done":
       return `Olá ${name}! Seu pedido #${orderNumber} foi entregue. Bom apetite! — The Burger GN`;
+    case "finalized":
+      return `Olá ${name}! Seu pedido #${orderNumber} foi concluído. Obrigado pela preferência! — The Burger GN`;
     case "cancelled":
       return `Olá ${name}! Infelizmente seu pedido #${orderNumber} foi recusado.${
         rejectReason ? ` Motivo: ${rejectReason}.` : ""
@@ -1185,6 +1188,7 @@ export const WORKFLOW_LABELS: Record<WorkflowStage | "cancelled", string> = {
   ready: "Pronto",
   out: "Saiu para Entrega",
   done: "Entregue",
+  finalized: "Finalizado",
   cancelled: "Recusado",
 };
 export const PAYMENT_STATUS_LABELS: Record<PaymentStatus, string> = {
