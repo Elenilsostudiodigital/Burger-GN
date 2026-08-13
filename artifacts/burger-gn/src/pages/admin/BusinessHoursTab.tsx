@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   getAdminBusinessHours,
   updateBusinessHours,
@@ -31,6 +31,28 @@ function errMessage(err: unknown, fallback: string) {
   return err instanceof Error && err.message ? err.message : fallback;
 }
 
+/**
+ * Status-only patch — never replaces weeklySchedule.
+ * Open/close used to call a full applyPayload that re-cloned the schedule and
+ * remounted every <input type="time"> while the open/closed banner swapped
+ * structure → React insertBefore crashes in production.
+ */
+function patchStatusFields(
+  prev: BusinessHoursAdmin,
+  payload: BusinessHoursAdmin,
+): BusinessHoursAdmin {
+  return {
+    ...prev,
+    manualMode: payload.manualMode,
+    status: payload.status,
+    exceptionDate: payload.exceptionDate,
+    exceptionClosed: payload.exceptionClosed,
+    exceptionOpen: payload.exceptionOpen,
+    exceptionClose: payload.exceptionClose,
+    updatedAt: payload.updatedAt,
+  };
+}
+
 export function BusinessHoursTab() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -41,10 +63,14 @@ export function BusinessHoursTab() {
   const [exceptionOpen, setExceptionOpen] = useState('18:00');
   const [exceptionClose, setExceptionClose] = useState('23:00');
   const [hasException, setHasException] = useState(false);
+  /** Always-mounted hosts — toggle via CSS, never mount/unmount success/error nodes. */
   const [success, setSuccess] = useState('');
   const [error, setError] = useState('');
+  const successTimer = useRef<number | undefined>(undefined);
+  const transitionTimer = useRef<number | undefined>(undefined);
+  const aliveRef = useRef(true);
 
-  const applyPayload = useCallback((payload: BusinessHoursAdmin) => {
+  const applyFullPayload = useCallback((payload: BusinessHoursAdmin) => {
     setData(payload);
     setSchedule(cloneSchedule(payload.weeklySchedule));
     const today = payload.status.localDate;
@@ -55,57 +81,52 @@ export function BusinessHoursTab() {
     setExceptionClose(payload.exceptionClose || '23:00');
   }, []);
 
+  const applyStatusOnly = useCallback((payload: BusinessHoursAdmin) => {
+    setData((prev) => (prev ? patchStatusFields(prev, payload) : payload));
+  }, []);
+
   const reload = useCallback(async () => {
     const payload = await getAdminBusinessHours();
-    applyPayload(payload);
+    applyFullPayload(payload);
     return payload;
-  }, [applyPayload]);
+  }, [applyFullPayload]);
 
   useEffect(() => {
-    let alive = true;
+    aliveRef.current = true;
     (async () => {
       setLoading(true);
       setError('');
       try {
         await reload();
       } catch {
-        if (alive) setError('Não foi possível carregar o horário de funcionamento');
+        if (aliveRef.current) setError('Não foi possível carregar o horário de funcionamento');
       } finally {
-        if (alive) setLoading(false);
+        if (aliveRef.current) setLoading(false);
       }
     })();
-    return () => { alive = false; };
+    return () => { aliveRef.current = false; };
   }, [reload]);
 
-  // Keep status live: poll + wake exactly at next open/close transition.
+  // Live status poll — stable effect (no teardown on nextTransitionAt changes).
   useEffect(() => {
     if (loading) return;
     let alive = true;
-    let transitionTimer: number | undefined;
+
+    const scheduleTransitionWake = (iso: string | null | undefined) => {
+      window.clearTimeout(transitionTimer.current);
+      if (!iso) return;
+      const at = Date.parse(iso);
+      if (!Number.isFinite(at)) return;
+      const wait = Math.max(500, Math.min(at - Date.now() + 250, 60 * 60 * 1000));
+      transitionTimer.current = window.setTimeout(() => { void tick(); }, wait);
+    };
 
     const tick = async () => {
       try {
         const payload = await getAdminBusinessHours();
         if (!alive) return;
-        // Update live status only — do not clobber in-progress schedule edits.
-        setData((prev) => (prev ? {
-          ...prev,
-          manualMode: payload.manualMode,
-          status: payload.status,
-          exceptionDate: payload.exceptionDate,
-          exceptionClosed: payload.exceptionClosed,
-          exceptionOpen: payload.exceptionOpen,
-          exceptionClose: payload.exceptionClose,
-          updatedAt: payload.updatedAt,
-        } : payload));
-        const at = payload.status.nextTransitionAt
-          ? Date.parse(payload.status.nextTransitionAt)
-          : NaN;
-        if (Number.isFinite(at)) {
-          const wait = Math.max(500, Math.min(at - Date.now() + 250, 60 * 60 * 1000));
-          window.clearTimeout(transitionTimer);
-          transitionTimer = window.setTimeout(() => { void tick(); }, wait);
-        }
+        applyStatusOnly(payload);
+        scheduleTransitionWake(payload.status.nextTransitionAt);
       } catch {
         /* keep last known status */
       }
@@ -115,34 +136,22 @@ export function BusinessHoursTab() {
     const onFocus = () => { void tick(); };
     window.addEventListener('focus', onFocus);
     document.addEventListener('visibilitychange', onFocus);
-
-    if (data?.status.nextTransitionAt) {
-      const at = Date.parse(data.status.nextTransitionAt);
-      if (Number.isFinite(at)) {
-        const wait = Math.max(500, Math.min(at - Date.now() + 250, 60 * 60 * 1000));
-        transitionTimer = window.setTimeout(() => { void tick(); }, wait);
-      }
-    }
+    void tick();
 
     return () => {
       alive = false;
       window.clearInterval(pollId);
-      window.clearTimeout(transitionTimer);
+      window.clearTimeout(transitionTimer.current);
       window.removeEventListener('focus', onFocus);
       document.removeEventListener('visibilitychange', onFocus);
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, data?.status.nextTransitionAt]);
+  }, [loading, applyStatusOnly]);
 
   const labels = data?.weekdayLabels;
   const status = data?.status;
   const isOpen = status?.isOpen === true;
   const manualMode = data?.manualMode ?? 'auto';
-
-  const todayLabel = useMemo(() => {
-    if (!status?.localDate) return 'Hoje';
-    return `Hoje (${status.localDate})`;
-  }, [status?.localDate]);
+  const todayLabel = status?.localDate ? `Hoje (${status.localDate})` : 'Hoje';
 
   const patchDay = (key: WeekdayKey, patch: Partial<BusinessHoursDaySchedule>) => {
     setSchedule((prev) => {
@@ -153,8 +162,11 @@ export function BusinessHoursTab() {
 
   const flash = (msg: string) => {
     setSuccess(msg);
-    window.setTimeout(() => setSuccess(''), 3500);
+    window.clearTimeout(successTimer.current);
+    successTimer.current = window.setTimeout(() => setSuccess(''), 3500);
   };
+
+  useEffect(() => () => window.clearTimeout(successTimer.current), []);
 
   const handleToggleNow = async (action: 'open' | 'close' | 'auto') => {
     setToggling(action);
@@ -164,12 +176,8 @@ export function BusinessHoursTab() {
         action === 'open' ? await openStoreNow()
           : action === 'close' ? await closeStoreNow()
             : await followBusinessHoursSchedule();
-      applyPayload(payload);
-      flash(
-        action === 'open' ? 'Loja aberta agora'
-          : action === 'close' ? 'Loja fechada agora'
-            : 'Seguindo horário automático',
-      );
+      applyStatusOnly(payload);
+      flash('Configurações salvas com sucesso');
     } catch (err) {
       setError(errMessage(err, 'Não foi possível alterar o status da loja'));
     } finally {
@@ -182,14 +190,12 @@ export function BusinessHoursTab() {
     setSaving(true);
     setError('');
     try {
-      // Always return to auto so the saved hours recalculate status immediately.
       const payload = await updateBusinessHours({
         weeklySchedule: schedule,
         manualMode: 'auto',
       });
-      applyPayload(payload);
-      const live = payload.status.isOpen ? 'Loja Aberta' : 'Loja Fechada';
-      flash(`Horário salvo · status recalculado: ${live}`);
+      applyFullPayload(payload);
+      flash('Configurações salvas com sucesso');
     } catch (err) {
       setError(errMessage(err, 'Erro ao salvar horário semanal'));
     } finally {
@@ -209,8 +215,8 @@ export function BusinessHoursTab() {
         exceptionClose: exceptionClosed ? null : exceptionClose,
         manualMode: 'auto',
       });
-      applyPayload(payload);
-      flash(`Exceção salva · ${payload.status.isOpen ? 'Loja Aberta' : 'Loja Fechada'}`);
+      applyFullPayload(payload);
+      flash('Configurações salvas com sucesso');
     } catch (err) {
       setError(errMessage(err, 'Erro ao salvar exceção de hoje'));
     } finally {
@@ -223,8 +229,8 @@ export function BusinessHoursTab() {
     setError('');
     try {
       const payload = await updateBusinessHours({ clearException: true, manualMode: 'auto' });
-      applyPayload(payload);
-      flash('Exceção de hoje removida');
+      applyFullPayload(payload);
+      flash('Configurações salvas com sucesso');
     } catch (err) {
       setError(errMessage(err, 'Erro ao remover exceção'));
     } finally {
@@ -242,11 +248,20 @@ export function BusinessHoursTab() {
 
   return (
     <div className="space-y-5">
-      <div className={`rounded-2xl border p-5 space-y-4 ${isOpen ? 'border-green-800/60 bg-green-950/20' : 'border-red-800/60 bg-red-950/20'}`}>
+      {/* Stable status host: same DOM tree open or closed — only classes/text change. */}
+      <div
+        className={`rounded-2xl border p-5 space-y-4 ${
+          isOpen ? 'border-green-800/60 bg-green-950/20' : 'border-red-800/60 bg-red-950/20'
+        }`}
+      >
         <div className="flex items-start gap-3">
           <Store size={22} className={isOpen ? 'text-green-400' : 'text-red-400'} />
           <div className="min-w-0 flex-1">
-            <p className={`font-black uppercase tracking-wide text-base ${isOpen ? 'text-green-400' : 'text-red-400'}`}>
+            <p
+              className={`font-black uppercase tracking-wide text-base ${
+                isOpen ? 'text-green-400' : 'text-red-400'
+              }`}
+            >
               {isOpen ? '🟢 Loja Aberta' : '🔴 Loja Fechada'}
             </p>
             <p className="text-zinc-400 text-xs mt-1 leading-relaxed">
@@ -255,7 +270,12 @@ export function BusinessHoursTab() {
               {status?.nextCloseTime && isOpen ? ` · Fecha às ${status.nextCloseTime}` : ''}
             </p>
             <p className="text-zinc-600 text-[11px] mt-1">
-              Modo: {manualMode === 'auto' ? 'Automático (horário)' : manualMode === 'open' ? 'Aberta manualmente' : 'Fechada manualmente'}
+              Modo:{' '}
+              {manualMode === 'auto'
+                ? 'Automático (horário)'
+                : manualMode === 'open'
+                  ? 'Aberta manualmente'
+                  : 'Fechada manualmente'}
               {status?.localTime ? ` · Agora ${status.localTime}` : ''}
             </p>
           </div>
@@ -315,35 +335,39 @@ export function BusinessHoursTab() {
                   <button
                     type="button"
                     onClick={() => patchDay(key, { active: !day.active })}
-                    className={`shrink-0 h-8 px-3 rounded-lg text-xs font-bold uppercase ${day.active ? 'bg-green-500/15 text-green-400 border border-green-700/40' : 'bg-zinc-900 text-zinc-500 border border-zinc-800'}`}
+                    className={`shrink-0 h-8 px-3 rounded-lg text-xs font-bold uppercase ${
+                      day.active
+                        ? 'bg-green-500/15 text-green-400 border border-green-700/40'
+                        : 'bg-zinc-900 text-zinc-500 border border-zinc-800'
+                    }`}
                   >
                     {day.active ? 'Ativo' : 'Fechado'}
                   </button>
                 </div>
-                {day.active ? (
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="space-y-1">
-                      <Label className="text-zinc-500 text-[11px]">Abertura</Label>
-                      <Input
-                        type="time"
-                        value={day.open}
-                        onChange={(e) => patchDay(key, { open: e.target.value })}
-                        className="bg-zinc-950 border-zinc-800 text-white h-10 text-sm focus:border-amber-500"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-zinc-500 text-[11px]">Fechamento</Label>
-                      <Input
-                        type="time"
-                        value={day.close}
-                        onChange={(e) => patchDay(key, { close: e.target.value })}
-                        className="bg-zinc-950 border-zinc-800 text-white h-10 text-sm focus:border-amber-500"
-                      />
-                    </div>
+                {/* Time inputs stay mounted — hide inactive days with CSS to avoid remount races. */}
+                <div className={`grid grid-cols-2 gap-2 ${day.active ? '' : 'hidden'}`}>
+                  <div className="space-y-1">
+                    <Label className="text-zinc-500 text-[11px]">Abertura</Label>
+                    <Input
+                      type="time"
+                      value={day.open}
+                      onChange={(e) => patchDay(key, { open: e.target.value })}
+                      className="bg-zinc-950 border-zinc-800 text-white h-10 text-sm focus:border-amber-500"
+                    />
                   </div>
-                ) : (
-                  <p className="text-zinc-600 text-xs">Sem expediente neste dia</p>
-                )}
+                  <div className="space-y-1">
+                    <Label className="text-zinc-500 text-[11px]">Fechamento</Label>
+                    <Input
+                      type="time"
+                      value={day.close}
+                      onChange={(e) => patchDay(key, { close: e.target.value })}
+                      className="bg-zinc-950 border-zinc-800 text-white h-10 text-sm focus:border-amber-500"
+                    />
+                  </div>
+                </div>
+                <p className={`text-zinc-600 text-xs ${day.active ? 'hidden' : ''}`}>
+                  Sem expediente neste dia
+                </p>
               </div>
             );
           })}
@@ -375,41 +399,47 @@ export function BusinessHoursTab() {
           <button
             type="button"
             onClick={() => { setHasException(true); setExceptionClosed(false); }}
-            className={`flex-1 h-10 rounded-xl text-xs font-bold uppercase border ${!exceptionClosed ? 'bg-amber-500/15 text-amber-400 border-amber-700/40' : 'bg-zinc-950 text-zinc-500 border-zinc-800'}`}
+            className={`flex-1 h-10 rounded-xl text-xs font-bold uppercase border ${
+              !exceptionClosed
+                ? 'bg-amber-500/15 text-amber-400 border-amber-700/40'
+                : 'bg-zinc-950 text-zinc-500 border-zinc-800'
+            }`}
           >
             Horário especial
           </button>
           <button
             type="button"
             onClick={() => { setHasException(true); setExceptionClosed(true); }}
-            className={`flex-1 h-10 rounded-xl text-xs font-bold uppercase border ${exceptionClosed ? 'bg-red-500/15 text-red-400 border-red-700/40' : 'bg-zinc-950 text-zinc-500 border-zinc-800'}`}
+            className={`flex-1 h-10 rounded-xl text-xs font-bold uppercase border ${
+              exceptionClosed
+                ? 'bg-red-500/15 text-red-400 border-red-700/40'
+                : 'bg-zinc-950 text-zinc-500 border-zinc-800'
+            }`}
           >
             Hoje fechado
           </button>
         </div>
 
-        {!exceptionClosed && (
-          <div className="grid grid-cols-2 gap-2">
-            <div className="space-y-1">
-              <Label className="text-zinc-500 text-[11px]">Abrir hoje às</Label>
-              <Input
-                type="time"
-                value={exceptionOpen}
-                onChange={(e) => setExceptionOpen(e.target.value)}
-                className="bg-zinc-950 border-zinc-800 text-white h-10 text-sm focus:border-amber-500"
-              />
-            </div>
-            <div className="space-y-1">
-              <Label className="text-zinc-500 text-[11px]">Fechar hoje às</Label>
-              <Input
-                type="time"
-                value={exceptionClose}
-                onChange={(e) => setExceptionClose(e.target.value)}
-                className="bg-zinc-950 border-zinc-800 text-white h-10 text-sm focus:border-amber-500"
-              />
-            </div>
+        <div className={`grid grid-cols-2 gap-2 ${exceptionClosed ? 'hidden' : ''}`}>
+          <div className="space-y-1">
+            <Label className="text-zinc-500 text-[11px]">Abrir hoje às</Label>
+            <Input
+              type="time"
+              value={exceptionOpen}
+              onChange={(e) => setExceptionOpen(e.target.value)}
+              className="bg-zinc-950 border-zinc-800 text-white h-10 text-sm focus:border-amber-500"
+            />
           </div>
-        )}
+          <div className="space-y-1">
+            <Label className="text-zinc-500 text-[11px]">Fechar hoje às</Label>
+            <Input
+              type="time"
+              value={exceptionClose}
+              onChange={(e) => setExceptionClose(e.target.value)}
+              className="bg-zinc-950 border-zinc-800 text-white h-10 text-sm focus:border-amber-500"
+            />
+          </div>
+        </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           <Button
@@ -432,12 +462,18 @@ export function BusinessHoursTab() {
         </div>
       </div>
 
-      {success ? (
-        <p className="text-green-400 text-sm px-1 flex items-center gap-2"><Check size={16} /> {success}</p>
-      ) : null}
-      {error ? (
-        <p className="text-red-400 text-sm px-1 flex items-center gap-2"><X size={16} /> {error}</p>
-      ) : null}
+      <p
+        className={`text-green-400 text-sm px-1 flex items-center gap-2 ${success ? '' : 'invisible'}`}
+        aria-live="polite"
+      >
+        <Check size={16} /> {success || 'Configurações salvas com sucesso'}
+      </p>
+      <p
+        className={`text-red-400 text-sm px-1 flex items-center gap-2 ${error ? '' : 'hidden'}`}
+        aria-live="assertive"
+      >
+        <X size={16} /> {error || 'Erro'}
+      </p>
     </div>
   );
 }
