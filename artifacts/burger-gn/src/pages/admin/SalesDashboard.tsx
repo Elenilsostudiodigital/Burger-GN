@@ -111,6 +111,91 @@ function formatChartLabel(label: string, granularity: string): string {
   return m && d ? `${d}/${m}` : label;
 }
 
+type ChartPoint = { label: string; total: number; orders: number; display: string };
+
+/**
+ * Recharts ResponsiveContainer mutates its own DOM (wrapper + ResizeObserver).
+ * Updating `data` in place (or swapping chart ↔ empty via ternary) while that
+ * host is mounted races React reconciliation → NotFoundError insertBefore.
+ * Contract: fixed-height host; unmount chart while loading; remount with period key.
+ */
+function SalesPeriodChart({
+  chartKey,
+  title,
+  data,
+  loading,
+}: {
+  chartKey: string;
+  title: string;
+  data: ChartPoint[];
+  loading: boolean;
+}) {
+  const hasData = data.some((p) => p.total > 0);
+  const showChart = !loading && hasData;
+
+  return (
+    <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
+      <h2 className="text-white font-black uppercase text-sm mb-3">{title}</h2>
+      <div className="h-56 w-full relative">
+        {loading && (
+          <div className="absolute inset-0 flex items-center justify-center">
+            <Loader2 className="animate-spin text-amber-500" size={24} />
+          </div>
+        )}
+        {!loading && !hasData && (
+          <p className="absolute inset-0 flex items-center justify-center text-zinc-600 text-sm text-center px-4">
+            Sem faturamento no período.
+          </p>
+        )}
+        {showChart ? (
+          <div key={chartKey} className="h-full w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                <defs>
+                  <linearGradient id={`salesFill-${chartKey}`} x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#f59e0b" stopOpacity={0.35} />
+                    <stop offset="100%" stopColor="#f59e0b" stopOpacity={0.02} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid stroke="#27272a" strokeDasharray="3 3" />
+                <XAxis
+                  dataKey="display"
+                  tick={{ fill: '#71717a', fontSize: 10 }}
+                  interval="preserveStartEnd"
+                  minTickGap={16}
+                />
+                <YAxis
+                  tick={{ fill: '#71717a', fontSize: 10 }}
+                  width={48}
+                  tickFormatter={(v) => `${Math.round(Number(v))}`}
+                />
+                <Tooltip
+                  contentStyle={{
+                    background: '#09090b',
+                    border: '1px solid #27272a',
+                    borderRadius: 12,
+                    fontSize: 12,
+                  }}
+                  formatter={(value: number) => [money(Number(value)), 'Faturamento']}
+                  labelFormatter={(l) => String(l)}
+                />
+                <Area
+                  type="monotone"
+                  dataKey="total"
+                  stroke="#f59e0b"
+                  fill={`url(#salesFill-${chartKey})`}
+                  strokeWidth={2}
+                  isAnimationActive={false}
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
 export default function SalesDashboard() {
   const { logout } = useAdmin();
   const [, setLocation] = useLocation();
@@ -149,11 +234,11 @@ export default function SalesDashboard() {
   };
 
   useEffect(() => {
-    load();
+    void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query.preset, query.from, query.to, canLoad]);
 
-  const chartData = useMemo(() => {
+  const chartData = useMemo((): ChartPoint[] => {
     if (!report) return [];
     return report.chart.series.map((p) => ({
       ...p,
@@ -168,6 +253,10 @@ export default function SalesDashboard() {
         ? 'Vendas por mês'
         : 'Vendas por dia';
 
+  const chartKey = report
+    ? `${report.period.preset}:${report.period.from}:${report.period.to}:${report.chart.granularity}`
+    : 'empty';
+
   return (
     <div className="min-h-screen bg-[#0a0a0a] pb-24">
       <header className="sticky top-0 z-40 bg-zinc-950/95 backdrop-blur border-b border-zinc-800 px-4 py-3">
@@ -179,7 +268,7 @@ export default function SalesDashboard() {
           <div className="flex items-center gap-1">
             <button
               type="button"
-              onClick={load}
+              onClick={() => { void load(); }}
               className="p-2 text-zinc-400 hover:text-amber-400"
               aria-label="Atualizar"
             >
@@ -204,7 +293,7 @@ export default function SalesDashboard() {
       </header>
 
       <main className="max-w-3xl mx-auto px-4 py-4 space-y-4">
-        {/* Period filters */}
+        {/* Period filters — custom date row stays mounted (CSS hidden) to avoid sibling insertBefore */}
         <section className="space-y-3">
           <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1 -mx-1 px-1">
             {PRESETS.map((p) => (
@@ -222,41 +311,43 @@ export default function SalesDashboard() {
               </button>
             ))}
           </div>
-          {preset === 'custom' && (
-            <div className="grid grid-cols-2 gap-3 rounded-2xl border border-zinc-800 bg-zinc-900 p-3">
-              <div className="space-y-1">
-                <Label className="text-zinc-500 text-[10px] uppercase font-bold">De</Label>
-                <Input
-                  type="date"
-                  value={customFrom}
-                  onChange={(e) => setCustomFrom(e.target.value)}
-                  className="bg-zinc-950 border-zinc-800 text-white h-10"
-                />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-zinc-500 text-[10px] uppercase font-bold">Até</Label>
-                <Input
-                  type="date"
-                  value={customTo}
-                  onChange={(e) => setCustomTo(e.target.value)}
-                  className="bg-zinc-950 border-zinc-800 text-white h-10"
-                />
-              </div>
+          <div
+            className={`grid grid-cols-2 gap-3 rounded-2xl border border-zinc-800 bg-zinc-900 p-3 ${
+              preset === 'custom' ? '' : 'hidden'
+            }`}
+          >
+            <div className="space-y-1">
+              <Label className="text-zinc-500 text-[10px] uppercase font-bold">De</Label>
+              <Input
+                type="date"
+                value={customFrom}
+                onChange={(e) => setCustomFrom(e.target.value)}
+                className="bg-zinc-950 border-zinc-800 text-white h-10"
+              />
             </div>
-          )}
-          {report && (
-            <p className="text-zinc-500 text-xs">
-              Período: {formatDayBR(report.period.from)}
-              {report.period.from !== report.period.to ? ` – ${formatDayBR(report.period.to)}` : ''}
-            </p>
-          )}
+            <div className="space-y-1">
+              <Label className="text-zinc-500 text-[10px] uppercase font-bold">Até</Label>
+              <Input
+                type="date"
+                value={customTo}
+                onChange={(e) => setCustomTo(e.target.value)}
+                className="bg-zinc-950 border-zinc-800 text-white h-10"
+              />
+            </div>
+          </div>
+          <p className={`text-zinc-500 text-xs ${report ? '' : 'invisible'}`}>
+            Período: {report ? formatDayBR(report.period.from) : '—'}
+            {report && report.period.from !== report.period.to ? ` – ${formatDayBR(report.period.to)}` : ''}
+          </p>
         </section>
 
-        {error && (
-          <div className="rounded-xl border border-red-900 bg-red-950/40 text-red-400 text-sm px-4 py-3">
-            {error}
-          </div>
-        )}
+        <div
+          className={`rounded-xl border border-red-900 bg-red-950/40 text-red-400 text-sm px-4 py-3 ${
+            error ? '' : 'hidden'
+          }`}
+        >
+          {error || '—'}
+        </div>
 
         {loading && !report ? (
           <div className="flex justify-center py-20">
@@ -264,8 +355,8 @@ export default function SalesDashboard() {
           </div>
         ) : report ? (
           <>
-            {/* KPI cards */}
-            <section className="grid grid-cols-2 gap-3">
+            {/* KPI cards — dim while refreshing; keep mounted (no chart race here) */}
+            <section className={`grid grid-cols-2 gap-3 transition-opacity ${loading ? 'opacity-60' : ''}`}>
               <KpiCard
                 icon={<Wallet size={16} />}
                 label={kpiTitle(report.period.preset, 'Faturamento')}
@@ -300,55 +391,12 @@ export default function SalesDashboard() {
               />
             </section>
 
-            {/* Chart */}
-            <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
-              <h2 className="text-white font-black uppercase text-sm mb-3">{chartTitle}</h2>
-              {chartData.every((p) => p.total === 0) ? (
-                <p className="text-zinc-600 text-sm py-10 text-center">Sem faturamento no período.</p>
-              ) : (
-                <div className="h-56 w-full">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-                      <defs>
-                        <linearGradient id="salesFill" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="0%" stopColor="#f59e0b" stopOpacity={0.35} />
-                          <stop offset="100%" stopColor="#f59e0b" stopOpacity={0.02} />
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid stroke="#27272a" strokeDasharray="3 3" />
-                      <XAxis
-                        dataKey="display"
-                        tick={{ fill: '#71717a', fontSize: 10 }}
-                        interval="preserveStartEnd"
-                        minTickGap={16}
-                      />
-                      <YAxis
-                        tick={{ fill: '#71717a', fontSize: 10 }}
-                        width={48}
-                        tickFormatter={(v) => `${Math.round(Number(v))}`}
-                      />
-                      <Tooltip
-                        contentStyle={{
-                          background: '#09090b',
-                          border: '1px solid #27272a',
-                          borderRadius: 12,
-                          fontSize: 12,
-                        }}
-                        formatter={(value: number) => [money(Number(value)), 'Faturamento']}
-                        labelFormatter={(l) => String(l)}
-                      />
-                      <Area
-                        type="monotone"
-                        dataKey="total"
-                        stroke="#f59e0b"
-                        fill="url(#salesFill)"
-                        strokeWidth={2}
-                      />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                </div>
-              )}
-            </section>
+            <SalesPeriodChart
+              chartKey={chartKey}
+              title={chartTitle}
+              data={chartData}
+              loading={loading}
+            />
 
             {/* Orders + customers */}
             <section className="grid grid-cols-1 sm:grid-cols-2 gap-3">
