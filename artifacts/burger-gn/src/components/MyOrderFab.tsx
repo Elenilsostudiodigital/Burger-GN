@@ -60,6 +60,7 @@ export function MyOrderFab() {
   if (
     location.startsWith('/admin') ||
     location.startsWith('/checkout') ||
+    location === '/confirmacao' ||
     location === '/meu-pedido' ||
     location.startsWith('/pedido/')
   ) {
