@@ -942,6 +942,18 @@ export const adminLogin = (email: string, password: string) =>
   api.post("/admin/login", { email, password });
 export const adminLogout = () => api.post("/admin/logout", {});
 export const adminMe = () => api.get("/admin/me") as Promise<{ authenticated: boolean }>;
+export const adminChangePassword = (d: {
+  currentPassword: string;
+  newPassword: string;
+  confirmPassword: string;
+}) =>
+  api.post("/admin/change-password", d) as Promise<{ ok: boolean; message?: string }>;
+export const adminForgotPassword = (email: string) =>
+  api.post("/admin/forgot-password", { email }) as Promise<{
+    ok: boolean;
+    message?: string;
+    emailDelivery?: string;
+  }>;
 
 // ── WhatsApp Settings ─────────────────────────────────────────────────────────
 export interface WhatsappSettings { id: number; number: string; updatedAt: string; }

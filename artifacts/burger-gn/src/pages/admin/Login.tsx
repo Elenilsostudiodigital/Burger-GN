@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useLocation } from 'wouter';
+import { Link, useLocation } from 'wouter';
 import { motion } from 'framer-motion';
 import { useAdmin } from '../../context/AdminContext';
 import { Lock, Eye, EyeOff, Loader2, Mail } from 'lucide-react';
@@ -106,6 +106,12 @@ export default function AdminLogin() {
             {loading ? <><Loader2 size={20} className="animate-spin mr-2" /> Entrando...</> : 'ENTRAR'}
           </Button>
         </form>
+
+        <p className="text-center mt-5">
+          <Link href="/admin/esqueci-senha" className="text-zinc-500 hover:text-amber-500 text-sm">
+            Esqueci minha senha
+          </Link>
+        </p>
 
         <p className="text-zinc-700 text-xs text-center mt-8">
           Padrão: <span className="text-zinc-500">{DEFAULT_EMAIL}</span> / <span className="text-zinc-500">burger123</span>

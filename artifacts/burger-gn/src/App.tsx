@@ -18,6 +18,8 @@ import ClubeCliente from "./pages/ClubeCliente";
 import { MyOrderFab } from "./components/MyOrderFab";
 import { AdminPanelScroll } from "./components/AdminPanelScroll";
 import AdminLogin from "./pages/admin/Login";
+import AdminForgotPassword from "./pages/admin/ForgotPassword";
+import AdminSecurity from "./pages/admin/Security";
 import AdminSalesDashboard from "./pages/admin/SalesDashboard";
 import AdminDashboard from "./pages/admin/Dashboard";
 import AdminFinalizedOrders from "./pages/admin/FinalizedOrders";
@@ -88,6 +90,9 @@ function AdminFinalizedOrdersRoute() {
 function AdminPedidosRoute() {
   return <ProtectedAdminRoute component={AdminDashboard} />;
 }
+function AdminSecurityRoute() {
+  return <ProtectedAdminRoute component={AdminSecurity} />;
+}
 
 function Router() {
   return (
@@ -105,6 +110,8 @@ function Router() {
 
         {/* Admin routes */}
         <Route path="/admin/login" component={AdminLogin} />
+        <Route path="/admin/esqueci-senha" component={AdminForgotPassword} />
+        <Route path="/admin/seguranca" component={AdminSecurityRoute} />
         <Route path="/admin/pedidos-finalizados" component={AdminFinalizedOrdersRoute} />
         <Route path="/admin/pedidos" component={AdminPedidosRoute} />
         <Route path="/admin/novo-pedido" component={() => <ProtectedAdminRoute component={AdminNewOrder} />} />

@@ -60,6 +60,20 @@ CREATE TABLE IF NOT EXISTS company_users (
 
 CREATE INDEX IF NOT EXISTS company_users_company_id_idx ON company_users(company_id);
 CREATE INDEX IF NOT EXISTS companies_default_storefront_idx ON companies(is_default_storefront);
+
+CREATE TABLE IF NOT EXISTS password_reset_tokens (
+  id SERIAL PRIMARY KEY,
+  company_user_id INTEGER NOT NULL REFERENCES company_users(id) ON DELETE CASCADE,
+  email TEXT NOT NULL,
+  token_hash TEXT NOT NULL,
+  expires_at TIMESTAMP NOT NULL,
+  used_at TIMESTAMP,
+  email_status TEXT NOT NULL DEFAULT 'pending',
+  created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS password_reset_tokens_email_idx ON password_reset_tokens(email);
+CREATE INDEX IF NOT EXISTS password_reset_tokens_user_id_idx ON password_reset_tokens(company_user_id);
 `;
 
 const DEFAULT_SLUG = "burger-gn";

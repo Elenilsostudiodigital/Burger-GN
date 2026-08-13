@@ -40,6 +40,19 @@ export const companyUsersTable = pgTable("company_users", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
+/** Password recovery tokens — email delivery wired later; structure only for now. */
+export const passwordResetTokensTable = pgTable("password_reset_tokens", {
+  id: serial("id").primaryKey(),
+  companyUserId: integer("company_user_id").notNull().references(() => companyUsersTable.id, { onDelete: "cascade" }),
+  email: text("email").notNull(),
+  tokenHash: text("token_hash").notNull(),
+  expiresAt: timestamp("expires_at").notNull(),
+  usedAt: timestamp("used_at"),
+  /** reserved for future email provider status */
+  emailStatus: text("email_status").notNull().default("pending"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
 export const insertCompanySchema = createInsertSchema(companiesTable).omit({
   id: true, createdAt: true, updatedAt: true,
 });
@@ -51,3 +64,4 @@ export type InsertCompany = z.infer<typeof insertCompanySchema>;
 export type Company = typeof companiesTable.$inferSelect;
 export type InsertCompanyUser = z.infer<typeof insertCompanyUserSchema>;
 export type CompanyUser = typeof companyUsersTable.$inferSelect;
+export type PasswordResetToken = typeof passwordResetTokensTable.$inferSelect;
