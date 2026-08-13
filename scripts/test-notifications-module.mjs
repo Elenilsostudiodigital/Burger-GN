@@ -38,9 +38,25 @@ async function waitReady() {
     const cookie = (login.setCookie || []).map((c) => c.split(";")[0]).filter(Boolean).join("; ");
     const r = await json("GET", "/api/admin/notification-settings", null, cookie);
     if (r.status === 200 && r.data && typeof r.data.config === "object") {
-      return { cookie, config: r.data.config };
+      // Probe that v2 fields round-trip (API is schema-free JSON).
+      const probe = await json(
+        "PUT",
+        "/api/admin/notification-settings",
+        {
+          config: {
+            ...(r.data.config || {}),
+            version: 2,
+            masterVolume: 0.5,
+            smartVoicePrepared: true,
+          },
+        },
+        cookie,
+      );
+      if (probe.status === 200 && probe.data?.config?.version === 2) {
+        return { cookie, config: probe.data.config };
+      }
     }
-    console.log("waiting notification-settings...", r.status);
+    console.log("waiting notification-settings v2...", r.status);
     await new Promise((r) => setTimeout(r, 10000));
   }
   throw new Error("notification settings deploy not ready");
