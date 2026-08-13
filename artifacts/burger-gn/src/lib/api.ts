@@ -968,6 +968,8 @@ export interface StoreStatusPublic {
   message: string;
   nextOpenTime: string | null;
   nextOpenLabel: string | null;
+  nextCloseTime?: string | null;
+  nextTransitionAt?: string | null;
   timezone: string;
   manualMode: BusinessHoursManualMode;
   localTime?: string;

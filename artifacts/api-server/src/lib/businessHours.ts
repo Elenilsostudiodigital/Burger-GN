@@ -38,12 +38,15 @@ const WEEKDAY_SHORT_TO_KEY: Record<string, WeekdayKey> = {
   sun: "sunday",
 };
 
-/** Safe always-open default so deploy does not accidentally close the storefront. */
+/**
+ * Default: every day closed until the admin configures hours.
+ * Never invent an always-open day.
+ */
 export function defaultWeeklySchedule(): WeeklySchedule {
   const day = (): BusinessHoursDaySchedule => ({
-    active: true,
-    open: "00:00",
-    close: "23:59",
+    active: false,
+    open: "18:00",
+    close: "23:00",
   });
   return {
     monday: day(),
@@ -56,9 +59,10 @@ export function defaultWeeklySchedule(): WeeklySchedule {
   };
 }
 
+/** Accepts HH:mm or HH:mm:ss from HTML time inputs. */
 export function normalizeTimeHHmm(value: unknown): string | null {
   if (typeof value !== "string") return null;
-  const m = value.trim().match(/^(\d{1,2}):(\d{2})$/);
+  const m = value.trim().match(/^(\d{1,2}):(\d{2})(?::\d{2})?$/);
   if (!m) return null;
   const h = Number(m[1]);
   const min = Number(m[2]);
@@ -75,12 +79,21 @@ export function parseHHmmToMinutes(value: string): number | null {
   return h * 60 + m;
 }
 
+/**
+ * A day is open for business only when explicitly active AND both times are valid.
+ * Missing / invalid hours ⇒ closed (never "Loja Aberta").
+ */
 export function normalizeDaySchedule(raw: unknown): BusinessHoursDaySchedule {
   const obj = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
-  const open = normalizeTimeHHmm(obj.open) ?? "18:00";
-  const close = normalizeTimeHHmm(obj.close) ?? "23:00";
-  const active = obj.active === false ? false : true;
-  return { active, open, close };
+  const open = normalizeTimeHHmm(obj.open);
+  const close = normalizeTimeHHmm(obj.close);
+  const wantsActive = obj.active === true || obj.active === "true" || obj.active === 1;
+  const hasHours = open != null && close != null;
+  return {
+    active: wantsActive && hasHours,
+    open: open ?? "18:00",
+    close: close ?? "23:00",
+  };
 }
 
 export function normalizeWeeklySchedule(raw: unknown): WeeklySchedule {
@@ -135,14 +148,14 @@ export function getStoreLocalNow(now = new Date(), timeZone = STORE_TZ): StoreLo
   };
 }
 
-/** True when `nowMinutes` is inside [open, close). Supports overnight (close <= open). */
+/** Inclusive open, exclusive close for same-day windows. Supports overnight. */
 export function isWithinWindow(nowMinutes: number, open: string, close: string): boolean {
   const openM = parseHHmmToMinutes(open);
   const closeM = parseHHmmToMinutes(close);
   if (openM == null || closeM == null) return false;
-  if (openM === closeM) return true; // 24h window for that day
+  // Identical times are treated as "no real window" → closed (not 24h).
+  if (openM === closeM) return false;
   if (closeM > openM) return nowMinutes >= openM && nowMinutes < closeM;
-  // overnight e.g. 18:00 → 02:00
   return nowMinutes >= openM || nowMinutes < closeM;
 }
 
@@ -153,11 +166,17 @@ function addDaysIso(dateIso: string, days: number): string {
   return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, "0")}-${String(dt.getUTCDate()).padStart(2, "0")}`;
 }
 
-function weekdayForDateIso(dateIso: string): WeekdayKey {
-  // Noon UTC avoids DST edge; Brazil currently has no DST.
+function weekdayForDateIso(dateIso: string, timeZone = STORE_TZ): WeekdayKey {
   const [y, m, d] = dateIso.split("-").map(Number);
   const noonUtc = new Date(Date.UTC(y, m - 1, d, 15, 0, 0));
-  return getStoreLocalNow(noonUtc).weekday;
+  return getStoreLocalNow(noonUtc, timeZone).weekday;
+}
+
+/** Build a Date for YYYY-MM-DD + HH:mm in America/Sao_Paulo (−03). */
+export function zonedDateTimeToUtc(dateIso: string, hhmm: string): Date | null {
+  const time = normalizeTimeHHmm(hhmm);
+  if (!time || !/^\d{4}-\d{2}-\d{2}$/.test(dateIso)) return null;
+  return new Date(`${dateIso}T${time}:00-03:00`);
 }
 
 export type StoreStatusReason =
@@ -174,6 +193,8 @@ export interface EffectiveDayHours {
   close: string;
   source: "schedule" | "exception";
   closedAllDay: boolean;
+  /** True when the weekday has no usable open/close window. */
+  hasHours: boolean;
 }
 
 export function resolveEffectiveDayHours(
@@ -195,25 +216,43 @@ export function resolveEffectiveDayHours(
         close: day.close,
         source: "exception",
         closedAllDay: true,
+        hasHours: false,
       };
     }
-    const open = normalizeTimeHHmm(settings.exceptionOpen) ?? day.open;
-    const close = normalizeTimeHHmm(settings.exceptionClose) ?? day.close;
+    const open = normalizeTimeHHmm(settings.exceptionOpen);
+    const close = normalizeTimeHHmm(settings.exceptionClose);
+    const hasHours = open != null && close != null && open !== close;
+    if (!hasHours) {
+      return {
+        active: false,
+        open: open ?? day.open,
+        close: close ?? day.close,
+        source: "exception",
+        closedAllDay: true,
+        hasHours: false,
+      };
+    }
     return {
       active: true,
-      open,
-      close,
+      open: open!,
+      close: close!,
       source: "exception",
       closedAllDay: false,
+      hasHours: true,
     };
   }
 
+  const hasHours = day.active && day.open !== day.close
+    && normalizeTimeHHmm(day.open) != null
+    && normalizeTimeHHmm(day.close) != null;
+
   return {
-    active: day.active,
+    active: hasHours,
     open: day.open,
     close: day.close,
     source: "schedule",
-    closedAllDay: !day.active,
+    closedAllDay: !hasHours,
+    hasHours,
   };
 }
 
@@ -223,6 +262,9 @@ export interface StoreStatusResult {
   message: string;
   nextOpenTime: string | null;
   nextOpenLabel: string | null;
+  nextCloseTime: string | null;
+  /** ISO timestamp when the evaluated status is expected to flip (auto mode). */
+  nextTransitionAt: string | null;
   timezone: string;
   manualMode: BusinessHoursManualMode;
   localTime: string;
@@ -230,30 +272,49 @@ export interface StoreStatusResult {
   today: EffectiveDayHours;
 }
 
-function findNextOpenTime(
+function findNextOpen(
   settings: BusinessHoursSettings,
   local: StoreLocalNow,
-): string | null {
-  // Later today?
+  timeZone: string,
+): { time: string; at: Date } | null {
   const todayHours = resolveEffectiveDayHours(settings, local.dateIso, local.weekday);
-  if (todayHours.active && !todayHours.closedAllDay) {
+  if (todayHours.hasHours && todayHours.active) {
     const openM = parseHHmmToMinutes(todayHours.open);
-    if (openM != null && local.minutes < openM) return todayHours.open;
-    // Overnight already open earlier — if currently closed and overnight window starts later tonight
-    const closeM = parseHHmmToMinutes(todayHours.close);
-    const openMins = openM ?? 0;
-    if (closeM != null && closeM <= openMins && local.minutes < openMins) {
-      return todayHours.open;
+    if (openM != null && local.minutes < openM) {
+      const at = zonedDateTimeToUtc(local.dateIso, todayHours.open);
+      if (at) return { time: todayHours.open, at };
     }
   }
 
   for (let i = 1; i <= 7; i++) {
     const dateIso = addDaysIso(local.dateIso, i);
-    const weekday = weekdayForDateIso(dateIso);
+    const weekday = weekdayForDateIso(dateIso, timeZone);
     const hours = resolveEffectiveDayHours(settings, dateIso, weekday);
-    if (hours.active && !hours.closedAllDay) return hours.open;
+    if (hours.hasHours && hours.active) {
+      const at = zonedDateTimeToUtc(dateIso, hours.open);
+      if (at) return { time: hours.open, at };
+    }
   }
   return null;
+}
+
+function findNextClose(
+  settings: BusinessHoursSettings,
+  local: StoreLocalNow,
+  today: EffectiveDayHours,
+): { time: string; at: Date } | null {
+  if (!today.hasHours || !today.active) return null;
+  if (!isWithinWindow(local.minutes, today.open, today.close)) return null;
+
+  const openM = parseHHmmToMinutes(today.open)!;
+  const closeM = parseHHmmToMinutes(today.close)!;
+  if (closeM > openM) {
+    const at = zonedDateTimeToUtc(local.dateIso, today.close);
+    return at ? { time: today.close, at } : null;
+  }
+  // Overnight: close is on the next calendar day.
+  const at = zonedDateTimeToUtc(addDaysIso(local.dateIso, 1), today.close);
+  return at ? { time: today.close, at } : null;
 }
 
 export function evaluateStoreStatus(
@@ -272,6 +333,8 @@ export function evaluateStoreStatus(
       message: "No momento não estamos aceitando pedidos.",
       nextOpenTime: null,
       nextOpenLabel: null,
+      nextCloseTime: null,
+      nextTransitionAt: null,
       timezone,
       manualMode,
       localTime: local.timeHHmm,
@@ -287,6 +350,8 @@ export function evaluateStoreStatus(
       message: "Loja aberta",
       nextOpenTime: null,
       nextOpenLabel: null,
+      nextCloseTime: null,
+      nextTransitionAt: null,
       timezone,
       manualMode,
       localTime: local.timeHHmm,
@@ -295,14 +360,17 @@ export function evaluateStoreStatus(
     };
   }
 
-  if (today.closedAllDay || !today.active) {
-    const next = findNextOpenTime(settings, local);
+  // Auto mode — schedule is the single source of truth.
+  if (!today.hasHours || today.closedAllDay || !today.active) {
+    const next = findNextOpen(settings, local, timezone);
     return {
       isOpen: false,
       reason: today.source === "exception" ? "exception_closed" : "day_closed",
       message: "Estamos fechados no momento.",
-      nextOpenTime: next,
-      nextOpenLabel: next ? `Voltaremos às ${next}` : null,
+      nextOpenTime: next?.time ?? null,
+      nextOpenLabel: next ? `Voltaremos às ${next.time}` : null,
+      nextCloseTime: null,
+      nextTransitionAt: next?.at.toISOString() ?? null,
       timezone,
       manualMode,
       localTime: local.timeHHmm,
@@ -312,12 +380,15 @@ export function evaluateStoreStatus(
   }
 
   if (isWithinWindow(local.minutes, today.open, today.close)) {
+    const nextClose = findNextClose(settings, local, today);
     return {
       isOpen: true,
       reason: "schedule_open",
       message: "Loja aberta",
       nextOpenTime: null,
       nextOpenLabel: null,
+      nextCloseTime: nextClose?.time ?? null,
+      nextTransitionAt: nextClose?.at.toISOString() ?? null,
       timezone,
       manualMode,
       localTime: local.timeHHmm,
@@ -326,13 +397,15 @@ export function evaluateStoreStatus(
     };
   }
 
-  const next = findNextOpenTime(settings, local);
+  const next = findNextOpen(settings, local, timezone);
   return {
     isOpen: false,
     reason: "outside_hours",
     message: "Estamos fechados no momento.",
-    nextOpenTime: next,
-    nextOpenLabel: next ? `Voltaremos às ${next}` : null,
+    nextOpenTime: next?.time ?? null,
+    nextOpenLabel: next ? `Voltaremos às ${next.time}` : null,
+    nextCloseTime: null,
+    nextTransitionAt: next?.at.toISOString() ?? null,
     timezone,
     manualMode,
     localTime: local.timeHHmm,

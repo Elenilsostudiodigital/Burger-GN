@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { getStoreStatus, StoreStatusPublic } from '../lib/api';
 import { AlertCircle } from 'lucide-react';
 
-const POLL_MS = 30_000;
+const POLL_MS = 15_000;
 
 export function useStoreStatus(poll = true) {
   const [status, setStatus] = useState<StoreStatusPublic | null>(null);
@@ -10,26 +10,57 @@ export function useStoreStatus(poll = true) {
 
   useEffect(() => {
     let alive = true;
+    let transitionTimer: number | undefined;
+    let pollId: number | undefined;
+
     const load = async () => {
       try {
         const s = await getStoreStatus();
-        if (alive) setStatus(s);
+        if (!alive) return;
+        setStatus(s);
+
+        if (poll && s.nextTransitionAt) {
+          const at = Date.parse(s.nextTransitionAt);
+          if (Number.isFinite(at)) {
+            const wait = Math.max(500, Math.min(at - Date.now() + 250, 60 * 60 * 1000));
+            window.clearTimeout(transitionTimer);
+            transitionTimer = window.setTimeout(() => { void load(); }, wait);
+          }
+        }
       } catch {
-        /* fail-open for UX if status endpoint blips; API still guards orders */
+        /* fail-closed for ordering UX once we know the endpoint exists;
+           while unknown, leave last status. API still guards POST /orders. */
       } finally {
         if (alive) setLoading(false);
       }
     };
+
     void load();
-    if (!poll) return () => { alive = false; };
-    const id = window.setInterval(load, POLL_MS);
+    if (poll) {
+      pollId = window.setInterval(() => { void load(); }, POLL_MS);
+      const onFocus = () => { void load(); };
+      window.addEventListener('focus', onFocus);
+      document.addEventListener('visibilitychange', onFocus);
+      return () => {
+        alive = false;
+        window.clearInterval(pollId);
+        window.clearTimeout(transitionTimer);
+        window.removeEventListener('focus', onFocus);
+        document.removeEventListener('visibilitychange', onFocus);
+      };
+    }
+
     return () => {
       alive = false;
-      window.clearInterval(id);
+      window.clearTimeout(transitionTimer);
     };
   }, [poll]);
 
-  return { status, loading, isOpen: status?.isOpen !== false, isClosed: status?.isOpen === false };
+  // Fail closed once status is known; before first load, do not block browsing.
+  const isClosed = status?.isOpen === false;
+  const isOpen = status == null ? true : status.isOpen === true;
+
+  return { status, loading, isOpen, isClosed };
 }
 
 export function StoreClosedBanner({ className = '' }: { className?: string }) {
