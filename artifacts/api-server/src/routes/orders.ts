@@ -2,7 +2,7 @@ import { Router } from "express";
 import { db } from "@workspace/db";
 import { ordersTable, orderItemsTable, couponsTable, deliveryZonesTable, kmDeliveryConfigTable, kmDeliveryTiersTable, paymentSettingsTable, productsTable, categoriesTable, clubeMembersTable, deliveryStreetsTable, deliveryStreetRequestsTable, deliveryAreasTable, companiesTable } from "@workspace/db";
 import { eq, and, desc, sql, asc, inArray, ne } from "drizzle-orm";
-import { requireCompanyAuth } from "../middlewares/auth";
+import { requireCompanyAuth, tryGetCompanySession } from "../middlewares/auth";
 import { resolvePublicCompany } from "../middlewares/company";
 import { addSSEClient, removeSSEClient, broadcastSSE } from "../lib/sse";
 import { calcDiscount } from "./coupons";
@@ -88,6 +88,7 @@ function enrichOrder<T extends { notes: string; status: string }>(
     fidelityRewardGranted: meta.fidelityRewardGranted ?? false,
     fidelityRewardTitle: meta.fidelityRewardTitle ?? null,
     fidelityRewardId: meta.fidelityRewardId ?? null,
+    source: meta.source ?? null,
   };
 }
 
@@ -155,6 +156,8 @@ router.post("/orders", resolvePublicCompany, async (req, res) => {
       /** Optional Clube fidelity free-burger redemption (additive). */
       fidelityRewardId?: string;
       fidelityFreeProductId?: number;
+      /** Attendant panel only — honored when admin session cookie is present. */
+      source?: "online" | "attendant";
       items: Array<{
         productId?: number; productName: string; productPrice: number; quantity: number;
         addons?: Array<{ name: string; price: number }>; notes?: string;
@@ -170,6 +173,22 @@ router.post("/orders", resolvePublicCompany, async (req, res) => {
     if (body.paymentMethod === "card" && body.cardType && !["credit", "debit"].includes(body.cardType)) {
       res.status(400).json({ error: "Invalid card type" }); return;
     }
+    if (body.orderType === "delivery") {
+      const street = String(body.address || "").trim();
+      const number = String(body.addressNumber || "").trim();
+      if (!street) {
+        res.status(400).json({ error: "Informe o endereço de entrega." }); return;
+      }
+      if (!number) {
+        res.status(400).json({ error: "Informe o número do imóvel." }); return;
+      }
+    }
+
+    const adminSession = tryGetCompanySession(req);
+    const isAttendantOrder =
+      body.source === "attendant"
+      && !!adminSession
+      && adminSession.companyId === companyId;
 
     if (body.orderType === "delivery" && body.paymentMethod === "cash") {
       const [paySettings] = await db.select().from(paymentSettingsTable).where(eq(paymentSettingsTable.companyId, companyId));
@@ -467,6 +486,7 @@ router.post("/orders", resolvePublicCompany, async (req, res) => {
         };
     if (body.paymentMethod === "card" && body.cardType) meta.cardType = body.cardType;
     if (body.paymentMethod === "cash") meta.needsChange = !!body.needsChange || !!body.changeFor;
+    if (isAttendantOrder) meta.source = "attendant";
 
     if (isPix) {
       const [paySettings] = await db.select().from(paymentSettingsTable).where(eq(paymentSettingsTable.companyId, companyId));
@@ -649,8 +669,8 @@ router.post("/orders", resolvePublicCompany, async (req, res) => {
     });
 
     const fullOrder = await getOrderWithItems(result.id);
-    // Pix only enters the admin "new order" queue after receipt upload.
-    if (!isPix) {
+    // Public Pix waits for receipt/webhook before the board. Attendant orders show immediately.
+    if (!isPix || isAttendantOrder) {
       broadcastSSE(companyId, "new_order", fullOrder);
     }
 

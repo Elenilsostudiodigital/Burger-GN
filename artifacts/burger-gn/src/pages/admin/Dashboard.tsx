@@ -18,7 +18,7 @@ import {
   LayoutDashboard, UtensilsCrossed, LogOut, Bell, BellOff,
   Printer, Clock, MessageCircle, History,
   XCircle, Tag, MapPin, Navigation, Settings, Route, Upload, TrendingUp,
-  ChevronLeft, ChevronRight, GripVertical, X, Crown, Filter, ImageIcon, CheckCircle2, Check, Ban, Star, Users,
+  ChevronLeft, ChevronRight, GripVertical, X, Crown, Filter, ImageIcon, CheckCircle2, Check, Ban, Star, Users, Plus,
 } from 'lucide-react';
 import { PrepCountdown, prepCardBorderClass } from '../../components/PrepCountdown';
 import {
@@ -78,9 +78,11 @@ function canAcceptOrder(order: Order): boolean {
   return true;
 }
 
-/** Pix without receipt stays off the board until the customer sends proof. */
+/** Pix without receipt stays off the board until the customer sends proof.
+ *  Attendant (Novo Pedido) orders appear immediately, including PIX awaiting payment. */
 function isVisibleOnBoard(order: Order): boolean {
   if (order.status === 'cancelled') return true;
+  if (order.source === 'attendant') return true;
   if (order.paymentMethod === 'pix' && order.workflow === 'awaiting_payment' && !orderHasReceipt(order)) {
     return false;
   }
@@ -239,6 +241,11 @@ function OrderCard({ order, highlight, dragging, onAccept, onRefuse, onAdvance, 
             <span className="text-zinc-500 text-xs flex items-center gap-1">
               <Clock size={11} /> {formatDate(order.createdAt)} · {formatTime(order.createdAt)} · {timeAgo(order.createdAt)}
             </span>
+            {order.source === 'attendant' && (
+              <span className="bg-sky-500/20 text-sky-300 border border-sky-500/30 text-[9px] font-black uppercase px-1.5 py-0.5 rounded">
+                Atendente
+              </span>
+            )}
             {awaitingPay && (
               <span className="bg-yellow-400 text-zinc-950 text-[9px] font-black uppercase px-1.5 py-0.5 rounded animate-pulse">
                 🟡 Aguardando conferência
@@ -867,6 +874,21 @@ export default function AdminDashboard() {
           </div>
 
           <div className="flex items-center gap-1 shrink-0">
+            <Link
+              href="/admin/novo-pedido"
+              className="hidden sm:inline-flex items-center gap-1.5 mr-1 px-3 py-1.5 rounded-full bg-amber-500 text-zinc-950 text-[10px] font-black uppercase tracking-wider hover:bg-amber-400"
+              title="Lançar pedido de balcão, telefone ou WhatsApp"
+            >
+              <Plus size={14} strokeWidth={3} />
+              Novo pedido
+            </Link>
+            <Link
+              href="/admin/novo-pedido"
+              className="sm:hidden p-2 text-amber-500"
+              title="Novo pedido"
+            >
+              <Plus size={22} strokeWidth={2.5} />
+            </Link>
             <button onClick={() => setShowCancelled(true)} className="p-2 text-zinc-400 hover:text-red-400 relative" title="Recusados">
               <XCircle size={20} />
               {cancelledOrders.length > 0 && (

@@ -19,6 +19,7 @@ import { MyOrderFab } from "./components/MyOrderFab";
 import AdminLogin from "./pages/admin/Login";
 import AdminSalesDashboard from "./pages/admin/SalesDashboard";
 import AdminDashboard from "./pages/admin/Dashboard";
+import AdminNewOrder from "./pages/admin/NewOrder";
 import AdminMenuAdmin from "./pages/admin/MenuAdmin";
 import AdminCoupons from "./pages/admin/Coupons";
 import AdminDeliveryZones from "./pages/admin/DeliveryZones";
@@ -89,6 +90,7 @@ function Router() {
         {/* Admin routes */}
         <Route path="/admin/login" component={AdminLogin} />
         <Route path="/admin/pedidos" component={() => <ProtectedAdminRoute component={AdminDashboard} />} />
+        <Route path="/admin/novo-pedido" component={() => <ProtectedAdminRoute component={AdminNewOrder} />} />
         <Route path="/admin/cardapio" component={() => <ProtectedAdminRoute component={AdminMenuAdmin} />} />
         <Route path="/admin/financeiro" component={() => <ProtectedAdminRoute component={AdminFinancial} />} />
         <Route path="/admin/cupons" component={() => <ProtectedAdminRoute component={AdminCoupons} />} />

@@ -74,6 +74,8 @@ export interface OrderMeta {
   prepTimeMin?: number;
   /** Snapshot of configured max minutes at accept (countdown target). */
   prepTimeMax?: number;
+  /** Origin channel: customer app vs attendant panel. */
+  source?: "online" | "attendant";
 }
 
 export const WORKFLOW_LABELS: Record<WorkflowStage | "cancelled", string> = {
@@ -153,6 +155,7 @@ export function serializeOrderNotes(publicNotes: string, meta: OrderMeta): strin
   if (meta.prepFinishedAt) cleanMeta.prepFinishedAt = meta.prepFinishedAt;
   if (typeof meta.prepTimeMin === "number") cleanMeta.prepTimeMin = meta.prepTimeMin;
   if (typeof meta.prepTimeMax === "number") cleanMeta.prepTimeMax = meta.prepTimeMax;
+  if (meta.source === "online" || meta.source === "attendant") cleanMeta.source = meta.source;
 
   const hasMeta = Object.keys(cleanMeta).length > 0;
   const body = (publicNotes || "").trim();

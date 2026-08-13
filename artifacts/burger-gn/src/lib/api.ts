@@ -775,6 +775,8 @@ export interface Order {
   fidelityRewardGranted?: boolean;
   fidelityRewardTitle?: string | null;
   fidelityRewardId?: string | null;
+  /** Set when created from the attendant Novo Pedido panel. */
+  source?: "online" | "attendant" | null;
 }
 
 export interface OrderReview {
@@ -808,6 +810,8 @@ export interface CreateOrderPayload {
   couponCode?: string;
   fidelityRewardId?: string;
   fidelityFreeProductId?: number;
+  /** Attendant panel — only applied when admin session cookie is present. */
+  source?: "online" | "attendant";
   items: Array<{ productId?: number; productName: string; productPrice: number; quantity: number; addons?: Addon[]; notes?: string }>;
 }
 export interface PixPaymentResult { paymentId: string; qrCode: string; qrCodeBase64: string; pixKey?: string; }

@@ -29,9 +29,14 @@ function parseCompanySession(raw: string | undefined): CompanySessionCookie | nu
   }
 }
 
-export function requireCompanyAuth(req: Request, res: Response, next: NextFunction) {
+/** Read company session from signed cookie without failing the request. */
+export function tryGetCompanySession(req: Request): CompanySessionCookie | null {
   const signed = (req as unknown as { signedCookies?: Record<string, string> }).signedCookies;
-  const session = parseCompanySession(signed?.["company_session"]);
+  return parseCompanySession(signed?.["company_session"]);
+}
+
+export function requireCompanyAuth(req: Request, res: Response, next: NextFunction) {
+  const session = tryGetCompanySession(req);
   if (!session) {
     res.status(401).json({ error: "Unauthorized" });
     return;
