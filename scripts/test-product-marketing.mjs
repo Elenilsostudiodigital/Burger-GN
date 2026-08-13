@@ -28,10 +28,17 @@ async function waitReady() {
   for (let i = 0; i < 40; i++) {
     const r = await json("GET", "/api/products");
     if (r.status === 200 && Array.isArray(r.data) && r.data[0] && "promoText" in r.data[0] && "discountLabel" in r.data[0]) {
+      // New deploy: promo higher than original is not active
+      const pepsi = r.data.find((p) => p.id === 1);
+      if (pepsi && pepsi.isPromotion && Number(pepsi.promoPrice) > Number(pepsi.price) && pepsi.isPromoActive === true) {
+        console.log("waiting promo<original rule...");
+        await new Promise((x) => setTimeout(x, 10000));
+        continue;
+      }
       return r.data;
     }
     console.log("waiting promoText/discountLabel deploy...", r.status);
-    await new Promise((r) => setTimeout(r, 10000));
+    await new Promise((x) => setTimeout(x, 10000));
   }
   throw new Error("promoText deploy not ready");
 }
