@@ -1,5 +1,14 @@
 import { createRoot } from "react-dom/client";
 import App from "./App";
 import "./index.css";
+import { registerBurgerGnPwa } from "./pwa/registerPwa";
+import { PwaInstallPrompt } from "./pwa/PwaInstallPrompt";
 
-createRoot(document.getElementById("root")!).render(<App />);
+registerBurgerGnPwa();
+
+createRoot(document.getElementById("root")!).render(
+  <>
+    <App />
+    <PwaInstallPrompt />
+  </>,
+);
