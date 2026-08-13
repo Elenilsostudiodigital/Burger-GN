@@ -18,6 +18,7 @@ import { buildStaticPixPayload, decodePixSettings, normalizePixKey } from "../li
 import { createPixPayment, getMPSettings, getMPAccessToken, fetchMPPayment } from "../lib/mercadopago";
 import { mercadoPagoNotificationUrl } from "../lib/publicUrl";
 import { applyMercadoPagoStatus } from "../lib/mpReconcile";
+import { applyRefundResultToMeta, executeMercadoPagoRefund, orderNeedsMercadoPagoRefund } from "../lib/mpRefund";
 import { syncClubeMemberOnOrder } from "../lib/clubeClientSync";
 import {
   isFidelityFreeBurgerProduct,
@@ -62,6 +63,11 @@ function enrichOrder<T extends { notes: string; status: string }>(order: T) {
     receiptRejectReason: meta.receiptRejectReason ?? null,
     receiptRejectedAt: meta.receiptRejectedAt ?? null,
     rejectReason: meta.rejectReason ?? null,
+    refundStatus: meta.refundStatus ?? null,
+    mpRefundId: meta.mpRefundId ?? null,
+    refundError: meta.refundError ?? null,
+    refundedAt: meta.refundedAt ?? null,
+    refundAttemptedAt: meta.refundAttemptedAt ?? null,
     review: meta.review ?? null,
     deliveredAt: meta.deliveredAt ?? null,
     history: meta.history ?? [],
@@ -739,10 +745,21 @@ router.get("/orders/track/:trackingId", async (req, res) => {
     if (!order) { res.status(404).json({ error: "Order not found" }); return; }
 
     // Backup to the official webhook: if PIX Online is still pending, re-fetch Mercado Pago.
-    if (order.paymentMethod === "pix" && order.paymentStatus === "pending" && order.mpPaymentId) {
+    // Also poll refunded payments after a paid order was refused, so the customer
+    // sees the refund only after Mercado Pago confirms it.
+    const trackMeta = parseOrderNotes(order.notes).meta;
+    const shouldPollPay = order.paymentMethod === "pix" && order.paymentStatus === "pending" && order.mpPaymentId;
+    const shouldPollRefund =
+      order.status === "cancelled"
+      && order.paymentMethod === "pix"
+      && order.paymentStatus === "paid"
+      && trackMeta.pixMode !== "manual"
+      && order.mpPaymentId
+      && trackMeta.refundStatus !== "refunded";
+    if (shouldPollPay || shouldPollRefund) {
       const token = await getMPAccessToken(order.companyId);
       if (token) {
-        const payment = await fetchMPPayment(token, order.mpPaymentId);
+        const payment = await fetchMPPayment(token, order.mpPaymentId!);
         if (payment?.status) {
           await applyMercadoPagoStatus({
             companyId: order.companyId,
@@ -757,7 +774,8 @@ router.get("/orders/track/:trackingId", async (req, res) => {
     const [fresh] = await db.select().from(ordersTable).where(eq(ordersTable.trackingId, trackingId));
     const live = fresh ?? order;
     const items = await db.select().from(orderItemsTable).where(eq(orderItemsTable.orderId, live.id));
-    res.json({ ...enrichOrder(live), items });
+    const { refundError: _refundError, ...publicOrder } = enrichOrder(live);
+    res.json({ ...publicOrder, items });
   } catch (err) {
     req.log.error({ err }, "Failed to track order");
     res.status(500).json({ error: "Internal server error" });
@@ -820,6 +838,11 @@ router.patch("/orders/:id/status", requireCompanyAuth, async (req, res) => {
       nextMeta.rejectReason = reason;
       nextMeta = appendHistory(nextMeta, "cancelled", `Recusado: ${reason}`);
       notifyStage = "cancelled";
+      if (orderNeedsMercadoPagoRefund(existing, nextMeta) && existing.mpPaymentId) {
+        nextMeta.mpPaymentId = existing.mpPaymentId;
+        nextMeta.refundStatus = "processing";
+        nextMeta.refundAttemptedAt = new Date().toISOString();
+      }
     } else if (requestedWorkflow === "awaiting_payment") {
       res.status(400).json({ error: "Status inválido para alteração manual." });
       return;
@@ -892,39 +915,153 @@ router.patch("/orders/:id/status", requireCompanyAuth, async (req, res) => {
       .where(and(eq(ordersTable.id, id), eq(ordersTable.companyId, req.companyId!)))
       .returning();
 
-    const enriched = enrichOrder(order);
+    let saved = order;
+    if (
+      nextStatus === "cancelled"
+      && orderNeedsMercadoPagoRefund(existing, nextMeta)
+      && existing.mpPaymentId
+    ) {
+      const refundResult = await executeMercadoPagoRefund({
+        companyId: req.companyId!,
+        orderId: existing.id,
+        paymentId: existing.mpPaymentId,
+      });
+      nextMeta = applyRefundResultToMeta(nextMeta, refundResult);
+      const [refunded] = await db.update(ordersTable)
+        .set({
+          notes: serializeOrderNotes(publicNotes, nextMeta),
+          updatedAt: new Date(),
+        })
+        .where(and(eq(ordersTable.id, id), eq(ordersTable.companyId, req.companyId!)))
+        .returning();
+      if (refunded) saved = refunded;
+    }
+
+    const enriched = enrichOrder(saved);
     const customerNotifyMessage = notifyStage
       ? buildCustomerNotifyMessage(
-          order.orderNumber,
-          order.customerName,
+          saved.orderNumber,
+          saved.customerName,
           notifyStage,
           nextMeta.rejectReason,
+          nextMeta.refundStatus === "refunded",
         )
       : null;
 
     // Future WhatsApp: post-delivery survey message is prepared but NOT sent (no API yet).
     const futureWhatsappSurvey =
       notifyStage === "done"
-        ? buildPostDeliverySurveyMessage(order.orderNumber, order.customerName)
+        ? buildPostDeliverySurveyMessage(saved.orderNumber, saved.customerName)
         : null;
 
     broadcastSSE(req.companyId!, "order_status", {
-      id: order.id,
-      trackingId: order.trackingId,
-      status: order.status,
+      id: saved.id,
+      trackingId: saved.trackingId,
+      status: saved.status,
       workflow: enriched.workflow,
       rejectReason: nextMeta.rejectReason ?? null,
+      refundStatus: nextMeta.refundStatus ?? null,
+      mpRefundId: nextMeta.mpRefundId ?? null,
+      refundError: nextMeta.refundError ?? null,
       customerNotifyMessage,
       futureWhatsappSurvey,
     });
     res.json({
       ...enriched,
-      items: (await getOrderWithItems(order.id))?.items ?? [],
+      items: (await getOrderWithItems(saved.id))?.items ?? [],
       customerNotifyMessage,
       futureWhatsappSurvey,
     });
   } catch (err) {
     req.log.error({ err }, "Failed to update order status");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Admin: retry a real Mercado Pago refund after a paid PIX order was refused.
+router.post("/orders/:id/mp-refund", requireCompanyAuth, async (req, res) => {
+  try {
+    const id = Number(req.params["id"]);
+    const [existing] = await db.select().from(ordersTable)
+      .where(and(eq(ordersTable.id, id), eq(ordersTable.companyId, req.companyId!)));
+    if (!existing) { res.status(404).json({ error: "Not found" }); return; }
+
+    const { publicNotes, meta } = parseOrderNotes(existing.notes);
+    if (existing.status !== "cancelled") {
+      res.status(400).json({ error: "Reembolso disponível apenas para pedidos recusados." });
+      return;
+    }
+    if (meta.refundStatus === "refunded") {
+      const enriched = enrichOrder(existing);
+      res.json({
+        ...enriched,
+        items: (await getOrderWithItems(existing.id))?.items ?? [],
+      });
+      return;
+    }
+    if (!orderNeedsMercadoPagoRefund(existing, meta) || !existing.mpPaymentId) {
+      res.status(400).json({ error: "Este pedido não tem pagamento Mercado Pago elegível para reembolso." });
+      return;
+    }
+
+    let nextMeta: OrderMeta = {
+      ...meta,
+      mpPaymentId: existing.mpPaymentId,
+      refundStatus: "processing",
+      refundAttemptedAt: new Date().toISOString(),
+    };
+    await db.update(ordersTable)
+      .set({
+        notes: serializeOrderNotes(publicNotes, nextMeta),
+        updatedAt: new Date(),
+      })
+      .where(and(eq(ordersTable.id, id), eq(ordersTable.companyId, req.companyId!)));
+
+    const refundResult = await executeMercadoPagoRefund({
+      companyId: req.companyId!,
+      orderId: existing.id,
+      paymentId: existing.mpPaymentId,
+    });
+    nextMeta = applyRefundResultToMeta(nextMeta, refundResult);
+
+    const [saved] = await db.update(ordersTable)
+      .set({
+        notes: serializeOrderNotes(publicNotes, nextMeta),
+        updatedAt: new Date(),
+      })
+      .where(and(eq(ordersTable.id, id), eq(ordersTable.companyId, req.companyId!)))
+      .returning();
+
+    const enriched = enrichOrder(saved);
+    const customerNotifyMessage = nextMeta.refundStatus === "refunded"
+      ? buildCustomerNotifyMessage(
+          saved.orderNumber,
+          saved.customerName,
+          "cancelled",
+          nextMeta.rejectReason,
+          true,
+        )
+      : null;
+
+    broadcastSSE(req.companyId!, "order_status", {
+      id: saved.id,
+      trackingId: saved.trackingId,
+      status: saved.status,
+      workflow: enriched.workflow,
+      rejectReason: nextMeta.rejectReason ?? null,
+      refundStatus: nextMeta.refundStatus ?? null,
+      mpRefundId: nextMeta.mpRefundId ?? null,
+      refundError: nextMeta.refundError ?? null,
+      customerNotifyMessage,
+    });
+
+    res.json({
+      ...enriched,
+      items: (await getOrderWithItems(saved.id))?.items ?? [],
+      customerNotifyMessage,
+    });
+  } catch (err) {
+    req.log.error({ err }, "Failed to retry Mercado Pago refund");
     res.status(500).json({ error: "Internal server error" });
   }
 });
