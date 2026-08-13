@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { ordersTable, orderItemsTable, couponsTable, deliveryZonesTable, kmDeliveryConfigTable, kmDeliveryTiersTable, paymentSettingsTable, productsTable, categoriesTable, clubeMembersTable, deliveryStreetsTable, deliveryStreetRequestsTable, deliveryAreasTable, companiesTable } from "@workspace/db";
+import { ordersTable, orderItemsTable, couponsTable, deliveryZonesTable, kmDeliveryConfigTable, kmDeliveryTiersTable, paymentSettingsTable, productsTable, categoriesTable, clubeMembersTable, deliveryStreetsTable, deliveryStreetRequestsTable, deliveryAreasTable, companiesTable, deliveryAnalysisRequestsTable } from "@workspace/db";
 import { eq, and, desc, sql, asc, inArray, ne } from "drizzle-orm";
 import { requireCompanyAuth } from "../middlewares/auth";
 import { resolvePublicCompany } from "../middlewares/company";
@@ -27,6 +27,7 @@ import {
   serializeClientNotes,
 } from "../lib/clientMeta";
 import { applyOrderCompletionRewards } from "../lib/orderRewards";
+import { loadLatestDeliveryAnalysis, loadApprovedCheckoutAnalysis, serializeDeliveryAnalysis } from "../lib/deliveryAnalysis";
 import { buildPublicClubeMe, type PublicClubeMePayload } from "../lib/clubePublicMe";
 import {
   computePrepDayStats,
@@ -149,6 +150,8 @@ router.post("/orders", resolvePublicCompany, async (req, res) => {
       /** Optional Clube fidelity free-burger redemption (additive). */
       fidelityRewardId?: string;
       fidelityFreeProductId?: number;
+      /** Approved checkout delivery-analysis token (address not in automatic area). */
+      checkoutAnalysisToken?: string;
       items: Array<{
         productId?: number; productName: string; productPrice: number; quantity: number;
         addons?: Array<{ name: string; price: number }>; notes?: string;
@@ -217,15 +220,29 @@ router.post("/orders", resolvePublicCompany, async (req, res) => {
     /** True only when a KM tier or active neighborhood zone produced a fee (0 is allowed if configured). */
     let deliveryFeeResolved = false;
     let customerDistanceKm: number | null = null;
+    const checkoutToken = typeof body.checkoutAnalysisToken === "string"
+      ? body.checkoutAnalysisToken.trim()
+      : "";
 
     if (body.orderType === "delivery") {
+      if (checkoutToken) {
+        const approved = await loadApprovedCheckoutAnalysis(companyId, checkoutToken);
+        if (approved) {
+          const fee = parseFloat(String(approved.deliveryFee));
+          if (Number.isFinite(fee) && fee >= 0) {
+            deliveryFee = fee;
+            deliveryFeeResolved = true;
+          }
+        }
+      }
+
       // Áreas de Entrega (map polygons) — when enabled, they own coverage + fee.
       const [kmConfigForAreas] = await db
         .select()
         .from(kmDeliveryConfigTable)
         .where(eq(kmDeliveryConfigTable.companyId, companyId))
         .limit(1);
-      if (kmConfigForAreas?.areasEnabled) {
+      if (!deliveryFeeResolved && kmConfigForAreas?.areasEnabled) {
         if (!body.customerLat || !body.customerLng) {
           res.status(400).json({
             error: "Informe sua localização para calcular a área de entrega.",
@@ -648,6 +665,27 @@ router.post("/orders", resolvePublicCompany, async (req, res) => {
       broadcastSSE(companyId, "new_order", fullOrder);
     }
 
+    if (checkoutToken && body.orderType === "delivery") {
+      try {
+        await db
+          .update(deliveryAnalysisRequestsTable)
+          .set({
+            orderId: result.id,
+            orderNumber,
+            updatedAt: new Date(),
+          })
+          .where(
+            and(
+              eq(deliveryAnalysisRequestsTable.companyId, companyId),
+              eq(deliveryAnalysisRequestsTable.trackingId, checkoutToken),
+              eq(deliveryAnalysisRequestsTable.status, "approved"),
+            ),
+          );
+      } catch (err) {
+        req.log.error({ err }, "Failed to link checkout delivery analysis to order");
+      }
+    }
+
     // Link pending street analysis request to this order (learning module).
     if (body.orderType === "delivery" && body.address) {
       try {
@@ -757,7 +795,12 @@ router.get("/orders/track/:trackingId", async (req, res) => {
     const [fresh] = await db.select().from(ordersTable).where(eq(ordersTable.trackingId, trackingId));
     const live = fresh ?? order;
     const items = await db.select().from(orderItemsTable).where(eq(orderItemsTable.orderId, live.id));
-    res.json({ ...enrichOrder(live), items });
+    const analysis = await loadLatestDeliveryAnalysis(live.id);
+    res.json({
+      ...enrichOrder(live),
+      items,
+      deliveryAnalysis: analysis ? serializeDeliveryAnalysis(analysis) : null,
+    });
   } catch (err) {
     req.log.error({ err }, "Failed to track order");
     res.status(500).json({ error: "Internal server error" });

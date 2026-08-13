@@ -6,7 +6,9 @@ import {
   createOrder, validateCoupon, getDeliveryZones, getDeliveryFee, getKmDeliveryConfig,
   geocodeAddress, reverseGeocode, haversineKm, findKmTier, getPaymentSettings,
   checkDeliveryStreet, resolveDeliveryArea,
+  requestCheckoutDeliveryAnalysis, getCheckoutDeliveryAnalysis,
   ValidateCouponResult, DeliveryZone, KmDeliveryConfig, PaymentSettingsPublic,
+  DeliveryAnalysisRequest,
 } from '../lib/api';
 import { saveMyOrder } from '../lib/myOrder';
 import { ErrorBoundary } from '../components/ErrorBoundary';
@@ -83,6 +85,13 @@ export default function Checkout() {
   const [streetPendingMessage, setStreetPendingMessage] = useState('');
   const [streetNotes, setStreetNotes] = useState('');
   const [streetEtaMinutes, setStreetEtaMinutes] = useState<number | null>(null);
+  const [deliveryBlocked, setDeliveryBlocked] = useState(false);
+  const [analysisEligible, setAnalysisEligible] = useState(false);
+  const [analysis, setAnalysis] = useState<DeliveryAnalysisRequest | null>(null);
+  const [analysisToken, setAnalysisToken] = useState('');
+  const [analysisModalOpen, setAnalysisModalOpen] = useState(false);
+  const [analysisSending, setAnalysisSending] = useState(false);
+  const [analysisError, setAnalysisError] = useState('');
   const feeDebounce = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const streetDebounce = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
@@ -113,9 +122,17 @@ export default function Checkout() {
   const discount = Math.min(subtotal, couponDiscount + fidelityDiscount);
   const DELIVERY_FEE_UNAVAILABLE =
     'Ainda não conseguimos calcular a taxa de entrega para este endereço. Verifique o endereço ou fale conosco.';
+  const analysisApproved = analysis?.status === 'approved';
+  const analysisPending = analysis?.status === 'pending';
+  const analysisRejected = analysis?.status === 'rejected';
+  const approvedAnalysisFee = analysisApproved
+    ? parseFloat(String(analysis?.deliveryFee ?? '0'))
+    : NaN;
   /** Delivery may only checkout when a fee was successfully resolved (R$ 0 is OK if configured). */
-  const hasValidDeliveryFee = !isDelivery || feeFound === true;
-  const total = Math.max(0, subtotal + (isDelivery && feeFound === true ? deliveryFee : 0) - discount);
+  const hasValidDeliveryFee = !isDelivery
+    || feeFound === true
+    || (analysisApproved && Number.isFinite(approvedAnalysisFee) && approvedAnalysisFee >= 0);
+  const total = Math.max(0, subtotal + (isDelivery && hasValidDeliveryFee ? deliveryFee : 0) - discount);
   const fmt = (v: number) => `R$ ${v.toFixed(2).replace('.', ',')}`;
   const cashBlockedForDelivery = isDelivery && paySettings !== null && !paySettings.cashOnDeliveryEnabled;
   const clubePhoneForRedeem = form.telefone || getSavedClubePhone();
@@ -171,6 +188,8 @@ export default function Checkout() {
             if (result.status === "allowed" && result.fee != null) {
               setDeliveryFee(result.fee);
               setFeeFound(true);
+              setDeliveryBlocked(false);
+              setAnalysisEligible(false);
               setFeeMessage(
                 result.area?.name
                   ? `Área: ${result.area.name}`
@@ -182,12 +201,16 @@ export default function Checkout() {
             if (result.status === "blocked") {
               setDeliveryFee(0);
               setFeeFound(false);
+              setDeliveryBlocked(true);
+              setAnalysisEligible(false);
               setFeeMessage(result.message || "Não entregamos nesta área.");
               return;
             }
             if (result.status === "outside") {
               setDeliveryFee(0);
               setFeeFound(false);
+              setDeliveryBlocked(false);
+              setAnalysisEligible(true);
               setFeeMessage(result.message || "Não entregamos nesta região.");
               return;
             }
@@ -348,6 +371,8 @@ export default function Checkout() {
           setFeeFound(false);
           setDeliveryFee(0);
           setFeeMessage('');
+          setDeliveryBlocked(true);
+          setAnalysisEligible(false);
           setStreetPendingMessage(
             result.message ||
               '🔴 Esta rua está temporariamente fora da área de entrega. Escolha outro endereço ou retire na loja.',
@@ -361,16 +386,17 @@ export default function Checkout() {
           setFeeFound(true);
           setFeeMessage('');
           setStreetPendingMessage('');
+          setDeliveryBlocked(false);
+          setAnalysisEligible(false);
           setStreetEtaMinutes(result.etaMinutes ?? null);
           if (result.distanceKm != null) setDistanceKm(result.distanceKm);
           return;
         }
 
-        if (result.pending) {
-          setStreetPendingMessage(
-            result.message ||
-              '📍 Esta rua ainda não faz parte da nossa área de entrega.\nAguarde um instante enquanto verificamos a disponibilidade.\nO pedido ficará aguardando análise do administrador.',
-          );
+        if (result.needsAnalysis || result.pending) {
+          setStreetPendingMessage('');
+          setDeliveryBlocked(false);
+          setAnalysisEligible(true);
           setStreetEtaMinutes(result.etaMinutes ?? null);
         } else {
           setStreetPendingMessage('');
@@ -393,6 +419,12 @@ export default function Checkout() {
     setStreetPendingMessage('');
     setStreetNotes('');
     setStreetEtaMinutes(null);
+    setDeliveryBlocked(false);
+    setAnalysisEligible(false);
+    setAnalysis(null);
+    setAnalysisToken('');
+    setAnalysisModalOpen(false);
+    setAnalysisError('');
     setGpsError('');
     setLocationLabel('');
     setAddressMode(null);
@@ -400,6 +432,67 @@ export default function Checkout() {
       ...prev,
       endereco: '', numero: '', complemento: '', bairro: '', referencia: '',
     }));
+  };
+
+  const fullDeliveryAddress = [
+    form.endereco.trim(),
+    form.numero.trim() ? `nº ${form.numero.trim()}` : '',
+    form.complemento.trim(),
+    form.bairro.trim() && form.bairro !== '__outro__' ? form.bairro.trim() : '',
+    form.referencia.trim() ? `Ref.: ${form.referencia.trim()}` : '',
+  ].filter(Boolean).join(', ');
+
+  useEffect(() => {
+    if (analysis?.status !== 'approved') return;
+    const fee = parseFloat(String(analysis.deliveryFee));
+    if (Number.isFinite(fee) && fee >= 0) {
+      setDeliveryFee(fee);
+      setFeeFound(true);
+    }
+  }, [analysis]);
+
+  useEffect(() => {
+    if (!analysisToken || analysis?.status !== 'pending') return;
+    let alive = true;
+    const tick = async () => {
+      try {
+        const res = await getCheckoutDeliveryAnalysis(analysisToken);
+        if (!alive) return;
+        setAnalysis(res.deliveryAnalysis);
+      } catch { /* keep last known status */ }
+    };
+    const id = window.setInterval(tick, 4000);
+    return () => { alive = false; window.clearInterval(id); };
+  }, [analysisToken, analysis?.status]);
+
+  const sendCheckoutAnalysis = async () => {
+    setAnalysisSending(true);
+    setAnalysisError('');
+    try {
+      const token = analysisToken || (typeof crypto !== 'undefined' && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(16).slice(2)}`);
+      const res = await requestCheckoutDeliveryAnalysis({
+        token,
+        customerName: form.nome.trim() || undefined,
+        phone: form.telefone || undefined,
+        address: form.endereco.trim(),
+        addressNumber: form.numero.trim(),
+        neighborhood: form.bairro.trim(),
+        city: 'Lauro de Freitas',
+        complement: form.complemento.trim() || undefined,
+        reference: form.referencia.trim() || undefined,
+        lat: customerCoords?.lat,
+        lng: customerCoords?.lng,
+      });
+      setAnalysisToken(res.token || token);
+      setAnalysis(res.deliveryAnalysis);
+      setAnalysisModalOpen(false);
+    } catch (err) {
+      setAnalysisError(err instanceof Error ? err.message : 'Não foi possível enviar a solicitação.');
+    } finally {
+      setAnalysisSending(false);
+    }
   };
 
   const streetNotesBanner =
@@ -551,8 +644,11 @@ export default function Checkout() {
       setGpsError('Aguarde a localização ou tente novamente.');
       return;
     }
-    if (feeFound !== true) {
-      setGpsError(DELIVERY_FEE_UNAVAILABLE);
+    if (!hasValidDeliveryFee) {
+      if (analysisPending) setGpsError('Aguarde a análise da entrega pela equipe.');
+      else if (analysisRejected) setGpsError(analysis?.rejectReason || 'Não conseguimos realizar a entrega neste endereço.');
+      else if (analysisEligible || feeFound === false) setGpsError('Solicite a análise da entrega para este endereço.');
+      else setGpsError(DELIVERY_FEE_UNAVAILABLE);
       return;
     }
     setFieldError('');
@@ -568,8 +664,11 @@ export default function Checkout() {
         : 'Informe o bairro.');
       return;
     }
-    if (feeFound !== true) {
-      setFieldError(DELIVERY_FEE_UNAVAILABLE);
+    if (!hasValidDeliveryFee) {
+      if (analysisPending) setFieldError('Aguarde a análise da entrega pela equipe.');
+      else if (analysisRejected) setFieldError(analysis?.rejectReason || 'Não conseguimos realizar a entrega neste endereço.');
+      else if (analysisEligible || feeFound === false) setFieldError('Solicite a análise da entrega para continuar.');
+      else setFieldError(DELIVERY_FEE_UNAVAILABLE);
       return;
     }
     setFieldError('');
@@ -606,8 +705,10 @@ export default function Checkout() {
         setSubmitError('Endereço incompleto. Volte e confirme a localização ou o endereço.');
         return;
       }
-      if (feeFound !== true) {
-        setSubmitError(DELIVERY_FEE_UNAVAILABLE);
+      if (!hasValidDeliveryFee) {
+        if (analysisPending) setSubmitError('Aguarde a análise da entrega pela equipe.');
+        else if (analysisRejected) setSubmitError(analysis?.rejectReason || 'Não conseguimos realizar a entrega neste endereço.');
+        else setSubmitError('Solicite a análise da entrega para este endereço.');
         return;
       }
     }
@@ -663,6 +764,7 @@ export default function Checkout() {
         couponCode: appliedCoupon?.code,
         fidelityRewardId: fidelityRedeem?.rewardId,
         fidelityFreeProductId: fidelityRedeem?.product.id,
+        checkoutAnalysisToken: analysisApproved ? analysisToken : undefined,
         items: cartItems.map(ci => ({
           productId: ci.item.id,
           productName: ci.item.name,
@@ -784,12 +886,63 @@ export default function Checkout() {
     payment: 'Pagamento',
   };
 
+  const showAnalysisCta = isDelivery
+    && !feeLoading
+    && !deliveryBlocked
+    && !hasValidDeliveryFee
+    && !analysisPending
+    && (analysisEligible || feeFound === false)
+    && !!form.endereco.trim()
+    && !!form.numero.trim()
+    && !!form.bairro.trim()
+    && form.bairro !== '__outro__';
+
   const feeBanner = (
     <AnimatePresence>
       {feeLoading ? (
         <motion.div key="fee-load" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
           className="flex items-center gap-2 text-zinc-500 text-sm">
           <Loader2 size={14} className="animate-spin" /> Calculando taxa de entrega...
+        </motion.div>
+      ) : analysisPending ? (
+        <motion.div key="analysis-pending" initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+          className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 space-y-1">
+          <p className="text-amber-300 font-black text-sm uppercase tracking-wide">Aguardando</p>
+          <p className="text-amber-100 text-sm leading-relaxed">
+            Solicitação enviada. Estamos analisando se conseguimos entregar neste endereço.
+          </p>
+        </motion.div>
+      ) : analysisApproved ? (
+        <motion.div key="analysis-ok" initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+          className="space-y-2">
+          <div className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 space-y-1">
+            <p className="text-emerald-300 font-black text-sm uppercase tracking-wide">Entrega aprovada!</p>
+            <p className="text-emerald-100 text-sm">Taxa de entrega: {fmt(deliveryFee)}</p>
+          </div>
+          {streetNotesBanner}
+        </motion.div>
+      ) : analysisRejected ? (
+        <motion.div key="analysis-no" initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+          className="rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 space-y-1">
+          <p className="text-red-300 font-black text-sm uppercase tracking-wide">Não conseguimos realizar a entrega neste endereço.</p>
+          {analysis?.rejectReason && <p className="text-red-100 text-sm">{analysis.rejectReason}</p>}
+        </motion.div>
+      ) : showAnalysisCta ? (
+        <motion.div key="analysis-cta" initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+          className="space-y-3">
+          <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3">
+            <p className="text-amber-100 text-sm leading-relaxed">
+              Esta rua ainda não faz parte da nossa área automática de entrega. Solicite uma análise da equipe para verificarmos a disponibilidade e a taxa.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => { setAnalysisError(''); setAnalysisModalOpen(true); }}
+            className="w-full min-h-[52px] px-3 py-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-zinc-950 font-black uppercase text-sm leading-snug whitespace-normal text-center"
+          >
+            Solicitar análise da entrega
+          </button>
+          {streetNotesBanner}
         </motion.div>
       ) : feeFound === true ? (
         <motion.div key="fee-ok" initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
@@ -805,11 +958,6 @@ export default function Checkout() {
             <span className="text-green-400 font-black">{fmt(deliveryFee)}</span>
           </div>
           {streetNotesBanner}
-          {streetPendingMessage ? (
-            <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-amber-200 text-sm whitespace-pre-line leading-relaxed">
-              {streetPendingMessage}
-            </div>
-          ) : null}
         </motion.div>
       ) : feeFound === false ? (
         <motion.div key="fee-warn" initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
@@ -828,14 +976,8 @@ export default function Checkout() {
           )}
           {streetNotesBanner}
         </motion.div>
-      ) : streetPendingMessage || streetNotesBanner ? (
-        <motion.div key="street-pending" initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
-          className="space-y-2">
-          {streetPendingMessage ? (
-            <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-amber-200 text-sm whitespace-pre-line leading-relaxed">
-              {streetPendingMessage}
-            </div>
-          ) : null}
+      ) : streetNotesBanner ? (
+        <motion.div key="street-notes" initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
           {streetNotesBanner}
         </motion.div>
       ) : null}
@@ -1082,8 +1224,9 @@ export default function Checkout() {
                   </div>
 
                   <Button type="button" onClick={confirmGpsLocation} size="lg"
-                    className="w-full min-h-[52px] font-bold tracking-wider rounded-xl bg-amber-500 hover:bg-amber-400 text-zinc-950">
-                    Confirmar localização
+                    disabled={!hasValidDeliveryFee || analysisPending || analysisRejected}
+                    className="w-full min-h-[52px] px-3 py-3 font-bold rounded-xl bg-amber-500 hover:bg-amber-400 text-zinc-950 whitespace-normal leading-snug text-center">
+                    {analysisApproved ? 'Continuar para pagamento' : 'Confirmar localização'}
                   </Button>
                 </>
               )}
@@ -1177,10 +1320,12 @@ export default function Checkout() {
                 <p className="text-red-400 text-sm flex items-center gap-1.5"><AlertCircle size={14} /> {fieldError}</p>
               )}
 
-              <Button type="button" onClick={continueFromManual} size="lg"
-                className="w-full min-h-[52px] font-bold tracking-wider rounded-xl bg-amber-500 hover:bg-amber-400 text-zinc-950">
-                Continuar para pagamento
-              </Button>
+              {hasValidDeliveryFee && !analysisPending && (
+                <Button type="button" onClick={continueFromManual} size="lg"
+                  className="w-full min-h-[52px] px-3 py-3 font-bold rounded-xl bg-amber-500 hover:bg-amber-400 text-zinc-950 whitespace-normal leading-snug text-center">
+                  Continuar para pagamento
+                </Button>
+              )}
             </motion.section>
           )}
 
@@ -1461,18 +1606,18 @@ export default function Checkout() {
             {isDelivery && (
               <div className="flex justify-between text-xs text-zinc-500 -mt-1">
                 <span>Taxa de entrega</span>
-                <span>{feeFound === true ? fmt(deliveryFee) : feeFound === false ? 'Indisponível' : '—'}</span>
+                <span>{hasValidDeliveryFee ? fmt(deliveryFee) : feeFound === false ? 'Indisponível' : '—'}</span>
               </div>
             )}
-            {isDelivery && !hasValidDeliveryFee && !feeLoading && (
+            {isDelivery && !hasValidDeliveryFee && !feeLoading && !analysisPending && !showAnalysisCta && !analysisRejected && (
               <p className="text-orange-400 text-xs leading-snug">{DELIVERY_FEE_UNAVAILABLE}</p>
             )}
             <Button
               type="button"
               onClick={onConfirmOrder}
-              disabled={submitting || !hasValidDeliveryFee || feeLoading}
+              disabled={submitting || !hasValidDeliveryFee || feeLoading || analysisPending || analysisRejected}
               size="lg"
-              className="w-full min-h-[52px] font-bold tracking-wider rounded-xl bg-amber-500 hover:bg-amber-400 text-zinc-950 text-base disabled:opacity-50 disabled:pointer-events-none">
+              className="w-full min-h-[52px] px-3 py-3 font-bold rounded-xl bg-amber-500 hover:bg-amber-400 text-zinc-950 text-base whitespace-normal leading-snug text-center disabled:opacity-50 disabled:pointer-events-none">
               {submitting
                 ? <><Loader2 size={20} className="animate-spin mr-2" /> Enviando...</>
                 : 'CONFIRMAR PEDIDO'}
@@ -1480,6 +1625,36 @@ export default function Checkout() {
           </div>
         </div>
       )}
+
+      <AnimatePresence>
+        {analysisModalOpen && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[90] bg-black/75 flex items-end sm:items-center justify-center p-0 sm:p-4"
+            onClick={() => !analysisSending && setAnalysisModalOpen(false)}>
+            <motion.div initial={{ y: 40 }} animate={{ y: 0 }} exit={{ y: 40 }}
+              className="bg-zinc-950 border border-zinc-800 rounded-t-3xl sm:rounded-3xl w-full sm:max-w-md p-5 space-y-4"
+              onClick={e => e.stopPropagation()}>
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="text-white font-black uppercase text-sm leading-snug">Confirmar análise da entrega</h2>
+                <button type="button" disabled={analysisSending} onClick={() => setAnalysisModalOpen(false)} className="text-zinc-500 hover:text-white shrink-0">
+                  <X size={18} />
+                </button>
+              </div>
+              <p className="text-zinc-400 text-sm leading-relaxed">
+                Vamos enviar este endereço para a equipe analisar a disponibilidade e definir a taxa de entrega.
+              </p>
+              <div className="rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-sm text-zinc-200 leading-relaxed">
+                {fullDeliveryAddress || 'Endereço incompleto'}
+              </div>
+              {analysisError && <p className="text-red-400 text-sm">{analysisError}</p>}
+              <button type="button" disabled={analysisSending} onClick={sendCheckoutAnalysis}
+                className="w-full min-h-[52px] px-3 py-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-zinc-950 font-black uppercase text-sm whitespace-normal leading-snug disabled:opacity-50">
+                {analysisSending ? 'Enviando…' : 'Enviar para análise'}
+              </button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </PageTransition>
     </ErrorBoundary>
   );

@@ -7,6 +7,7 @@ import {
   ORDER_TYPE_LABELS, PAYMENT_STATUS_LABELS, WORKFLOW_LABELS,
   formatPaymentMethod,
   isAllowedReceiptFile, RECEIPT_ACCEPT, customerInAppStatusMessage,
+  requestDeliveryAnalysis,
 } from '../lib/api';
 import {
   getMyOrder, clearMyOrder, saveMyOrder, archiveMyOrder,
@@ -14,7 +15,7 @@ import {
 } from '../lib/myOrder';
 import { notifyOrderStatusChange } from '../lib/pushNotifications';
 import { buildPostDeliverySurveyMessage, sendPostDeliverySurveyWhenReady } from '../lib/whatsappFuture';
-import { ArrowLeft, Clock, Home, AlertCircle, Timer, Star, Loader2, Camera, ImageIcon, Upload, Copy, Check } from 'lucide-react';
+import { ArrowLeft, Clock, Home, AlertCircle, Timer, Star, Loader2, Camera, ImageIcon, Upload, Copy, Check, MapPin, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { PageTransition } from '../components/PageTransition';
 import { BottomNav } from '../components/BottomNav';
@@ -107,6 +108,11 @@ function OrderTimelineView({ trackingId }: { trackingId: string }) {
   const galleryRef = useRef<HTMLInputElement>(null);
   const cameraRef = useRef<HTMLInputElement>(null);
   const lastPaymentKey = useRef<string | null>(null);
+  const lastAnalysisKey = useRef<string | null>(null);
+  const [analysisModalOpen, setAnalysisModalOpen] = useState(false);
+  const [analysisNote, setAnalysisNote] = useState('');
+  const [analysisSending, setAnalysisSending] = useState(false);
+  const [analysisError, setAnalysisError] = useState('');
 
   useEffect(() => {
     getPaymentSettings()
@@ -168,6 +174,25 @@ function OrderTimelineView({ trackingId }: { trackingId: string }) {
         }
         lastWorkflow.current = String(wf);
         lastPaymentKey.current = payKey;
+
+        const analysisKey = data.deliveryAnalysis
+          ? `${data.deliveryAnalysis.id}:${data.deliveryAnalysis.status}`
+          : '';
+        if (lastAnalysisKey.current && lastAnalysisKey.current !== analysisKey && data.deliveryAnalysis) {
+          const st = data.deliveryAnalysis.status;
+          if (st === 'approved') {
+            setStatusToast({ title: 'Análise aprovada', body: 'Sua solicitação de análise da entrega foi aprovada pela equipe.' });
+          } else if (st === 'rejected') {
+            setStatusToast({
+              title: 'Análise recusada',
+              body: data.deliveryAnalysis.rejectReason
+                ? `Motivo: ${data.deliveryAnalysis.rejectReason}`
+                : 'A equipe recusou a análise da entrega.',
+            });
+          }
+          window.setTimeout(() => setStatusToast(null), 8000);
+        }
+        lastAnalysisKey.current = analysisKey;
 
         if (data.status === 'done') {
           // Survey copy stays in-app (avaliação). External WhatsApp queue gated off.
@@ -383,6 +408,22 @@ function OrderTimelineView({ trackingId }: { trackingId: string }) {
       setReceiptError(err instanceof Error ? err.message : 'Erro ao enviar comprovante');
     } finally {
       setUploadingReceipt(false);
+    }
+  };
+
+  const sendDeliveryAnalysis = async () => {
+    setAnalysisSending(true);
+    setAnalysisError('');
+    try {
+      const res = await requestDeliveryAnalysis(trackingId, analysisNote);
+      setOrder(prev => prev ? { ...prev, deliveryAnalysis: res.deliveryAnalysis } : prev);
+      lastAnalysisKey.current = `${res.deliveryAnalysis.id}:${res.deliveryAnalysis.status}`;
+      setAnalysisModalOpen(false);
+      setAnalysisNote('');
+    } catch (err) {
+      setAnalysisError(err instanceof Error ? err.message : 'Não foi possível enviar a solicitação.');
+    } finally {
+      setAnalysisSending(false);
     }
   };
 
@@ -723,6 +764,54 @@ function OrderTimelineView({ trackingId }: { trackingId: string }) {
           </motion.div>
         )}
 
+        {order.orderType === 'delivery' && !cancelled && (
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.08 }}
+            className="rounded-3xl border border-zinc-800 bg-zinc-900/80 p-5 space-y-3">
+            <h3 className="text-white font-black uppercase text-xs tracking-wider">Entrega</h3>
+            <p className="text-zinc-300 text-sm flex items-start gap-2">
+              <MapPin size={16} className="text-amber-500 mt-0.5 shrink-0" />
+              <span>
+                {order.address}{order.addressNumber ? `, ${order.addressNumber}` : ''}
+                {order.neighborhood ? ` — ${order.neighborhood}` : ''}
+              </span>
+            </p>
+            {parseFloat(order.deliveryFee) > 0 && (
+              <p className="text-zinc-500 text-xs">Taxa de entrega: {fmt(order.deliveryFee)}</p>
+            )}
+
+            {order.deliveryAnalysis?.status === 'pending' && (
+              <div className="rounded-2xl border border-amber-500/40 bg-amber-500/10 px-4 py-3">
+                <p className="text-amber-300 font-black text-sm uppercase tracking-wide">Análise solicitada</p>
+                <p className="text-zinc-200 text-sm mt-1">Aguardando análise da equipe.</p>
+              </div>
+            )}
+            {order.deliveryAnalysis?.status === 'approved' && (
+              <div className="rounded-2xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-3">
+                <p className="text-emerald-300 font-black text-sm uppercase tracking-wide">Análise aprovada</p>
+                <p className="text-zinc-200 text-sm mt-1">Sua solicitação de análise da entrega foi aprovada.</p>
+              </div>
+            )}
+            {order.deliveryAnalysis?.status === 'rejected' && (
+              <div className="rounded-2xl border border-red-500/40 bg-red-500/10 px-4 py-3 space-y-1">
+                <p className="text-red-300 font-black text-sm uppercase tracking-wide">Análise recusada</p>
+                {order.deliveryAnalysis.rejectReason && (
+                  <p className="text-zinc-200 text-sm">{order.deliveryAnalysis.rejectReason}</p>
+                )}
+              </div>
+            )}
+
+            {(!order.deliveryAnalysis || order.deliveryAnalysis.status === 'rejected') && (
+              <button
+                type="button"
+                onClick={() => { setAnalysisError(''); setAnalysisModalOpen(true); }}
+                className="w-full h-12 rounded-xl bg-amber-500 hover:bg-amber-400 text-zinc-950 font-black uppercase text-sm tracking-wide"
+              >
+                Solicitar análise da entrega
+              </button>
+            )}
+          </motion.div>
+        )}
+
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}
           className="rounded-3xl border border-zinc-800 bg-zinc-900/80 p-5 space-y-3">
           <h3 className="text-white font-black uppercase text-xs tracking-wider">Resumo</h3>
@@ -758,6 +847,41 @@ function OrderTimelineView({ trackingId }: { trackingId: string }) {
           </Button>
         </Link>
       </main>
+
+      <AnimatePresence>
+        {analysisModalOpen && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[90] bg-black/75 flex items-end sm:items-center justify-center p-0 sm:p-4"
+            onClick={() => !analysisSending && setAnalysisModalOpen(false)}>
+            <motion.div initial={{ y: 40 }} animate={{ y: 0 }} exit={{ y: 40 }}
+              className="bg-zinc-950 border border-zinc-800 rounded-t-3xl sm:rounded-3xl w-full sm:max-w-md p-5 space-y-4"
+              onClick={e => e.stopPropagation()}>
+              <div className="flex items-center justify-between">
+                <h2 className="text-white font-black uppercase text-sm">Análise da entrega</h2>
+                <button type="button" disabled={analysisSending} onClick={() => setAnalysisModalOpen(false)} className="text-zinc-500 hover:text-white">
+                  <X size={18} />
+                </button>
+              </div>
+              <p className="text-zinc-400 text-sm leading-relaxed">
+                A entrega será analisada pela nossa equipe. Se quiser, informe o motivo ou uma observação para ajudar na análise.
+              </p>
+              <textarea
+                value={analysisNote}
+                onChange={e => setAnalysisNote(e.target.value)}
+                placeholder="Motivo ou observação (opcional)"
+                maxLength={1000}
+                className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 text-white text-sm resize-none h-28 focus:border-amber-500 focus:outline-none"
+              />
+              {analysisError && <p className="text-red-400 text-sm">{analysisError}</p>}
+              <button type="button" disabled={analysisSending} onClick={sendDeliveryAnalysis}
+                className="w-full h-12 rounded-xl bg-amber-500 hover:bg-amber-400 text-zinc-950 font-black uppercase text-sm tracking-wide disabled:opacity-50">
+                {analysisSending ? 'Enviando…' : 'Enviar para análise'}
+              </button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <BottomNav />
     </PageTransition>
   );

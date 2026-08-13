@@ -11,6 +11,7 @@ import { ensureClubeSchema } from "./lib/ensureClubeSchema";
 import { ensureDeliveryStreetsSchema } from "./lib/ensureDeliveryStreetsSchema";
 import { ensureDeliveryAreasSchema } from "./lib/ensureDeliveryAreasSchema";
 import { ensurePaymentSettingsSchema } from "./lib/ensurePaymentSettingsSchema";
+import { ensureDeliveryAnalysisSchema } from "./lib/ensureDeliveryAnalysisSchema";
 
 const app: Express = express();
 
@@ -88,6 +89,23 @@ app.use("/api", async (req, res, next) => {
   } catch (err) {
     logger.error({ err }, "Failed to ensure delivery areas schema");
     res.status(500).json({ error: "Falha ao preparar o banco de áreas de entrega." });
+  }
+});
+
+/** Ensures delivery-analysis table before customer/admin analysis handlers. */
+app.use("/api", async (req, res, next) => {
+  const p = req.path || "";
+  const needsAnalysis =
+    p.includes("delivery-analysis") ||
+    p.startsWith("/delivery/checkout-analysis") ||
+    p.startsWith("/orders/track");
+  if (!needsAnalysis) return next();
+  try {
+    await ensureDeliveryAnalysisSchema();
+    next();
+  } catch (err) {
+    logger.error({ err }, "Failed to ensure delivery analysis schema");
+    res.status(500).json({ error: "Falha ao preparar o banco de análise de entrega." });
   }
 });
 
