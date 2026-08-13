@@ -10,8 +10,9 @@ import { useCart } from '../context/CartContext';
 import {
   ORDER_TYPE_LABELS, formatPaymentMethod,
   PaymentStatus, PixPaymentResult, uploadOrderReceipt, trackOrder,
-  CardType, WorkflowStage, PixMode, isAllowedReceiptFile, RECEIPT_ACCEPT,
+  CardType, WorkflowStage, PixMode, isAllowedReceiptFile, RECEIPT_ACCEPT, orderHasReceipt,
 } from '../lib/api';
+import { compressReceiptImage } from '../lib/receiptImage';
 import { saveMyOrder } from '../lib/myOrder';
 import { saveClubePhone } from '../lib/clubeCliente';
 import { Button } from '@/components/ui/button';
@@ -41,29 +42,6 @@ interface StoredOrder {
 }
 
 type PixStep = 'pay' | 'upload' | 'sent' | 'confirmed';
-
-function compressImage(file: File, maxWidth = 1200, quality = 0.72): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(new Error('Falha ao ler arquivo'));
-    reader.onload = () => {
-      const img = new Image();
-      img.onload = () => {
-        const scale = Math.min(1, maxWidth / img.width);
-        const canvas = document.createElement('canvas');
-        canvas.width = Math.round(img.width * scale);
-        canvas.height = Math.round(img.height * scale);
-        const ctx = canvas.getContext('2d');
-        if (!ctx) { reject(new Error('Canvas indisponível')); return; }
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        resolve(canvas.toDataURL('image/jpeg', quality));
-      };
-      img.onerror = () => reject(new Error('Imagem inválida'));
-      img.src = reader.result as string;
-    };
-    reader.readAsDataURL(file);
-  });
-}
 
 function hasValidPixQr(pix: PixPaymentResult | null | undefined): pix is PixPaymentResult {
   return !!pix?.qrCode && pix.qrCode.trim().length > 20;
@@ -130,8 +108,8 @@ export default function Confirmation() {
           setRejectReason(null);
           return;
         }
-        if (!isPixOnline && (live.paymentStatus === 'failed' || live.receiptRejectReason)) {
-          setRejectReason(live.receiptRejectReason || 'Comprovante recusado');
+        if (!isPixOnline && live.receiptRejectReason) {
+          setRejectReason(live.receiptRejectReason);
           setPixStep('upload');
           setReceiptPreview(null);
         }
@@ -169,7 +147,7 @@ export default function Confirmation() {
     }
     setUploadError('');
     try {
-      const dataUrl = await compressImage(file);
+      const dataUrl = await compressReceiptImage(file);
       setReceiptPreview(dataUrl);
     } catch {
       setUploadError('Não foi possível ler a imagem. Tente outra foto.');
@@ -185,6 +163,16 @@ export default function Confirmation() {
       setRejectReason(null);
       setPixStep('sent');
     } catch (err) {
+      // The API may have saved the comprovante even if the HTTP response failed
+      // (previously it echoed the full image back and the client treated that as an error).
+      try {
+        const live = await trackOrder(order.trackingId);
+        if (orderHasReceipt(live)) {
+          setRejectReason(null);
+          setPixStep('sent');
+          return;
+        }
+      } catch { /* keep the original upload error */ }
       setUploadError(err instanceof Error ? err.message : 'Erro ao enviar comprovante');
     } finally {
       setUploading(false);

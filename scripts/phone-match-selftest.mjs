@@ -42,9 +42,13 @@ function phoneIdentityKeys(phone) {
 }
 
 function isPlaceholderPhone(phone) {
+  const digits = String(phone || "").replace(/\D/g, "").replace(/^0+/, "");
+  if (!digits) return true;
+  if (/^0+$/.test(digits)) return true;
   const key = phoneIdentityKey(phone);
-  if (!key || key.length < 10) return true;
+  if (!key) return true;
   if (/^0+$/.test(key)) return true;
+  if (key.length < 8) return true;
   return false;
 }
 
@@ -72,5 +76,6 @@ assert(phoneIdentityKeys("71999999999").includes("7199999999"), "keys include wi
 assert(isPlaceholderPhone("00000000000"), "placeholder zeros");
 assert(isPlaceholderPhone("123"), "too short");
 assert(!isPlaceholderPhone("71999999999"), "real mobile");
+assert(!isPlaceholderPhone("55719867616"), "short but real checkout WhatsApp must earn cashback");
 
 console.log("phone-match-selftest: OK");
