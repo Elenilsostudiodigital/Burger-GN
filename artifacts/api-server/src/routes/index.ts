@@ -20,6 +20,7 @@ import salesDashboardRouter from "./salesDashboard";
 import clubeRouter from "./clube";
 import clientesRouter from "./clientes";
 import presenceRouter from "./presence";
+import uploadsRouter from "./uploads";
 
 const router: IRouter = Router();
 
@@ -44,5 +45,6 @@ router.use(salesDashboardRouter);
 router.use(clubeRouter);
 router.use(clientesRouter);
 router.use(presenceRouter);
+router.use(uploadsRouter);
 
 export default router;

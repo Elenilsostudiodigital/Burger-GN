@@ -2121,3 +2121,9 @@ export interface PresenceSnapshot {
 export const getAdminPresence = () =>
   api.get("/admin/presence") as Promise<PresenceSnapshot>;
 
+export const uploadProductImage = (dataUrl: string, fileName?: string) =>
+  api.post("/admin/uploads/product-image", { dataUrl, fileName }) as Promise<{
+    url: string;
+    storage: "blob" | "inline";
+  }>;
+

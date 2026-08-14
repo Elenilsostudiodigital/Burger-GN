@@ -19,6 +19,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { AdminBottomNav } from '../../components/AdminBottomNav';
 import { AdminTab, AdminTabBar } from '../../components/AdminTabs';
+import { ProductImageField } from '../../components/ProductImageField';
 
 type Tab = 'products' | 'categories';
 type AvailabilityFilter = 'all' | 'available' | 'soldout';
@@ -150,11 +151,12 @@ function ProductForm({ categories, initial, onSave, onCancel, saving }: {
             {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
         </div>
-        <div className="col-span-2 space-y-1">
-          <Label className="text-zinc-400 text-xs">URL da Imagem</Label>
-          <Input value={form.image} onChange={set('image')} placeholder="https://..."
-            className="bg-zinc-950 border-zinc-800 text-white h-10 text-sm focus:border-amber-500" />
-        </div>
+
+        <ProductImageField
+          value={form.image}
+          onChange={(image) => setForm(f => ({ ...f, image }))}
+        />
+
         <div className="col-span-2 space-y-1">
           <Label className="text-zinc-400 text-xs">URL do Vídeo (opcional)</Label>
           <Input value={form.videoUrl} onChange={set('videoUrl')} placeholder="https://..."
@@ -166,9 +168,6 @@ function ProductForm({ categories, initial, onSave, onCancel, saving }: {
             className="bg-zinc-950 border-zinc-800 text-white h-10 text-sm focus:border-amber-500" />
         </div>
       </div>
-      {form.image && (
-        <img src={form.image} alt="preview" className="w-full h-32 object-cover rounded-xl border border-zinc-800" onError={e => (e.currentTarget.style.display = 'none')} />
-      )}
 
       <div className="space-y-1">
         <Label className="text-zinc-400 text-xs">Ingredientes (separados por vírgula)</Label>
@@ -530,6 +529,7 @@ export default function MenuAdmin() {
           <div className="space-y-4">
             {showForm && (
               <ProductForm
+                key={editProduct ? `edit-${editProduct.id}` : 'new'}
                 categories={categories}
                 initial={editProduct ? productToForm(editProduct) : undefined}
                 onSave={handleSaveProduct}

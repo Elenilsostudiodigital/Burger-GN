@@ -30,6 +30,7 @@ Atualizar esta lista conforme o andamento do projeto.
 - 🔄 Produtos e Promoções (Marketing)
 
 - 🔄 Divulgação do Cardápio
+- 🔄 Upload Profissional de Imagens dos Produtos
 
 ---
 
@@ -44,4 +45,5 @@ _Nenhum bug aberto registrado neste momento. Incluir aqui qualquer falha reprodu
 
 ## PRÓXIMA ETAPA
 
-Aguardando próxima solicitação do proprietário.
+Módulo **Upload de Imagens dos Produtos** publicado — aguardando validação manual.
+Onde: Admin → Cardápio → Editar/Adicionar produto → bloco **Imagem do Produto** (Selecionar Imagem).
