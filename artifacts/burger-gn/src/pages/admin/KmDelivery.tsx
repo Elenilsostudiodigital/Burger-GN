@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import DeliveryAreasAdmin from './DeliveryAreasAdmin';
+import { AdminTab, AdminTabBar } from '../../components/AdminTabs';
 
 function AdminNav({ active }: { active: string }) {
   const items = [
@@ -31,7 +32,7 @@ function AdminNav({ active }: { active: string }) {
   ];
   return (
     <nav className="fixed bottom-0 left-0 right-0 bg-zinc-950/95 backdrop-blur border-t border-zinc-800 z-40">
-      <div className="max-w-2xl mx-auto flex">
+      <div className="admin-shell flex">
         {items.map(item => (
           <Link key={item.href} href={item.href} className="flex-1">
             <div className={`flex flex-col items-center gap-0.5 py-2.5 transition-colors ${active === item.href ? 'text-amber-500' : 'text-zinc-500 hover:text-white'}`}>
@@ -166,7 +167,7 @@ export default function KmDelivery() {
   return (
     <div className="min-h-screen bg-[#0a0a0a] pb-24">
       <header className="sticky top-0 z-40 bg-zinc-950/95 backdrop-blur border-b border-zinc-800 px-4 py-3">
-        <div className="max-w-2xl mx-auto flex items-center justify-between">
+        <div className="admin-shell flex items-center justify-between">
           <div className="flex items-center gap-3">
             <Navigation size={20} className="text-amber-500" />
             <div>
@@ -184,28 +185,16 @@ export default function KmDelivery() {
         <div className="w-8 h-8 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
       </div>
 
-      <main className={`max-w-2xl mx-auto px-4 py-5 space-y-5 ${loading ? 'hidden' : ''}`}>
+      <main className={`admin-shell px-4 py-5 space-y-5 ${loading ? 'hidden' : ''}`}>
 
-          <div className="flex gap-1 p-1 rounded-xl bg-zinc-900 border border-zinc-800">
-            <button
-              type="button"
-              onClick={() => setTab('config')}
-              className={`flex-1 h-10 rounded-lg text-xs font-bold uppercase tracking-wide transition-colors ${
-                tab === 'config' ? 'bg-amber-500 text-zinc-950' : 'text-zinc-400 hover:text-white'
-              }`}
-            >
+          <AdminTabBar variant="equal">
+            <AdminTab active={tab === 'config'} onClick={() => setTab('config')}>
               Configuração
-            </button>
-            <button
-              type="button"
-              onClick={() => setTab('areas')}
-              className={`flex-1 h-10 rounded-lg text-xs font-bold uppercase tracking-wide transition-colors inline-flex items-center justify-center gap-1.5 ${
-                tab === 'areas' ? 'bg-amber-500 text-zinc-950' : 'text-zinc-400 hover:text-white'
-              }`}
-            >
-              <Shapes size={14} /> Áreas de Entrega
-            </button>
-          </div>
+            </AdminTab>
+            <AdminTab active={tab === 'areas'} onClick={() => setTab('areas')} icon={<Shapes size={14} />}>
+              Áreas de Entrega
+            </AdminTab>
+          </AdminTabBar>
 
           {/*
             Both panels stay mounted (CSS hidden). Unmounting DeliveryAreasAdmin

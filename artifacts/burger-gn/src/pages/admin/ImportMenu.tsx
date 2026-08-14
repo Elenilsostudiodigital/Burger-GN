@@ -140,7 +140,7 @@ export default function ImportMenu() {
   return (
     <div className="min-h-screen bg-[#0a0a0a] pb-24">
       <header className="sticky top-0 z-40 bg-zinc-950/95 backdrop-blur border-b border-zinc-800 px-4 py-3">
-        <div className="max-w-2xl mx-auto flex items-center justify-between">
+        <div className="admin-shell flex items-center justify-between">
           <div>
             <h1 className="text-white font-black uppercase text-base leading-none">Importar Cardápio</h1>
             <p className="text-zinc-600 text-xs">The Burger GN</p>
@@ -151,7 +151,7 @@ export default function ImportMenu() {
         </div>
       </header>
 
-      <main className="max-w-2xl mx-auto px-4 py-5 space-y-5">
+      <main className="admin-shell px-4 py-5 space-y-5">
         {result && (
           <div className="bg-green-900/20 border border-green-700 rounded-2xl p-4 space-y-1">
             <p className="text-green-400 font-bold text-sm flex items-center gap-2"><Check size={16} /> Importação concluída!</p>
@@ -284,7 +284,7 @@ export default function ImportMenu() {
       </main>
 
       <nav className="fixed bottom-0 left-0 right-0 bg-zinc-950/95 backdrop-blur border-t border-zinc-800 z-40">
-        <div className="max-w-2xl mx-auto flex overflow-x-auto no-scrollbar">
+        <div className="admin-shell flex overflow-x-auto no-scrollbar">
           <Link href="/admin/pedidos" className="flex-1 min-w-[14%]">
             <div className="flex flex-col items-center gap-0.5 py-2.5 text-zinc-500 hover:text-white transition-colors">
               <LayoutDashboard size={18} />

@@ -27,6 +27,8 @@ Atualizar esta lista conforme o andamento do projeto.
 - 🔄 PWA (Progressive Web App)
 - 🔄 Produtos e Promoções (Marketing)
 
+- 🔄 Divulgação do Cardápio
+
 ---
 
 ## BUGS CONHECIDOS
@@ -40,4 +42,5 @@ _Nenhum bug aberto registrado neste momento. Incluir aqui qualquer falha reprodu
 
 ## PRÓXIMA ETAPA
 
-Aguardando próxima solicitação do proprietário.
+Módulo **Divulgação** em produção — aguardando validação manual.
+Onde achar: menu inferior **Divulgação**, atalho no Início/Cardápio, ou `/admin/divulgacao`.

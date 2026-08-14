@@ -28,7 +28,7 @@ function AdminNav({ active }: { active: string }) {
   ];
   return (
     <nav className="fixed bottom-0 left-0 right-0 bg-zinc-950/95 backdrop-blur border-t border-zinc-800 z-40">
-      <div className="max-w-2xl mx-auto flex">
+      <div className="admin-shell flex">
         {navItems.map(item => (
           <Link key={item.href} href={item.href} className="flex-1">
             <div className={`flex flex-col items-center gap-0.5 py-2.5 transition-colors ${active === item.href ? 'text-amber-500' : 'text-zinc-500 hover:text-white'}`}>
@@ -112,7 +112,7 @@ export default function DeliveryZones() {
   return (
     <div className="min-h-screen bg-[#0a0a0a] pb-24">
       <header className="sticky top-0 z-40 bg-zinc-950/95 backdrop-blur border-b border-zinc-800 px-4 py-3">
-        <div className="max-w-2xl mx-auto flex items-center justify-between">
+        <div className="admin-shell flex items-center justify-between">
           <div className="flex items-center gap-3">
             <MapPin size={20} className="text-amber-500" />
             <div>
@@ -126,7 +126,7 @@ export default function DeliveryZones() {
         </div>
       </header>
 
-      <main className="max-w-2xl mx-auto px-4 py-5 space-y-5">
+      <main className="admin-shell px-4 py-5 space-y-5">
         {/* Stats */}
         <div className="grid grid-cols-3 gap-3">
           <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 text-center">
@@ -160,14 +160,14 @@ export default function DeliveryZones() {
               <MapPin size={16} className="text-amber-500" />
               {editZone ? 'Editar Bairro' : 'Novo Bairro'}
             </h3>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="col-span-2 space-y-1.5">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div className="md:col-span-2 space-y-1.5">
                 <Label className="text-zinc-400 text-xs">Nome do Bairro *</Label>
                 <Input value={formNeighborhood} onChange={e => setFormNeighborhood(e.target.value)}
                   placeholder="Ex: Centro de Lauro de Freitas"
                   className="bg-zinc-950 border-zinc-800 text-white h-11 text-sm focus:border-amber-500" />
               </div>
-              <div className="col-span-2 space-y-1.5">
+              <div className="space-y-1.5">
                 <Label className="text-zinc-400 text-xs">Taxa de Entrega (R$) *</Label>
                 <div className="relative">
                   <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 text-sm font-bold">R$</span>
@@ -204,7 +204,7 @@ export default function DeliveryZones() {
             <div className="w-8 h-8 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
           </div>
         ) : (
-          <div className="space-y-2">
+          <div className="admin-card-grid-2">
             <AnimatePresence>
               {zones.map(zone => (
                 <motion.div key={zone.id} layout initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}

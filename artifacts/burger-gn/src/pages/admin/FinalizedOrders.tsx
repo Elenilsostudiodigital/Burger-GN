@@ -13,6 +13,7 @@ import {
   LayoutDashboard, PackageCheck, Search, LogOut, ArrowLeft,
   TrendingUp, Receipt, Calculator,
 } from 'lucide-react';
+import { AdminTab, AdminTabBar } from '../../components/AdminTabs';
 
 type PeriodFilter = 'today' | 'yesterday' | 'last7' | 'thisMonth' | 'lastMonth' | 'all';
 type SortKey = 'newest' | 'oldest' | 'highest' | 'lowest';
@@ -163,7 +164,7 @@ export default function FinalizedOrders() {
   return (
     <div className="min-h-screen bg-[#0a0a0a] pb-24">
       <header className="sticky top-0 z-40 bg-zinc-950/95 backdrop-blur border-b border-zinc-800 px-4 py-3">
-        <div className="max-w-3xl mx-auto flex items-center justify-between gap-3">
+        <div className="admin-shell flex items-center justify-between gap-3">
           <div className="flex items-center gap-3 min-w-0">
             <Link href="/admin/pedidos" className="p-2 text-zinc-400 hover:text-white" title="Voltar aos pedidos">
               <ArrowLeft size={20} />
@@ -186,7 +187,7 @@ export default function FinalizedOrders() {
         </div>
       </header>
 
-      <main className="max-w-3xl mx-auto px-4 py-5 space-y-4">
+      <main className="admin-shell px-4 py-5 space-y-4">
         <div className="grid grid-cols-3 gap-2">
           <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-3">
             <p className="text-zinc-500 text-[10px] uppercase font-bold flex items-center gap-1">
@@ -218,22 +219,17 @@ export default function FinalizedOrders() {
           />
         </div>
 
-        <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
+        <AdminTabBar>
           {PERIODS.map((p) => (
-            <button
+            <AdminTab
               key={p.key}
-              type="button"
+              active={period === p.key}
               onClick={() => setPeriod(p.key)}
-              className={`shrink-0 px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
-                period === p.key
-                  ? 'bg-violet-500 text-white'
-                  : 'bg-zinc-900 text-zinc-500 border border-zinc-800'
-              }`}
             >
               {p.label}
-            </button>
+            </AdminTab>
           ))}
-        </div>
+        </AdminTabBar>
 
         <div className="flex items-center gap-2">
           <label className="text-zinc-500 text-xs uppercase font-bold">Ordenar</label>
@@ -258,7 +254,7 @@ export default function FinalizedOrders() {
         ) : filtered.length === 0 ? (
           <p className="text-zinc-600 text-sm text-center py-16">Nenhum pedido finalizado neste filtro.</p>
         ) : (
-          <div className="space-y-3">
+          <div className="admin-card-grid-2">
             {filtered.map((o) => {
               const when = o.finalizedAt || o.deliveredAt || o.createdAt;
               const prepSec = o.prepDurationSeconds
@@ -266,7 +262,7 @@ export default function FinalizedOrders() {
                   ? Math.max(0, Math.round((new Date(o.prepFinishedAt).getTime() - new Date(o.prepStartedAt).getTime()) / 1000))
                   : null);
               return (
-                <article key={o.id} className="rounded-2xl border border-zinc-800 bg-zinc-900/50 p-4 space-y-3">
+                <article key={o.id} className="admin-card rounded-2xl border border-zinc-800 bg-zinc-900/50 p-4 space-y-3">
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <p className="text-white font-black text-base">#{o.orderNumber}</p>
@@ -337,7 +333,7 @@ export default function FinalizedOrders() {
       </main>
 
       <nav className="fixed bottom-0 left-0 right-0 bg-zinc-950/95 backdrop-blur border-t border-zinc-800 z-40">
-        <div className="max-w-3xl mx-auto flex overflow-x-auto no-scrollbar">
+        <div className="admin-shell flex overflow-x-auto no-scrollbar">
           <Link href="/admin/pedidos" className="flex-1 min-w-[64px]">
             <div className="flex flex-col items-center gap-0.5 py-2.5 text-zinc-500 hover:text-white">
               <LayoutDashboard size={18} />

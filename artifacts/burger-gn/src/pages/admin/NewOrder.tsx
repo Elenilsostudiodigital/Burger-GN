@@ -12,6 +12,7 @@ import {
   geocodeAddress, getDeliveryFee, checkDeliveryStreet, resolveDeliveryArea,
   findKmTier, haversineKm, requestDeliveryAreaAnalysis,
 } from '../../lib/api';
+import { AdminTab, AdminTabBar } from '../../components/AdminTabs';
 
 type Step = 'cliente' | 'tipo' | 'produtos' | 'pagamento' | 'pix';
 
@@ -581,7 +582,7 @@ export default function AdminNewOrder() {
   return (
     <div className="min-h-screen bg-zinc-950 text-white pb-24">
       <header className="sticky top-0 z-40 bg-zinc-950/95 backdrop-blur border-b border-zinc-800 px-4 py-3">
-        <div className="max-w-3xl mx-auto flex items-center gap-3">
+        <div className="admin-shell flex items-center gap-3">
           <Link href="/admin/pedidos" className="p-2 text-zinc-400 hover:text-white">
             <ArrowLeft size={20} />
           </Link>
@@ -597,29 +598,29 @@ export default function AdminNewOrder() {
           )}
         </div>
         {step !== 'pix' && (
-          <div className="max-w-3xl mx-auto mt-3 flex gap-1.5 overflow-x-auto no-scrollbar">
-            {([
-              ['cliente', '1. Cliente'],
-              ['tipo', '2. Tipo'],
-              ['produtos', '3. Produtos'],
-              ['pagamento', '4. Pagamento'],
-            ] as const).map(([id, label]) => (
-              <span
-                key={id}
-                className={`shrink-0 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
-                  step === id
-                    ? 'bg-amber-500 text-zinc-950'
-                    : 'bg-zinc-900 text-zinc-500 border border-zinc-800'
-                }`}
-              >
-                {label}
-              </span>
-            ))}
+          <div className="admin-shell mt-3">
+            <AdminTabBar>
+              {([
+                ['cliente', '1. Cliente'],
+                ['tipo', '2. Tipo'],
+                ['produtos', '3. Produtos'],
+                ['pagamento', '4. Pagamento'],
+              ] as const).map(([id, label]) => (
+                <span
+                  key={id}
+                  role="tab"
+                  aria-selected={step === id}
+                  className={`admin-tab ${step === id ? 'admin-tab--active' : ''}`}
+                >
+                  <span className="admin-tab__label">{label}</span>
+                </span>
+              ))}
+            </AdminTabBar>
           </div>
         )}
       </header>
 
-      <main className="max-w-3xl mx-auto px-4 py-5 space-y-5">
+      <main className="admin-shell px-4 py-5 space-y-5">
         {submitError && (
           <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
             {submitError}
@@ -864,25 +865,16 @@ export default function AdminNewOrder() {
                 className="w-full rounded-xl bg-zinc-900 border border-zinc-800 pl-9 pr-3 py-2.5 outline-none focus:border-amber-500"
               />
             </div>
-            <div className="flex gap-1.5 overflow-x-auto no-scrollbar">
-              <button
-                type="button"
-                onClick={() => setCatFilter('all')}
-                className={`shrink-0 px-3 py-1.5 rounded-full text-[10px] font-bold uppercase ${catFilter === 'all' ? 'bg-amber-500 text-zinc-950' : 'bg-zinc-900 text-zinc-500 border border-zinc-800'}`}
-              >
+            <AdminTabBar>
+              <AdminTab active={catFilter === 'all'} onClick={() => setCatFilter('all')}>
                 Todos
-              </button>
+              </AdminTab>
               {categories.map((c) => (
-                <button
-                  key={c.id}
-                  type="button"
-                  onClick={() => setCatFilter(c.id)}
-                  className={`shrink-0 px-3 py-1.5 rounded-full text-[10px] font-bold uppercase ${catFilter === c.id ? 'bg-amber-500 text-zinc-950' : 'bg-zinc-900 text-zinc-500 border border-zinc-800'}`}
-                >
+                <AdminTab key={c.id} active={catFilter === c.id} onClick={() => setCatFilter(c.id)}>
                   {c.name}
-                </button>
+                </AdminTab>
               ))}
-            </div>
+            </AdminTabBar>
 
             {menuLoading ? (
               <div className="flex justify-center py-10"><Loader2 className="animate-spin text-amber-500" /></div>

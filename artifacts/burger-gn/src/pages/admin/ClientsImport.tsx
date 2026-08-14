@@ -282,7 +282,7 @@ export default function ClientsImport() {
   return (
     <div className="min-h-screen bg-[#0a0a0a] pb-24" data-testid="clientes-importacao-page">
       <header className="sticky top-0 z-40 bg-zinc-950/95 border-b border-zinc-800 px-4 py-3">
-        <div className="max-w-2xl mx-auto flex items-center justify-between">
+        <div className="admin-shell flex items-center justify-between">
           <div className="flex items-center gap-3">
             <UserPlus size={20} className="text-amber-500" />
             <div>
@@ -305,7 +305,7 @@ export default function ClientsImport() {
         </div>
       </header>
 
-      <main className="max-w-2xl mx-auto px-4 py-5 space-y-5">
+      <main className="admin-shell px-4 py-5 space-y-5">
         <ClientsSubnav active="importar" />
 
         {/* ═══ IMPORTADOR CSV/EXCEL — interface principal da aba ═══ */}

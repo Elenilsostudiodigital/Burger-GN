@@ -23,6 +23,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { AdminTab, AdminTabBar } from '../../components/AdminTabs';
 
 type Tab =
   | 'dashboard'
@@ -67,7 +68,7 @@ function AdminNav({ active }: { active: string }) {
   ];
   return (
     <nav className="fixed bottom-0 left-0 right-0 bg-zinc-950/95 backdrop-blur border-t border-zinc-800 z-40">
-      <div className="max-w-2xl mx-auto flex overflow-x-auto no-scrollbar">
+      <div className="admin-shell flex overflow-x-auto no-scrollbar">
         {navItems.map(item => (
           <Link key={item.href} href={item.href} className="flex-1 min-w-[64px]">
             <div className={`flex flex-col items-center gap-0.5 py-2.5 transition-colors ${active === item.href ? 'text-amber-500' : 'text-zinc-500 hover:text-white'}`}>
@@ -333,7 +334,7 @@ export default function ClubeBurger() {
   return (
     <div className="min-h-screen bg-[#0a0a0a] pb-24">
       <header className="sticky top-0 z-40 bg-zinc-950/95 backdrop-blur border-b border-zinc-800 px-4 py-3">
-        <div className="max-w-2xl mx-auto flex items-center justify-between">
+        <div className="admin-shell flex items-center justify-between">
           <div className="flex items-center gap-3">
             <Crown size={20} className="text-amber-500" />
             <div>
@@ -347,21 +348,14 @@ export default function ClubeBurger() {
         </div>
       </header>
 
-      <main className="max-w-2xl mx-auto px-4 py-5 space-y-5">
-        {/* Tabs */}
-        <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1 -mx-1 px-1">
+      <main className="admin-shell px-4 py-5 space-y-5">
+        <AdminTabBar>
           {TABS.map(t => (
-            <button key={t.id} onClick={() => setTab(t.id)}
-              className={`shrink-0 flex items-center gap-1.5 h-10 px-3 rounded-xl font-bold text-[11px] uppercase tracking-wider transition-all whitespace-nowrap ${
-                tab === t.id
-                  ? 'bg-amber-500 text-zinc-950'
-                  : 'bg-zinc-900 text-zinc-500 border border-zinc-800 hover:bg-zinc-800'
-              }`}>
-              {t.icon}
+            <AdminTab key={t.id} active={tab === t.id} onClick={() => setTab(t.id)} icon={t.icon}>
               {t.label}
-            </button>
+            </AdminTab>
           ))}
-        </div>
+        </AdminTabBar>
 
         {error && (
           <div className="bg-red-950/40 border border-red-900 text-red-400 text-sm rounded-xl px-4 py-3">{error}</div>
@@ -958,9 +952,9 @@ export default function ClubeBurger() {
                     </div>
                   )}
                   {members.length === 0 ? <Empty text="Nenhum membro cadastrado." /> : (
-                    <div className="space-y-2">
+                    <div className="admin-card-grid-2">
                       {members.map(m => (
-                        <div key={m.id} className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 flex items-center justify-between gap-3">
+                        <div key={m.id} className="admin-card bg-zinc-900 border border-zinc-800 rounded-xl p-4 flex items-center justify-between gap-3">
                           <div className="min-w-0">
                             <p className="text-white font-bold text-sm truncate">{m.name}</p>
                             <p className="text-zinc-500 text-xs">

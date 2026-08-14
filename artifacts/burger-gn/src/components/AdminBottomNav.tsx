@@ -2,7 +2,7 @@ import { Link } from 'wouter';
 import { useEffect, useState } from 'react';
 import {
   LayoutDashboard, UtensilsCrossed, Tag, MapPin, Settings, Crown,
-  TrendingUp, Star, Upload, Navigation, Users, BarChart3, PackageCheck,
+  TrendingUp, Star, Upload, Navigation, Users, BarChart3, PackageCheck, Megaphone,
 } from 'lucide-react';
 import { getAdminStreetRequests } from '../lib/api';
 
@@ -13,6 +13,7 @@ const ITEMS = [
   { href: '/admin/clientes', icon: Users, label: 'Clientes' },
   { href: '/admin/avaliacoes', icon: Star, label: 'Avaliações' },
   { href: '/admin/cardapio', icon: UtensilsCrossed, label: 'Cardápio' },
+  { href: '/admin/divulgacao', icon: Megaphone, label: 'Divulgação' },
   { href: '/admin/financeiro', icon: TrendingUp, label: 'Financeiro' },
   { href: '/admin/cupons', icon: Tag, label: 'Cupons' },
   { href: '/admin/clube', icon: Crown, label: 'Clube' },
@@ -49,7 +50,7 @@ export function AdminBottomNav({ active }: { active: string }) {
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 bg-zinc-950/95 backdrop-blur border-t border-zinc-800 z-40">
-      <div className="max-w-2xl mx-auto flex overflow-x-auto no-scrollbar">
+      <div className="admin-shell flex overflow-x-auto no-scrollbar">
         {ITEMS.map((item) => {
           const isActive = active === item.href
             || (item.href !== '/admin'

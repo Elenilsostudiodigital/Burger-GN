@@ -18,7 +18,7 @@ import {
   LayoutDashboard, UtensilsCrossed, LogOut, Bell, BellOff,
   Printer, Clock, MessageCircle, History,
   XCircle, Tag, MapPin, Navigation, Settings, Route, Upload, TrendingUp,
-  ChevronLeft, ChevronRight, GripVertical, X, Crown, Filter, ImageIcon, CheckCircle2, Check, Ban, Star, Users, Plus, PackageCheck,
+  ChevronLeft, ChevronRight, GripVertical, X, Crown, Filter, ImageIcon, CheckCircle2, Check, Ban, Star, Users, Plus, PackageCheck, Megaphone,
 } from 'lucide-react';
 import { PrepCountdown, prepCardBorderClass } from '../../components/PrepCountdown';
 import { AreaAnalysisRequestCard } from '../../components/AreaAnalysisRequestCard';
@@ -905,7 +905,7 @@ export default function AdminDashboard() {
       
 
       <header className="sticky top-0 z-40 bg-zinc-950/95 backdrop-blur border-b border-zinc-800 px-4 py-3">
-        <div className="max-w-[1800px] mx-auto flex items-center justify-between gap-3">
+        <div className="admin-shell-wide flex items-center justify-between gap-3">
           <div className="flex items-center gap-3 min-w-0">
             <div className="w-9 h-9 border-2 border-amber-500 rounded-full flex items-center justify-center shrink-0">
               <span className="text-amber-500 font-black text-xs">GN</span>
@@ -980,7 +980,7 @@ export default function AdminDashboard() {
           </div>
         </div>
 
-        <div className="max-w-[1800px] mx-auto mt-3 flex items-center gap-2 overflow-x-auto no-scrollbar">
+        <div className="admin-shell-wide mt-3 flex items-center gap-2 overflow-x-auto no-scrollbar">
           <Filter size={14} className="text-zinc-600 shrink-0" />
           <button type="button" onClick={() => setFilter('all')}
             className={`shrink-0 px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${filter === 'all' ? 'bg-amber-500 text-zinc-950' : 'bg-zinc-900 text-zinc-500 border border-zinc-800'}`}>
@@ -997,7 +997,7 @@ export default function AdminDashboard() {
         </div>
 
         {prepStats && (
-          <div className="max-w-[1800px] mx-auto mt-3 grid grid-cols-3 gap-2">
+          <div className="admin-shell-wide mt-3 grid grid-cols-3 gap-2">
             <div className="rounded-xl border border-zinc-800 bg-zinc-900/80 px-3 py-2">
               <p className="text-zinc-500 text-[9px] font-bold uppercase tracking-wider">Tempo médio (hoje)</p>
               <p className="text-white font-black text-sm mt-0.5">
@@ -1019,7 +1019,7 @@ export default function AdminDashboard() {
       </header>
 
       <div className={`px-4 pt-4 ${streetRequests.length ? '' : 'hidden'}`}>
-        <div className="max-w-[1800px] mx-auto space-y-3">
+        <div className="admin-shell-wide space-y-3">
           {streetRequests.map((req) => (
             <AreaAnalysisRequestCard
               key={req.id}
@@ -1046,7 +1046,7 @@ export default function AdminDashboard() {
               setActiveDragOrder(orders.find(o => o.id === orderId) ?? null);
             }}
             onDragEnd={handleDragEnd}>
-            <div className="max-w-[1800px] mx-auto h-full flex gap-3 overflow-x-auto pb-4" style={{ minHeight: 'calc(100vh - 240px)' }}>
+            <div className="admin-shell-wide h-full flex gap-3 overflow-x-auto pb-4" style={{ minHeight: 'calc(100vh - 240px)' }}>
               {visibleColumns.map(col => (
                 <Column key={col.key} col={col} orders={ordersByColumn[col.key]} newOrderIds={newOrderIds}
                   onAccept={handleAccept} onRefuse={openRefuse} onAdvance={handleAdvance} onBack={handleBack}
@@ -1192,7 +1192,7 @@ export default function AdminDashboard() {
         )}
 
       <nav className="sticky bottom-0 left-0 right-0 bg-zinc-950/95 backdrop-blur border-t border-zinc-800 z-40">
-        <div className="max-w-[1800px] mx-auto flex overflow-x-auto no-scrollbar">
+        <div className="admin-shell-wide flex overflow-x-auto no-scrollbar">
           {[
             { href: '/admin', icon: TrendingUp, label: 'Início', active: false },
             { href: '/admin/pedidos', icon: LayoutDashboard, label: 'Pedidos', active: true },
@@ -1200,6 +1200,7 @@ export default function AdminDashboard() {
             { href: '/admin/clientes', icon: Users, label: 'Clientes', active: false },
             { href: '/admin/avaliacoes', icon: Star, label: 'Avaliações', active: false },
             { href: '/admin/cardapio', icon: UtensilsCrossed, label: 'Cardápio' },
+            { href: '/admin/divulgacao', icon: Megaphone, label: 'Divulgação' },
             { href: '/admin/financeiro', icon: TrendingUp, label: 'Financeiro' },
             { href: '/admin/cupons', icon: Tag, label: 'Cupons' },
             { href: '/admin/clube', icon: Crown, label: 'Clube' },

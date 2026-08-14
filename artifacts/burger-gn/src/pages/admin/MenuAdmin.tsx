@@ -8,16 +8,17 @@ import {
 } from '../../lib/api';
 import { PROMO_TEXT_SUGGESTIONS, calcDiscountPercent, calcSavedAmount, formatBrl } from '../../lib/productMarketing';
 import { useAdmin } from '../../context/AdminContext';
-import { useLocation } from 'wouter';
+import { Link, useLocation } from 'wouter';
 import {
   UtensilsCrossed, Plus, Pencil, Trash2, Check, X,
-  ToggleLeft, ToggleRight, Loader2, LogOut, Zap,
+  ToggleLeft, ToggleRight, Loader2, LogOut, Zap, Megaphone,
 } from 'lucide-react';
 import type { Addon } from '../../lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { AdminBottomNav } from '../../components/AdminBottomNav';
+import { AdminTab, AdminTabBar } from '../../components/AdminTabs';
 
 type Tab = 'products' | 'categories';
 
@@ -480,7 +481,7 @@ export default function MenuAdmin() {
   return (
     <div className="min-h-screen bg-[#0a0a0a] pb-24">
       <header className="sticky top-0 z-40 bg-zinc-950/95 backdrop-blur border-b border-zinc-800 px-4 py-3">
-        <div className="max-w-2xl mx-auto flex items-center justify-between">
+        <div className="admin-shell flex items-center justify-between">
           <div>
             <h1 className="text-white font-black uppercase text-base leading-none">Gestão do Cardápio</h1>
             <p className="text-zinc-600 text-xs">Produtos e promoções</p>
@@ -491,17 +492,27 @@ export default function MenuAdmin() {
         </div>
       </header>
 
-      <main className="max-w-2xl mx-auto px-4 py-5 space-y-5">
-        <div className="flex gap-2">
+      <main className="admin-shell px-4 py-5 space-y-5">
+        <Link href="/admin/divulgacao" className="block">
+          <div className="rounded-2xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 flex items-center justify-between gap-3 hover:bg-amber-500/15 transition-colors">
+            <div className="flex items-center gap-3 min-w-0">
+              <Megaphone size={18} className="text-amber-500 shrink-0" />
+              <div className="min-w-0">
+                <p className="text-amber-400 font-black uppercase text-sm leading-none">Divulgação</p>
+                <p className="text-zinc-400 text-xs mt-1 truncate">Link, WhatsApp e QR do cardápio</p>
+              </div>
+            </div>
+            <span className="text-amber-500 text-xs font-bold uppercase shrink-0">Abrir</span>
+          </div>
+        </Link>
+
+        <AdminTabBar variant="equal">
           {(['products', 'categories'] as const).map(t => (
-            <button key={t} onClick={() => setTab(t)}
-              className={`flex-1 py-2.5 rounded-xl font-bold text-sm uppercase tracking-wider transition-all ${
-                tab === t ? 'bg-amber-500 text-zinc-950' : 'bg-zinc-900 text-zinc-500 border border-zinc-800 hover:bg-zinc-800'
-              }`}>
+            <AdminTab key={t} active={tab === t} onClick={() => setTab(t)}>
               {t === 'products' ? 'Produtos' : 'Categorias'}
-            </button>
+            </AdminTab>
           ))}
-        </div>
+        </AdminTabBar>
 
         {loading ? (
           <div className="flex justify-center py-16">
@@ -526,7 +537,7 @@ export default function MenuAdmin() {
               </Button>
             )}
 
-            <div className="space-y-3">
+            <div className="admin-card-grid-2">
               <AnimatePresence>
                 {products.map(product => (
                   <motion.div key={product.id} layout initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
@@ -623,9 +634,9 @@ export default function MenuAdmin() {
               </Button>
             </div>
 
-            <div className="space-y-2">
+            <div className="admin-card-grid-2">
               {categories.map(cat => (
-                <div key={cat.id} className="bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 flex items-center justify-between">
+                <div key={cat.id} className="admin-card bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 flex items-center justify-between">
                   <div>
                     <p className={`font-bold text-sm ${cat.active ? 'text-white' : 'text-zinc-600'}`}>{cat.name}</p>
                     <p className="text-zinc-600 text-xs font-mono">{cat.slug}</p>

@@ -25,7 +25,7 @@ function AdminNav({ active }: { active: string }) {
   ];
   return (
     <nav className="fixed bottom-0 left-0 right-0 bg-zinc-950/95 backdrop-blur border-t border-zinc-800 z-40">
-      <div className="max-w-3xl mx-auto flex overflow-x-auto no-scrollbar">
+      <div className="admin-shell flex overflow-x-auto no-scrollbar">
         {items.map(item => (
           <Link key={item.href} href={item.href} className="flex-1 min-w-[64px]">
             <div className={`flex flex-col items-center gap-0.5 py-2.5 transition-colors ${active === item.href ? 'text-amber-500' : 'text-zinc-500 hover:text-white'}`}>
@@ -71,7 +71,7 @@ export default function AdminReviews() {
   return (
     <div className="min-h-screen bg-[#0a0a0a] pb-24">
       <header className="sticky top-0 z-40 bg-zinc-950/95 border-b border-zinc-800 px-4 py-3">
-        <div className="max-w-2xl mx-auto flex items-center justify-between">
+        <div className="admin-shell flex items-center justify-between">
           <div>
             <h1 className="text-white font-black uppercase text-base flex items-center gap-2">
               <MessageSquareQuote size={18} className="text-amber-500" /> Avaliações
@@ -85,7 +85,7 @@ export default function AdminReviews() {
         </div>
       </header>
 
-      <main className="max-w-2xl mx-auto px-4 py-5 space-y-4">
+      <main className="admin-shell px-4 py-5 space-y-4">
         <div className="grid grid-cols-2 gap-3">
           <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
             <p className="text-zinc-500 text-[10px] uppercase font-bold">Total</p>
@@ -106,10 +106,10 @@ export default function AdminReviews() {
             Nenhuma avaliação recebida ainda.
           </div>
         ) : (
-          <div className="space-y-3">
+          <div className="admin-card-grid-2">
             {reviews.map(r => (
               <article key={`${r.orderId}-${r.createdAt}`}
-                className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4 space-y-2">
+                className="admin-card rounded-2xl border border-zinc-800 bg-zinc-900 p-4 space-y-2">
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <p className="text-amber-500 font-black">#{r.orderNumber}</p>

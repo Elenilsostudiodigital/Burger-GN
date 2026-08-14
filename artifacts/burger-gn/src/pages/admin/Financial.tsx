@@ -19,6 +19,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { AdminTab, AdminTabBar } from '../../components/AdminTabs';
 
 function AdminNav({ active }: { active: string }) {
   const items = [
@@ -35,7 +36,7 @@ function AdminNav({ active }: { active: string }) {
   ];
   return (
     <nav className="fixed bottom-0 left-0 right-0 bg-zinc-950/95 backdrop-blur border-t border-zinc-800 z-40 overflow-x-auto no-scrollbar">
-      <div className="max-w-3xl mx-auto flex min-w-max">
+      <div className="admin-shell flex min-w-max">
         {items.map(item => (
           <Link key={item.href} href={item.href} className="flex-1 min-w-[12%]">
             <div className={`flex flex-col items-center gap-0.5 py-2.5 px-2 transition-colors ${active === item.href ? 'text-amber-500' : 'text-zinc-500 hover:text-white'}`}>
@@ -271,7 +272,7 @@ export default function Financial() {
   return (
     <div className="min-h-screen bg-[#0a0a0a] pb-24">
       <header className="sticky top-0 z-40 bg-zinc-950/95 backdrop-blur border-b border-zinc-800 px-4 py-3">
-        <div className="max-w-3xl mx-auto flex items-center justify-between">
+        <div className="admin-shell flex items-center justify-between">
           <div className="flex items-center gap-3">
             <TrendingUp size={20} className="text-amber-500" />
             <div>
@@ -285,7 +286,7 @@ export default function Financial() {
         </div>
       </header>
 
-      <main className="max-w-3xl mx-auto px-4 py-5 space-y-5">
+      <main className="admin-shell px-4 py-5 space-y-5">
         {/* Fixed revenue cards */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <StatCard icon={<Wallet size={14} />} label="Hoje" value={report ? money(report.fixedRevenue.today) : '—'} accent="text-amber-500" />
@@ -396,16 +397,15 @@ export default function Financial() {
 
             {/* Sales chart */}
             <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4">
-              <div className="flex items-center justify-between mb-3">
+              <div className="space-y-3 mb-3">
                 <p className="text-zinc-400 text-xs uppercase font-bold">Vendas</p>
-                <div className="flex gap-1">
+                <AdminTabBar>
                   {CHART_TABS.map(t => (
-                    <button key={t.key} onClick={() => setChartTab(t.key)}
-                      className={`px-2.5 py-1 rounded-lg text-[11px] font-bold uppercase transition-all ${chartTab === t.key ? 'bg-amber-500 text-zinc-950' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'}`}>
+                    <AdminTab key={t.key} active={chartTab === t.key} onClick={() => setChartTab(t.key)}>
                       {t.label}
-                    </button>
+                    </AdminTab>
                   ))}
-                </div>
+                </AdminTabBar>
               </div>
               {chartData.length === 0 ? (
                 <p className="text-zinc-600 text-sm py-8 text-center">Sem dados para o período selecionado</p>

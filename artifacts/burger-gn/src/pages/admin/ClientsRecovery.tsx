@@ -11,6 +11,7 @@ import {
 } from '../../lib/api';
 import { AdminBottomNav } from '../../components/AdminBottomNav';
 import { ClientsSubnav } from '../../components/ClientsSubnav';
+import { AdminTab, AdminTabBar } from '../../components/AdminTabs';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -168,7 +169,7 @@ export default function ClientsRecovery() {
   return (
     <div className="min-h-screen bg-[#0a0a0a] pb-24">
       <header className="sticky top-0 z-40 bg-zinc-950/95 border-b border-zinc-800 px-4 py-3">
-        <div className="max-w-2xl mx-auto flex items-center justify-between">
+        <div className="admin-shell flex items-center justify-between">
           <div className="flex items-center gap-3">
             <Flame size={20} className="text-orange-400" />
             <div>
@@ -183,7 +184,7 @@ export default function ClientsRecovery() {
         </div>
       </header>
 
-      <main className="max-w-2xl mx-auto px-4 py-5 space-y-4">
+      <main className="admin-shell px-4 py-5 space-y-4">
         <ClientsSubnav active="recuperacao" />
 
         {/* Summary */}
@@ -214,22 +215,17 @@ export default function ClientsRecovery() {
               className="w-full h-12 rounded-xl bg-zinc-900 border border-zinc-800 pl-10 pr-3 text-sm text-white placeholder:text-zinc-600 focus:border-amber-500 focus:outline-none"
             />
           </div>
-          <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
+          <AdminTabBar>
             {FILTERS.map((f) => (
-              <button
+              <AdminTab
                 key={f.id}
-                type="button"
+                active={filter === f.id}
                 onClick={() => setFilter(f.id)}
-                className={`shrink-0 h-10 px-3 rounded-xl text-[11px] font-black uppercase ${
-                  filter === f.id
-                    ? 'bg-amber-500 text-zinc-950'
-                    : 'bg-zinc-900 border border-zinc-800 text-zinc-400'
-                }`}
               >
                 {f.emoji} {f.label}
-              </button>
+              </AdminTab>
             ))}
-          </div>
+          </AdminTabBar>
         </div>
 
         {toast && (
@@ -249,12 +245,12 @@ export default function ClientsRecovery() {
             </Link>
           </div>
         ) : (
-          <div className="space-y-3">
+          <div className="admin-card-grid-2">
             {clients.map((c) => {
               const badge = statusBadge(c);
               const warn = recentWarning(c);
               return (
-                <article key={c.id} className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4 space-y-3">
+                <article key={c.id} className="admin-card rounded-2xl border border-zinc-800 bg-zinc-900 p-4 space-y-3">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <p className="text-white font-bold text-base truncate flex items-center gap-1.5">

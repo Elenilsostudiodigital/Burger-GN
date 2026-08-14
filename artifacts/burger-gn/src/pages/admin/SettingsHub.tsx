@@ -20,6 +20,7 @@ import { ProfileTab } from './ProfileTab';
 import { SecurityTab } from './SecurityTab';
 import { NotificationsTab } from './NotificationsTab';
 import { AdminBottomNav } from '../../components/AdminBottomNav';
+import { AdminTab, AdminTabBar } from '../../components/AdminTabs';
 
 type Tab =
   | 'perfil'
@@ -556,7 +557,7 @@ export default function SettingsHub() {
   return (
     <div className="min-h-screen bg-[#0a0a0a] pb-24">
       <header className="sticky top-0 z-40 bg-zinc-950/95 backdrop-blur border-b border-zinc-800 px-4 py-3">
-        <div className="max-w-2xl mx-auto flex items-center justify-between">
+        <div className="admin-shell flex items-center justify-between">
           <div className="flex items-center gap-3">
             <Settings size={20} className="text-amber-500" />
             <div>
@@ -570,23 +571,19 @@ export default function SettingsHub() {
         </div>
       </header>
 
-      <main className="max-w-2xl mx-auto px-4 py-5 space-y-5">
-        <div className="flex gap-2 overflow-x-auto no-scrollbar">
+      <main className="admin-shell px-4 py-5 space-y-5">
+        <AdminTabBar>
           {tabs.map((t) => (
-            <button
+            <AdminTab
               key={t.id}
-              type="button"
+              active={tab === t.id}
               onClick={() => setTab(t.id)}
-              className={`shrink-0 flex-1 min-w-[7rem] h-11 rounded-xl font-bold text-sm uppercase tracking-wide transition-all flex items-center justify-center gap-2 ${
-                tab === t.id
-                  ? 'bg-amber-500 text-zinc-950'
-                  : 'bg-zinc-900 text-zinc-400 border border-zinc-800'
-              }`}
+              icon={t.icon}
             >
-              {t.icon} {t.label}
-            </button>
+              {t.label}
+            </AdminTab>
           ))}
-        </div>
+        </AdminTabBar>
 
         {tab === 'perfil' ? <ProfileTab />
           : tab === 'seguranca' ? <SecurityTab />

@@ -9,10 +9,11 @@ import {
 } from '../../lib/api';
 import { useAdmin } from '../../context/AdminContext';
 import { AdminBottomNav } from '../../components/AdminBottomNav';
+import { AdminTab, AdminTabBar } from '../../components/AdminTabs';
 import {
   LogOut, Loader2, TrendingUp, TrendingDown, Minus,
   ShoppingBag, Wallet, Users, Receipt, Package, CreditCard,
-  Bike, Clock, CalendarDays, Star, RefreshCw,
+  Bike, Clock, CalendarDays, Star, RefreshCw, Megaphone,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -260,7 +261,7 @@ export default function SalesDashboard() {
   return (
     <div className="min-h-screen bg-[#0a0a0a] pb-24">
       <header className="sticky top-0 z-40 bg-zinc-950/95 backdrop-blur border-b border-zinc-800 px-4 py-3">
-        <div className="max-w-3xl mx-auto flex items-center justify-between gap-3">
+        <div className="admin-shell flex items-center justify-between gap-3">
           <div>
             <h1 className="text-white font-black uppercase text-base leading-none">Dashboard</h1>
             <p className="text-zinc-500 text-xs mt-0.5">Vendas · The Burger GN</p>
@@ -292,25 +293,33 @@ export default function SalesDashboard() {
         </div>
       </header>
 
-      <main className="max-w-3xl mx-auto px-4 py-4 space-y-4">
+      <main className="admin-shell px-4 py-4 space-y-4">
+        <Link href="/admin/divulgacao" className="block">
+          <div className="rounded-2xl border border-amber-500/40 bg-amber-500/10 px-4 py-3.5 flex items-center justify-between gap-3 hover:bg-amber-500/15 transition-colors">
+            <div className="flex items-center gap-3 min-w-0">
+              <Megaphone size={20} className="text-amber-500 shrink-0" />
+              <div className="min-w-0">
+                <p className="text-amber-400 font-black uppercase text-sm leading-none">Divulgação</p>
+                <p className="text-zinc-400 text-xs mt-1 truncate">Link, WhatsApp e QR Code do cardápio</p>
+              </div>
+            </div>
+            <span className="text-amber-500 text-xs font-bold uppercase shrink-0">Abrir</span>
+          </div>
+        </Link>
+
         {/* Period filters — custom date row stays mounted (CSS hidden) to avoid sibling insertBefore */}
         <section className="space-y-3">
-          <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1 -mx-1 px-1">
+          <AdminTabBar>
             {PRESETS.map((p) => (
-              <button
+              <AdminTab
                 key={p.key}
-                type="button"
+                active={preset === p.key}
                 onClick={() => setPreset(p.key)}
-                className={`shrink-0 h-9 px-3 rounded-xl text-[11px] font-bold uppercase tracking-wide ${
-                  preset === p.key
-                    ? 'bg-amber-500 text-zinc-950'
-                    : 'bg-zinc-900 text-zinc-400 border border-zinc-800'
-                }`}
               >
                 {p.label}
-              </button>
+              </AdminTab>
             ))}
-          </div>
+          </AdminTabBar>
           <div
             className={`grid grid-cols-2 gap-3 rounded-2xl border border-zinc-800 bg-zinc-900 p-3 ${
               preset === 'custom' ? '' : 'hidden'
@@ -356,7 +365,7 @@ export default function SalesDashboard() {
         ) : report ? (
           <>
             {/* KPI cards — dim while refreshing; keep mounted (no chart race here) */}
-            <section className={`grid grid-cols-2 gap-3 transition-opacity ${loading ? 'opacity-60' : ''}`}>
+            <section className={`grid grid-cols-2 md:grid-cols-4 gap-3 transition-opacity ${loading ? 'opacity-60' : ''}`}>
               <KpiCard
                 icon={<Wallet size={16} />}
                 label={kpiTitle(report.period.preset, 'Faturamento')}

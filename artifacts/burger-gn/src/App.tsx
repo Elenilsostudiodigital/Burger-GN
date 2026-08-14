@@ -40,6 +40,7 @@ import AdminClientDetail from "./pages/admin/ClientDetail";
 import AdminClientsRecovery from "./pages/admin/ClientsRecovery";
 import AdminNovasRuas from "./pages/admin/NovasRuas";
 import AdminRuasEntrega from "./pages/admin/RuasEntrega";
+import AdminDivulgacao from "./pages/admin/Divulgacao";
 
 const queryClient = new QueryClient();
 
@@ -118,6 +119,7 @@ function Router() {
         <Route path="/admin/pedidos" component={AdminPedidosRoute} />
         <Route path="/admin/novo-pedido" component={() => <ProtectedAdminRoute component={AdminNewOrder} />} />
         <Route path="/admin/cardapio" component={() => <ProtectedAdminRoute component={AdminMenuAdmin} />} />
+        <Route path="/admin/divulgacao" component={() => <ProtectedAdminRoute component={AdminDivulgacao} />} />
         <Route path="/admin/financeiro" component={() => <ProtectedAdminRoute component={AdminFinancial} />} />
         <Route path="/admin/cupons" component={() => <ProtectedAdminRoute component={AdminCoupons} />} />
         <Route path="/admin/clube" component={() => <ProtectedAdminRoute component={AdminClubeBurger} />} />

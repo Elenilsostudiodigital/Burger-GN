@@ -105,7 +105,7 @@ export default function ClientDetail() {
   return (
     <div className="min-h-screen bg-[#0a0a0a] pb-24">
       <header className="sticky top-0 z-40 bg-zinc-950/95 border-b border-zinc-800 px-4 py-3">
-        <div className="max-w-2xl mx-auto flex items-center justify-between">
+        <div className="admin-shell flex items-center justify-between">
           <div className="flex items-center gap-3">
             <Link href="/admin/clientes" className="p-2 text-zinc-400 hover:text-white">
               <ArrowLeft size={20} />
@@ -122,7 +122,7 @@ export default function ClientDetail() {
         </div>
       </header>
 
-      <main className="max-w-2xl mx-auto px-4 py-5 space-y-4">
+      <main className="admin-shell px-4 py-5 space-y-4">
         {loading && (
           <div className="flex justify-center py-16"><Loader2 className="animate-spin text-amber-500" size={28} /></div>
         )}

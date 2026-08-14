@@ -117,7 +117,7 @@ export default function AdminNovasRuas() {
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-white pb-24">
       <header className="sticky top-0 z-30 bg-zinc-950/95 border-b border-zinc-800 px-4 py-3 backdrop-blur">
-        <div className="max-w-3xl mx-auto flex items-center gap-3">
+        <div className="admin-shell flex items-center gap-3">
           <button type="button" onClick={() => setLocation('/admin')} className="p-2 text-zinc-400 hover:text-white">
             <ArrowLeft size={18} />
           </button>
@@ -131,7 +131,7 @@ export default function AdminNovasRuas() {
         </div>
       </header>
 
-      <main className="max-w-3xl mx-auto px-4 py-4 space-y-4">
+      <main className="admin-shell px-4 py-4 space-y-4">
         {error ? <p className="text-red-400 text-sm">{error}</p> : null}
 
         {!selectedId ? (

@@ -396,7 +396,7 @@ export default function AdminRuasEntrega() {
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-white pb-24">
       <header className="sticky top-0 z-30 bg-zinc-950/95 border-b border-zinc-800 px-4 py-3 backdrop-blur">
-        <div className="max-w-3xl mx-auto flex items-center gap-3">
+        <div className="admin-shell flex items-center gap-3">
           <Link href="/admin/config" className="p-2 text-zinc-400 hover:text-white">
             <ArrowLeft size={18} />
           </Link>
@@ -415,7 +415,7 @@ export default function AdminRuasEntrega() {
         Visibility is CSS-only (`hidden`) so React never insertBefore across
         a reference node that disappeared during listLoading / edit toggles.
       */}
-      <main className="max-w-3xl mx-auto px-4 py-4 space-y-4">
+      <main className="admin-shell px-4 py-4 space-y-4">
         <div className="flex flex-col sm:flex-row gap-2">
           <div className="relative flex-1">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600" />
