@@ -5,6 +5,16 @@ Toda nova implementação aprovada pelo proprietário gera uma nova versão.
 
 ---
 
+## Burger GN v1.2
+
+- Controle de Produtos Esgotados
+  - Toggle Disponível/Esgotado no Cardápio ADM (sem editar/excluir)
+  - Filtros Todos / Disponíveis / Esgotados
+  - Selo ESGOTADO no cardápio público + compra bloqueada
+  - Carrinho e pedidos rejeitam itens esgotados
+
+---
+
 ## Burger GN v1.1
 
 - Notificações e Sons (Configurações)

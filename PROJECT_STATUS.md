@@ -11,6 +11,7 @@ Estes módulos já foram aprovados manualmente.
 - ✅ Configuração de Pagamentos
 - ✅ Configuração do WhatsApp
 - ✅ Notificações e Sons
+- ✅ Controle de Produtos Esgotados
 
 ---
 
@@ -28,7 +29,6 @@ Atualizar esta lista conforme o andamento do projeto.
 - 🔄 Produtos e Promoções (Marketing)
 
 - 🔄 Divulgação do Cardápio
-- 🔄 Controle de Produtos Esgotados
 
 ---
 
@@ -43,5 +43,4 @@ _Nenhum bug aberto registrado neste momento. Incluir aqui qualquer falha reprodu
 
 ## PRÓXIMA ETAPA
 
-Módulo **Controle de Produtos Esgotados** implementado — aguardando testes locais, deploy e validação manual.
-Filtros no Cardápio ADM (Todos / Disponíveis / Esgotados); selo ESGOTADO no cardápio público; bloqueio no carrinho.
+Aguardando próxima solicitação do proprietário.
