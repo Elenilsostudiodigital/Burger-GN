@@ -5,6 +5,14 @@ Toda nova implementação aprovada pelo proprietário gera uma nova versão.
 
 ---
 
+## Burger GN v1.4.1
+
+- Correção pontual: pedidos #3 e #7 (PIX legado `pending` já em Entregue)
+  - Regularização só desses registros + finalização pelo fluxo normal
+  - Lógica geral de finalização inalterada
+
+---
+
 ## Burger GN v1.4
 
 - Upload Profissional de Imagens dos Produtos

@@ -45,5 +45,4 @@ _Nenhum bug aberto registrado neste momento. Incluir aqui qualquer falha reprodu
 
 ## PRÓXIMA ETAPA
 
-Pedidos **#3** e **#7** corrigidos e finalizados — aguardando validação manual.
-Causa: PIX legado com `paymentStatus=pending` após já estarem em Entregue; a regra atual bloqueia finalizar PIX não pago (comportamento correto). Só esses dois registros foram regularizados.
+Aguardando próxima solicitação do proprietário.
