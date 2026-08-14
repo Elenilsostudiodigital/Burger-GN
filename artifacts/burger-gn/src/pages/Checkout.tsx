@@ -17,6 +17,7 @@ import {
   FidelityRedeemSelection,
 } from '../components/ClubeFidelityRedeemPrompt';
 import { getSavedClubePhone } from '../lib/clubeCliente';
+import { setPresenceIdentity } from '../lib/menuPresence';
 import {
   ArrowLeft, Bike, Store, Utensils, CreditCard, Banknote, QrCode, Star,
   Loader2, Tag, X, CheckCircle2, MapPin, AlertCircle, ChevronDown, LocateFixed, Navigation, Home,
@@ -127,7 +128,19 @@ export default function Checkout() {
   const clubePhoneForRedeem = form.telefone || getSavedClubePhone();
 
   const setField = useCallback(<K extends keyof FormState>(key: K, value: FormState[K]) => {
-    setForm(prev => ({ ...prev, [key]: value }));
+    setForm(prev => {
+      const next = { ...prev, [key]: value };
+      if (key === 'nome' || key === 'telefone') {
+        setPresenceIdentity(
+          key === 'nome' ? String(value) : next.nome,
+          key === 'telefone' ? String(value) : next.telefone,
+        );
+        try {
+          window.dispatchEvent(new CustomEvent('bgn:presence-identity'));
+        } catch { /* ignore */ }
+      }
+      return next;
+    });
     setFieldError('');
   }, []);
 

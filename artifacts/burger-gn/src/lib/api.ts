@@ -2091,3 +2091,33 @@ export const getClientImportLogs = (limit = 20) =>
     logs: ClientImportLogRow[];
   }>;
 
+// ── Menu presence (Clientes Online) ──────────────────────────────────────────
+
+export type PresenceSessionStatus = "browsing" | "cart" | "checkout";
+
+export interface PresenceSession {
+  sessionId: string;
+  status: PresenceSessionStatus | string;
+  displayName: string;
+  phone: string | null;
+  cartItems: number;
+  enteredAt: string;
+  lastSeenAt: string;
+  browsingSeconds: number;
+  checkoutStartedAt: string | null;
+}
+
+export interface PresenceSnapshot {
+  summary: {
+    online: number;
+    cart: number;
+    checkout: number;
+    browsing: number;
+  };
+  sessions: PresenceSession[];
+  ttlSeconds: number;
+}
+
+export const getAdminPresence = () =>
+  api.get("/admin/presence") as Promise<PresenceSnapshot>;
+

@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { PrepCountdown, prepCardBorderClass } from '../../components/PrepCountdown';
 import { AreaAnalysisRequestCard } from '../../components/AreaAnalysisRequestCard';
+import { PedidosPresenceBar } from '../../components/PedidosPresenceBar';
 import {
   computePrepRemainingSeconds,
   formatPrepDuration,
@@ -1016,8 +1017,14 @@ export default function AdminDashboard() {
             </div>
           </div>
         )}
-      </header>
 
+        <PedidosPresenceBar
+          onAlert={(message) => {
+            setNotification(message);
+            setTimeout(() => setNotification(null), 5000);
+          }}
+        />
+      </header>
       <div className={`px-4 pt-4 ${streetRequests.length ? '' : 'hidden'}`}>
         <div className="admin-shell-wide space-y-3">
           {streetRequests.map((req) => (

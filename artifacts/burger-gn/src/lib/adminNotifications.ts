@@ -35,7 +35,10 @@ export type NotifEventKey =
   | 'ready'
   | 'outForDelivery'
   | 'delivered'
-  | 'overdue';
+  | 'overdue'
+  | 'presenceOnline'
+  | 'presenceCart'
+  | 'presenceCheckout';
 
 export interface CustomSound {
   id: string;
@@ -151,6 +154,9 @@ export const EVENT_LABELS: Record<NotifEventKey, string> = {
   outForDelivery: 'Saiu para Entrega',
   delivered: 'Pedido Entregue',
   overdue: 'Pedido em Atraso',
+  presenceOnline: 'Cliente Online (Cardápio)',
+  presenceCart: 'Carrinho Ativo',
+  presenceCheckout: 'Finalizando Pedido',
 };
 
 const DEFAULT_MESSAGES: Record<NotifEventKey, string> = {
@@ -161,6 +167,9 @@ const DEFAULT_MESSAGES: Record<NotifEventKey, string> = {
   outForDelivery: 'Pedido saiu para entrega',
   delivered: 'Pedido entregue',
   overdue: 'Pedido em atraso',
+  presenceOnline: 'Novo cliente entrou no cardápio',
+  presenceCart: 'Um cliente iniciou um pedido',
+  presenceCheckout: 'Um cliente está finalizando um pedido',
 };
 
 const SMART_VOICE_SCRIPTS: Partial<Record<NotifEventKey, string>> = {
@@ -171,10 +180,11 @@ const SMART_VOICE_SCRIPTS: Partial<Record<NotifEventKey, string>> = {
 };
 
 function defaultEvent(key: NotifEventKey, extra: Partial<EventSoundConfig> = {}): EventSoundConfig {
+  const presence = key === 'presenceOnline' || key === 'presenceCart' || key === 'presenceCheckout';
   return {
     enabled: true,
-    sound: key === 'newOrder' ? 'new_order' : key === 'overdue' ? 'alarm' : 'classic',
-    volume: 0.7,
+    sound: key === 'newOrder' ? 'new_order' : key === 'overdue' ? 'alarm' : presence ? 'soft' : 'classic',
+    volume: presence ? 0.45 : 0.7,
     customMessage: DEFAULT_MESSAGES[key],
     repeatMode: key === 'newOrder' ? 'until_accepted' : 'none',
     repeatIntervalSec: 10,
@@ -214,6 +224,9 @@ export function defaultNotificationSettings(): NotificationSettings {
         repeatMode: 'times_3',
         repeatIntervalSec: 15,
       }),
+      presenceOnline: defaultEvent('presenceOnline', { sound: 'soft', volume: 0.4 }),
+      presenceCart: defaultEvent('presenceCart', { sound: 'classic', volume: 0.45 }),
+      presenceCheckout: defaultEvent('presenceCheckout', { sound: 'restaurant_bell', volume: 0.5 }),
     },
     delay: {
       enabled: true,

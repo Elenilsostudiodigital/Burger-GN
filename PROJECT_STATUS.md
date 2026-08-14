@@ -29,6 +29,7 @@ Atualizar esta lista conforme o andamento do projeto.
 - 🔄 Produtos e Promoções (Marketing)
 
 - 🔄 Divulgação do Cardápio
+- 🔄 Clientes Online / Monitoramento do Cardápio
 
 ---
 
@@ -43,4 +44,6 @@ _Nenhum bug aberto registrado neste momento. Incluir aqui qualquer falha reprodu
 
 ## PRÓXIMA ETAPA
 
-Aguardando próxima solicitação do proprietário.
+Módulo **Clientes Online** na tela de **Pedidos** — aguardando teste em tempo real e aprovação.
+Onde ver: Admin → Pedidos (`/admin/pedidos`) → faixa no topo (Online / Carrinhos / Checkout).
+Sons: Config → Notificações e Sons → eventos Cliente Online / Carrinho / Checkout.

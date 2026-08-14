@@ -286,4 +286,7 @@ const EVENT_TITLE: Record<NotifEventKey, string> = {
   outForDelivery: 'Saiu para entrega',
   delivered: 'Pedido entregue',
   overdue: 'Pedido em atraso',
+  presenceOnline: 'Cliente no cardápio',
+  presenceCart: 'Carrinho ativo',
+  presenceCheckout: 'Finalizando pedido',
 };

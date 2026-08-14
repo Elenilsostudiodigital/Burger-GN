@@ -41,6 +41,7 @@ import AdminClientsRecovery from "./pages/admin/ClientsRecovery";
 import AdminNovasRuas from "./pages/admin/NovasRuas";
 import AdminRuasEntrega from "./pages/admin/RuasEntrega";
 import AdminDivulgacao from "./pages/admin/Divulgacao";
+import { MenuPresenceTracker } from "./components/MenuPresenceTracker";
 
 const queryClient = new QueryClient();
 
@@ -100,6 +101,7 @@ function AdminSecurityRoute() {
 function Router() {
   return (
     <>
+      <MenuPresenceTracker />
       <Switch>
         {/* Customer routes */}
         <Route path="/" component={Home} />

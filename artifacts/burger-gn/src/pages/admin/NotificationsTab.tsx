@@ -42,6 +42,9 @@ const EVENT_KEYS: NotifEventKey[] = [
   'outForDelivery',
   'delivered',
   'overdue',
+  'presenceOnline',
+  'presenceCart',
+  'presenceCheckout',
 ];
 
 function CheckboxRow({

@@ -19,6 +19,7 @@ import financialRouter from "./financial";
 import salesDashboardRouter from "./salesDashboard";
 import clubeRouter from "./clube";
 import clientesRouter from "./clientes";
+import presenceRouter from "./presence";
 
 const router: IRouter = Router();
 
@@ -42,5 +43,6 @@ router.use(financialRouter);
 router.use(salesDashboardRouter);
 router.use(clubeRouter);
 router.use(clientesRouter);
+router.use(presenceRouter);
 
 export default router;
