@@ -5,6 +5,16 @@ Toda nova implementação aprovada pelo proprietário gera uma nova versão.
 
 ---
 
+## Burger GN v1.4
+
+- Upload Profissional de Imagens dos Produtos
+  - Selecionar foto no computador ou galeria/câmera no celular
+  - Arrastar e soltar, recorte (zoom/mover/girar), otimização automática
+  - Pré-visualizar, trocar e remover; URL apenas como opção avançada
+  - Compatível com cardápio, promoções, destaques e demais telas que usam `image`
+
+---
+
 ## Burger GN v1.3
 
 - Clientes Online / Monitoramento do Cardápio
