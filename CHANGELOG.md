@@ -5,6 +5,16 @@ Toda nova implementação aprovada pelo proprietário gera uma nova versão.
 
 ---
 
+## Burger GN v1.3
+
+- Clientes Online / Monitoramento do Cardápio
+  - Faixa em tempo real no topo da tela de Pedidos (Online / Carrinhos / Checkout)
+  - Alertas visuais na própria tela de Pedidos
+  - Sons configuráveis em Notificações e Sons
+  - Sessões anônimas até nome/telefone; remoção por inatividade
+
+---
+
 ## Burger GN v1.2
 
 - Controle de Produtos Esgotados
