@@ -31,6 +31,8 @@ export function ProductRowCard({
   const promoHeadline = productPromoHeadline(product);
   const promoActive = !!product.isPromoActive;
   const locked = !!product.isClubeExclusive && !clubeLoggedIn;
+  const soldOut = product.available === false;
+  const canBuy = !locked && !soldOut;
   const effective = productEffectivePrice(product);
   const compareAt = product.compareAtPrice ? parseFloat(String(product.compareAtPrice)) : null;
 
@@ -48,7 +50,7 @@ export function ProductRowCard({
           onSelect(product);
         }
       }}
-      className="w-full text-left group relative flex gap-3.5 rounded-2xl border border-zinc-800/90 bg-zinc-900/70 p-3 shadow-[0_6px_24px_rgba(0,0,0,0.25)] hover:border-zinc-700 hover:bg-zinc-900 active:scale-[0.99] transition-all cursor-pointer"
+      className={`w-full text-left group relative flex gap-3.5 rounded-2xl border border-zinc-800/90 bg-zinc-900/70 p-3 shadow-[0_6px_24px_rgba(0,0,0,0.25)] hover:border-zinc-700 hover:bg-zinc-900 active:scale-[0.99] transition-all cursor-pointer ${soldOut ? 'opacity-90' : ''}`}
     >
       <div className="flex-1 min-w-0 flex flex-col justify-between py-0.5">
         <div className="space-y-1">
@@ -56,7 +58,11 @@ export function ProductRowCard({
             <h3 className="text-white font-bold text-[15px] leading-snug tracking-tight line-clamp-2">
               {product.name}
             </h3>
-            {badge ? (
+            {soldOut ? (
+              <span className="shrink-0 mt-0.5 inline-flex items-center rounded-md bg-zinc-700 px-1.5 py-0.5 text-[10px] font-black tracking-wide text-white">
+                ESGOTADO
+              </span>
+            ) : badge ? (
               <span className="shrink-0 mt-0.5 inline-flex items-center rounded-md bg-red-600 px-1.5 py-0.5 text-[10px] font-black tracking-wide text-white">
                 {badge}
               </span>
@@ -92,11 +98,20 @@ export function ProductRowCard({
             {promoActive && compareAt !== null && Number.isFinite(compareAt) ? (
               <span className="text-zinc-500 text-xs line-through">{formatBrl(compareAt)}</span>
             ) : null}
-            <span className={`font-black text-[15px] tracking-tight ${locked ? 'text-zinc-500' : 'text-amber-500'}`}>
+            <span className={`font-black text-[15px] tracking-tight ${!canBuy ? 'text-zinc-500' : 'text-amber-500'}`}>
               {locked ? 'Exclusivo' : formatBrl(effective)}
             </span>
           </div>
-          {!locked && onQuickAdd && onQuantityChange && (
+          {soldOut ? (
+            <button
+              type="button"
+              disabled
+              onClick={e => e.stopPropagation()}
+              className="px-2.5 h-8 inline-flex items-center justify-center rounded-full bg-zinc-800 text-zinc-500 text-[10px] font-black uppercase tracking-wide cursor-not-allowed"
+            >
+              Esgotado
+            </button>
+          ) : canBuy && onQuickAdd && onQuantityChange ? (
             quantity === 0 ? (
               <button
                 type="button"
@@ -127,7 +142,7 @@ export function ProductRowCard({
                 </button>
               </div>
             )
-          )}
+          ) : null}
         </div>
       </div>
 
@@ -135,10 +150,17 @@ export function ProductRowCard({
         <img
           src={product.image || 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=400&h=400&fit=crop'}
           alt={product.name}
-          className={`w-full h-full object-cover transition-transform duration-500 group-hover:scale-105 ${locked ? 'opacity-70' : ''}`}
+          className={`w-full h-full object-cover transition-transform duration-500 group-hover:scale-105 ${!canBuy ? 'opacity-55 grayscale' : ''}`}
           loading="lazy"
         />
-        {product.videoUrl && (
+        {soldOut && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/55">
+            <span className="px-2 py-1 rounded-md bg-zinc-950/90 border border-zinc-600 text-white text-[10px] font-black tracking-widest uppercase">
+              Esgotado
+            </span>
+          </div>
+        )}
+        {product.videoUrl && !soldOut && (
           <div className="absolute top-1.5 right-1.5 bg-black/55 backdrop-blur text-white p-1 rounded-full">
             <PlayCircle size={14} />
           </div>

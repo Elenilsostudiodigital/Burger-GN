@@ -85,6 +85,7 @@ export default function Home() {
     cartItems.find(ci => ci.item.id === productId && ci.selectedAddons.length === 0 && !ci.notes)?.lineId;
 
   const handleQuickAdd = (product: Product) => {
+    if (!product.available) return;
     if (product.isClubeExclusive && !clubeLoggedIn) return;
     addItem({
       id: product.id,
@@ -97,6 +98,7 @@ export default function Home() {
   };
 
   const handleModalAdd = (product: Product, addons: Addon[], notes: string, quantity: number) => {
+    if (!product.available) return;
     if (product.isClubeExclusive && !clubeLoggedIn) return;
     addItem({
       id: product.id,

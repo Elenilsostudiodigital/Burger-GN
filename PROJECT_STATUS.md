@@ -28,6 +28,7 @@ Atualizar esta lista conforme o andamento do projeto.
 - 🔄 Produtos e Promoções (Marketing)
 
 - 🔄 Divulgação do Cardápio
+- 🔄 Controle de Produtos Esgotados
 
 ---
 
@@ -42,5 +43,5 @@ _Nenhum bug aberto registrado neste momento. Incluir aqui qualquer falha reprodu
 
 ## PRÓXIMA ETAPA
 
-Módulo **Divulgação** em produção — aguardando validação manual.
-Onde achar: menu inferior **Divulgação**, atalho no Início/Cardápio, ou `/admin/divulgacao`.
+Módulo **Controle de Produtos Esgotados** implementado — aguardando testes locais, deploy e validação manual.
+Filtros no Cardápio ADM (Todos / Disponíveis / Esgotados); selo ESGOTADO no cardápio público; bloqueio no carrinho.

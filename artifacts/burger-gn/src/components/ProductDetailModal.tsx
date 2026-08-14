@@ -62,6 +62,8 @@ export function ProductDetailModal({ product, onClose, onAdd, clubeLoggedIn = fa
   const ingredients = safeList(product?.ingredients);
   const addons = safeList(product?.addons);
   const locked = !!(product?.isClubeExclusive && !clubeLoggedIn);
+  const soldOut = product?.available === false;
+  const canBuy = !locked && !soldOut;
   const base = product ? productEffectivePrice(product) : 0;
   const unitPrice = product
     ? base + selected.reduce((acc, a) => acc + (Number(a.price) || 0), 0)
@@ -131,13 +133,24 @@ export function ProductDetailModal({ product, onClose, onAdd, clubeLoggedIn = fa
                 >
                   <X size={18} />
                 </button>
+                {soldOut && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-black/45 pointer-events-none">
+                    <span className="px-3 py-1.5 rounded-md bg-zinc-950/90 border border-zinc-600 text-white text-xs font-black tracking-widest uppercase">
+                      Esgotado
+                    </span>
+                  </div>
+                )}
               </div>
 
               <div className="px-5 py-4 space-y-5">
                 <div>
                   <div className="flex items-start gap-2 flex-wrap">
                     <h2 className="text-white font-black uppercase text-xl leading-tight tracking-tight">{product.name}</h2>
-                    {badge ? (
+                    {soldOut ? (
+                      <span className="shrink-0 mt-1 inline-flex rounded-md bg-zinc-700 px-2 py-0.5 text-[11px] font-black text-white tracking-wide">
+                        ESGOTADO
+                      </span>
+                    ) : badge ? (
                       <span className="shrink-0 mt-1 inline-flex rounded-md bg-red-600 px-2 py-0.5 text-[11px] font-black text-white">
                         {badge}
                       </span>
@@ -224,7 +237,15 @@ export function ProductDetailModal({ product, onClose, onAdd, clubeLoggedIn = fa
             </div>
 
             <div className="shrink-0 z-20 border-t border-zinc-800 bg-zinc-950 px-5 pt-3 pb-3 space-y-3">
-              {!locked ? (
+              {soldOut ? (
+                <button
+                  type="button"
+                  disabled
+                  className="w-full min-h-14 py-3.5 bg-zinc-800 text-zinc-500 font-black uppercase tracking-wider rounded-xl cursor-not-allowed"
+                >
+                  Produto esgotado
+                </button>
+              ) : !locked ? (
                 <>
                   <div className="flex items-center justify-center gap-4 bg-zinc-900 border border-zinc-800 rounded-xl py-2">
                     <button
@@ -246,6 +267,7 @@ export function ProductDetailModal({ product, onClose, onAdd, clubeLoggedIn = fa
                   <button
                     type="button"
                     onClick={() => {
+                      if (!canBuy) return;
                       onAdd(product, selected, notes.trim(), quantity);
                       onClose();
                     }}

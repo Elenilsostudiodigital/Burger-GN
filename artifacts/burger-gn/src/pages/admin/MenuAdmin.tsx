@@ -21,6 +21,7 @@ import { AdminBottomNav } from '../../components/AdminBottomNav';
 import { AdminTab, AdminTabBar } from '../../components/AdminTabs';
 
 type Tab = 'products' | 'categories';
+type AvailabilityFilter = 'all' | 'available' | 'soldout';
 
 interface ProductFormData {
   name: string;
@@ -398,6 +399,7 @@ export default function MenuAdmin() {
   const [newCatSlug, setNewCatSlug] = useState('');
   const [addingCat, setAddingCat] = useState(false);
   const [promoProduct, setPromoProduct] = useState<Product | null>(null);
+  const [availabilityFilter, setAvailabilityFilter] = useState<AvailabilityFilter>('all');
 
   const loadData = async () => {
     setLoading(true);
@@ -478,6 +480,12 @@ export default function MenuAdmin() {
 
   const handleLogout = async () => { await logout(); setLocation('/'); };
 
+  const filteredProducts = products.filter(p => {
+    if (availabilityFilter === 'available') return p.available;
+    if (availabilityFilter === 'soldout') return !p.available;
+    return true;
+  });
+
   return (
     <div className="min-h-screen bg-[#0a0a0a] pb-24">
       <header className="sticky top-0 z-40 bg-zinc-950/95 backdrop-blur border-b border-zinc-800 px-4 py-3">
@@ -531,23 +539,52 @@ export default function MenuAdmin() {
             )}
 
             {!showForm && (
-              <Button onClick={() => { setEditProduct(null); setShowForm(true); }}
-                className="w-full h-12 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold rounded-xl flex items-center justify-center gap-2">
-                <Plus size={18} /> Adicionar Produto
-              </Button>
+              <>
+                <Button onClick={() => { setEditProduct(null); setShowForm(true); }}
+                  className="w-full h-12 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold rounded-xl flex items-center justify-center gap-2">
+                  <Plus size={18} /> Adicionar Produto
+                </Button>
+
+                <div className="flex gap-2">
+                  {([
+                    { id: 'all' as const, label: 'Todos', count: products.length },
+                    { id: 'available' as const, label: 'Disponíveis', count: products.filter(p => p.available).length },
+                    { id: 'soldout' as const, label: 'Esgotados', count: products.filter(p => !p.available).length },
+                  ]).map(f => (
+                    <button
+                      key={f.id}
+                      type="button"
+                      onClick={() => setAvailabilityFilter(f.id)}
+                      className={`flex-1 rounded-xl px-2 py-2.5 text-center border transition-colors ${
+                        availabilityFilter === f.id
+                          ? 'border-amber-500 bg-amber-500/15 text-amber-400'
+                          : 'border-zinc-800 bg-zinc-900 text-zinc-400 hover:border-zinc-700'
+                      }`}
+                    >
+                      <span className="block text-[11px] font-black uppercase tracking-wide">{f.label}</span>
+                      <span className="block text-xs mt-0.5 opacity-80">{f.count}</span>
+                    </button>
+                  ))}
+                </div>
+              </>
             )}
 
             <div className="admin-card-grid-2">
               <AnimatePresence>
-                {products.map(product => (
+                {filteredProducts.map(product => (
                   <motion.div key={product.id} layout initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
                     className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden flex gap-0">
-                    <div className="w-24 shrink-0">
+                    <div className="w-24 shrink-0 relative">
                       <img
                         src={product.image || 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=200&h=150&fit=crop'}
                         alt={product.name}
                         className={`w-full h-full object-cover min-h-[88px] ${!product.available ? 'opacity-40 grayscale' : ''}`}
                       />
+                      {!product.available && (
+                        <span className="absolute inset-x-1 bottom-1 text-center text-[9px] font-black uppercase tracking-wider bg-zinc-950/90 text-white rounded px-1 py-0.5">
+                          Esgotado
+                        </span>
+                      )}
                     </div>
                     <div className="flex-1 p-3 min-w-0">
                       <div className="flex items-start justify-between gap-2">
@@ -575,17 +612,25 @@ export default function MenuAdmin() {
                               {[product.discountLabel, product.promoText].filter(Boolean).join(' · ')}
                             </span>
                           ) : null}
+                          <button
+                            type="button"
+                            onClick={() => handleToggleAvailable(product)}
+                            className={`mt-2 inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] font-black uppercase tracking-wide border transition-colors ${
+                              product.available
+                                ? 'border-green-500/40 bg-green-900/25 text-green-400 hover:bg-green-900/40'
+                                : 'border-red-500/40 bg-red-900/25 text-red-400 hover:bg-red-900/40'
+                            }`}
+                            title={product.available ? 'Marcar como esgotado' : 'Marcar como disponível'}
+                          >
+                            {product.available ? <ToggleRight size={14} /> : <ToggleLeft size={14} />}
+                            {product.available ? 'Disponível' : 'Esgotado'}
+                          </button>
                         </div>
                         <div className="flex flex-col gap-1.5 shrink-0">
                           <button onClick={() => setPromoProduct(product)}
                             className="px-2 py-1 text-[10px] font-black uppercase rounded-lg bg-amber-500/15 text-amber-400 border border-amber-500/30 hover:bg-amber-500/25 inline-flex items-center gap-1"
                             title="Promoção rápida">
                             <Zap size={12} /> Promoção
-                          </button>
-                          <button onClick={() => handleToggleAvailable(product)}
-                            className={`p-1.5 rounded-lg transition-colors ${product.available ? 'text-green-400 bg-green-900/30 hover:bg-green-900/50' : 'text-zinc-600 bg-zinc-800 hover:bg-zinc-700'}`}
-                            title={product.available ? 'Desativar' : 'Ativar'}>
-                            {product.available ? <ToggleRight size={18} /> : <ToggleLeft size={18} />}
                           </button>
                           <button onClick={() => { setEditProduct(product); setShowForm(true); }}
                             className="p-1.5 text-zinc-400 bg-zinc-800 hover:bg-zinc-700 rounded-lg transition-colors" title="Editar">
@@ -602,10 +647,18 @@ export default function MenuAdmin() {
                 ))}
               </AnimatePresence>
 
-              {products.length === 0 && (
+              {filteredProducts.length === 0 && (
                 <div className="text-center py-12">
                   <UtensilsCrossed size={40} className="text-zinc-800 mx-auto mb-3" />
-                  <p className="text-zinc-600">Nenhum produto cadastrado.</p>
+                  <p className="text-zinc-600">
+                    {products.length === 0
+                      ? 'Nenhum produto cadastrado.'
+                      : availabilityFilter === 'soldout'
+                        ? 'Nenhum produto esgotado.'
+                        : availabilityFilter === 'available'
+                          ? 'Nenhum produto disponível.'
+                          : 'Nenhum produto cadastrado.'}
+                  </p>
                 </div>
               )}
             </div>

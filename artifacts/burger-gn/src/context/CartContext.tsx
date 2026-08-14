@@ -45,6 +45,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   const [cartItems, setCartItems] = useState<CartItem[]>([]);
 
   const addItem = (item: CartProduct, options?: AddItemOptions) => {
+    if (!item.available) return;
     const selectedAddons = options?.addons ?? [];
     const notes = options?.notes ?? '';
     const qtyToAdd = options?.quantity ?? 1;

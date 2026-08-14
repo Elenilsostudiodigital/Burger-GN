@@ -70,7 +70,8 @@ router.get("/products", resolvePublicCompany, async (req, res) => {
   try {
     await ensureProductMarketingSchema();
     const { category } = req.query as { category?: string };
-    const conditions = [eq(productsTable.companyId, req.companyId!), eq(productsTable.available, true)];
+    // Include sold-out products so the public menu can show ESGOTADO (cart/orders still block them).
+    const conditions = [eq(productsTable.companyId, req.companyId!)];
     if (category) {
       const [cat] = await db
         .select()
