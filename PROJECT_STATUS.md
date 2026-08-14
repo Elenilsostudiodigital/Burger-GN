@@ -39,7 +39,7 @@ Atualizar esta lista conforme o andamento do projeto.
 Listar todos os bugs ainda existentes.  
 Quando um bug for corrigido **e** validado manualmente pelo proprietário, remover da lista.
 
-_Nenhum bug aberto registrado neste momento. Incluir aqui qualquer falha reproduzível pendente de validação._
+- 🔄 Pedidos #3 e #7 presos em ENTREGUE (PIX legado `paymentStatus=pending`) — correção pontual em andamento.
 
 ---
 

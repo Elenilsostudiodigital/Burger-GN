@@ -1382,4 +1382,54 @@ router.patch("/orders/:id/payment-status", requireCompanyAuth, async (req, res) 
   }
 });
 
+/**
+ * One-shot data repair for legacy orders #3 and #7 only.
+ * They reached Entregue (done) on 2026-08-05 with PIX still pending — before the
+ * payment-conference gate. Finalize is correctly blocked for unpaid PIX; this
+ * does NOT change that logic. It only marks those two already-delivered records
+ * as paid so the existing FINALIZAR PEDIDO path can run.
+ */
+const LEGACY_STUCK_DELIVERED_PIX = new Set([3, 7]);
+
+router.post("/admin/repair-legacy-delivered-pix", requireCompanyAuth, async (req, res) => {
+  try {
+    const orders = await db.select().from(ordersTable)
+      .where(eq(ordersTable.companyId, req.companyId!));
+    const repaired: Array<{ id: number; orderNumber: number }> = [];
+    const skipped: Array<{ orderNumber: number; reason: string }> = [];
+
+    for (const existing of orders) {
+      if (!LEGACY_STUCK_DELIVERED_PIX.has(existing.orderNumber)) continue;
+      const { publicNotes, meta } = parseOrderNotes(existing.notes);
+      const wf = resolveWorkflow(existing.status, meta);
+      if (existing.paymentMethod !== "pix" || existing.paymentStatus !== "pending") {
+        skipped.push({ orderNumber: existing.orderNumber, reason: "not unpaid pix" });
+        continue;
+      }
+      if (existing.status !== "done" || wf !== "done") {
+        skipped.push({ orderNumber: existing.orderNumber, reason: `not delivered (status=${existing.status} wf=${wf})` });
+        continue;
+      }
+      const nextMeta = appendHistory(
+        meta,
+        "done",
+        "Pagamento PIX regularizado (pedido legado já entregue)",
+      );
+      await db.update(ordersTable)
+        .set({
+          paymentStatus: "paid",
+          notes: serializeOrderNotes(publicNotes, nextMeta),
+          updatedAt: new Date(),
+        })
+        .where(and(eq(ordersTable.id, existing.id), eq(ordersTable.companyId, req.companyId!)));
+      repaired.push({ id: existing.id, orderNumber: existing.orderNumber });
+    }
+
+    res.json({ ok: true, repaired, skipped });
+  } catch (err) {
+    req.log.error({ err }, "Failed to repair legacy delivered PIX orders");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 export default router;
