@@ -39,10 +39,11 @@ Atualizar esta lista conforme o andamento do projeto.
 Listar todos os bugs ainda existentes.  
 Quando um bug for corrigido **e** validado manualmente pelo proprietário, remover da lista.
 
-- 🔄 Pedidos #3 e #7 presos em ENTREGUE (PIX legado `paymentStatus=pending`) — correção pontual em andamento.
+_Nenhum bug aberto registrado neste momento. Incluir aqui qualquer falha reproduzível pendente de validação._
 
 ---
 
 ## PRÓXIMA ETAPA
 
-Aguardando próxima solicitação do proprietário.
+Pedidos **#3** e **#7** corrigidos e finalizados — aguardando validação manual.
+Causa: PIX legado com `paymentStatus=pending` após já estarem em Entregue; a regra atual bloqueia finalizar PIX não pago (comportamento correto). Só esses dois registros foram regularizados.
