@@ -455,6 +455,49 @@ export default function ClubeBurger() {
                           className="bg-zinc-950 border-zinc-800 text-white h-11 focus:border-amber-500"
                         />
                       </div>
+                      <div className="space-y-1.5">
+                        <Label className="text-zinc-400 text-xs">Validade da fidelidade</Label>
+                        <select
+                          value={fidelity.fidelityExpiryMode || 'none'}
+                          onChange={e => setFidelity(f => f ? {
+                            ...f,
+                            fidelityExpiryMode: e.target.value as 'none' | 'days' | 'date',
+                          } : f)}
+                          className="w-full bg-zinc-950 border border-zinc-800 text-white h-11 rounded-md px-3 focus:border-amber-500"
+                        >
+                          <option value="none">Sem validade</option>
+                          <option value="days">Definir validade (dias)</option>
+                          <option value="date">Data específica</option>
+                        </select>
+                      </div>
+                      {(fidelity.fidelityExpiryMode || 'none') === 'days' && (
+                        <div className="space-y-1.5">
+                          <Label className="text-zinc-400 text-xs">Dias de validade</Label>
+                          <select
+                            value={String(fidelity.fidelityExpiryDays ?? 30)}
+                            onChange={e => setFidelity(f => f ? {
+                              ...f,
+                              fidelityExpiryDays: parseInt(e.target.value, 10) || 30,
+                            } : f)}
+                            className="w-full bg-zinc-950 border border-zinc-800 text-white h-11 rounded-md px-3 focus:border-amber-500"
+                          >
+                            {[15, 30, 60, 90, 180, 365].map(d => (
+                              <option key={d} value={d}>{d} dias</option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
+                      {(fidelity.fidelityExpiryMode || 'none') === 'date' && (
+                        <div className="space-y-1.5">
+                          <Label className="text-zinc-400 text-xs">Data de validade</Label>
+                          <Input
+                            type="date"
+                            value={fidelity.fidelityExpiryDate || ''}
+                            onChange={e => setFidelity(f => f ? { ...f, fidelityExpiryDate: e.target.value || null } : f)}
+                            className="bg-zinc-950 border-zinc-800 text-white h-11 focus:border-amber-500"
+                          />
+                        </div>
+                      )}
                       <p className="text-zinc-500 text-xs">
                         Exemplo: {fidelity.stampsRequired || 10} selos = {fidelity.stampRewardTitle || '1 hambúrguer grátis'}.
                       </p>
@@ -466,6 +509,10 @@ export default function ClubeBurger() {
                               fidelityEnabled: fidelity.fidelityEnabled,
                               stampsRequired: fidelity.stampsRequired,
                               stampRewardTitle: fidelity.stampRewardTitle,
+                              fidelityExpiryMode: fidelity.fidelityExpiryMode || 'none',
+                              fidelityExpiryDays: fidelity.fidelityExpiryDays ?? null,
+                              fidelityExpiryDate: fidelity.fidelityExpiryDate ?? null,
+                              fidelityWarningDays: fidelity.fidelityWarningDays ?? 7,
                             });
                             setFidelity(updated);
                           } catch { setError('Erro ao salvar fidelidade'); }
@@ -594,15 +641,94 @@ export default function ClubeBurger() {
                         placeholder="Opcional"
                         className="bg-zinc-950 border-zinc-800 text-white h-11 focus:border-amber-500" />
                     </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-zinc-400 text-xs">% máximo utilizável no pedido — vazio = 100%</Label>
+                      <Input type="number" min={0} max={100}
+                        value={String(form.cashbackMaxUsePercent ?? cashback.cashbackMaxUsePercent ?? '')}
+                        onChange={e => setForm(f => ({
+                          ...f,
+                          cashbackMaxUsePercent: e.target.value,
+                          cashbackPercent: f.cashbackPercent ?? cashback.cashbackPercent,
+                          cashbackMinOrder: f.cashbackMinOrder ?? cashback.cashbackMinOrder,
+                        }))}
+                        placeholder="Ex: 30"
+                        className="bg-zinc-950 border-zinc-800 text-white h-11 focus:border-amber-500" />
+                      <p className="text-zinc-600 text-[11px]">
+                        Ex.: pedido R$ 100 e limite 30% → cliente usa no máximo R$ 30 mesmo com saldo maior.
+                      </p>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-zinc-400 text-xs">Validade do cashback</Label>
+                      <select
+                        value={String(form.cashbackExpiryMode ?? cashback.cashbackExpiryMode ?? 'none')}
+                        onChange={e => setForm(f => ({
+                          ...f,
+                          cashbackExpiryMode: e.target.value,
+                          cashbackPercent: f.cashbackPercent ?? cashback.cashbackPercent,
+                          cashbackMinOrder: f.cashbackMinOrder ?? cashback.cashbackMinOrder,
+                        }))}
+                        className="w-full bg-zinc-950 border border-zinc-800 text-white h-11 rounded-md px-3 focus:border-amber-500"
+                      >
+                        <option value="none">Sem validade</option>
+                        <option value="days">Definir validade (dias)</option>
+                        <option value="date">Data específica</option>
+                      </select>
+                    </div>
+                    {(String(form.cashbackExpiryMode ?? cashback.cashbackExpiryMode ?? 'none') === 'days') && (
+                      <div className="space-y-1.5">
+                        <Label className="text-zinc-400 text-xs">Dias de validade</Label>
+                        <select
+                          value={String(form.cashbackExpiryDays ?? cashback.cashbackExpiryDays ?? 30)}
+                          onChange={e => setForm(f => ({
+                            ...f,
+                            cashbackExpiryDays: e.target.value,
+                            cashbackPercent: f.cashbackPercent ?? cashback.cashbackPercent,
+                            cashbackMinOrder: f.cashbackMinOrder ?? cashback.cashbackMinOrder,
+                          }))}
+                          className="w-full bg-zinc-950 border border-zinc-800 text-white h-11 rounded-md px-3 focus:border-amber-500"
+                        >
+                          {[15, 30, 60, 90, 180, 365].map(d => (
+                            <option key={d} value={d}>{d} dias</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                    {(String(form.cashbackExpiryMode ?? cashback.cashbackExpiryMode ?? 'none') === 'date') && (
+                      <div className="space-y-1.5">
+                        <Label className="text-zinc-400 text-xs">Data de validade</Label>
+                        <Input
+                          type="date"
+                          value={String(form.cashbackExpiryDate ?? cashback.cashbackExpiryDate ?? '')}
+                          onChange={e => setForm(f => ({
+                            ...f,
+                            cashbackExpiryDate: e.target.value,
+                            cashbackPercent: f.cashbackPercent ?? cashback.cashbackPercent,
+                            cashbackMinOrder: f.cashbackMinOrder ?? cashback.cashbackMinOrder,
+                          }))}
+                          className="bg-zinc-950 border-zinc-800 text-white h-11 focus:border-amber-500"
+                        />
+                      </div>
+                    )}
                     <Button onClick={async () => {
                       setSaving(true); setError('');
                       try {
                         const maxRaw = String(form.cashbackMaxPerOrder ?? cashback.cashbackMaxPerOrder ?? '').trim();
+                        const maxUseRaw = String(form.cashbackMaxUsePercent ?? cashback.cashbackMaxUsePercent ?? '').trim();
+                        const expiryMode = (form.cashbackExpiryMode ?? cashback.cashbackExpiryMode ?? 'none') as 'none' | 'days' | 'date';
                         await updateClubeCashback({
                           cashbackEnabled: cashback.cashbackEnabled ?? true,
                           cashbackPercent: (parseFloat(String(form.cashbackPercent ?? cashback.cashbackPercent)) || 0).toFixed(2),
                           cashbackMinOrder: (parseFloat(String(form.cashbackMinOrder ?? cashback.cashbackMinOrder)) || 0).toFixed(2),
                           cashbackMaxPerOrder: maxRaw === '' ? null : (parseFloat(maxRaw) || 0).toFixed(2),
+                          cashbackMaxUsePercent: maxUseRaw === '' ? null : (parseFloat(maxUseRaw) || 0).toFixed(2),
+                          cashbackExpiryMode: expiryMode,
+                          cashbackExpiryDays: expiryMode === 'days'
+                            ? (parseInt(String(form.cashbackExpiryDays ?? cashback.cashbackExpiryDays ?? 30), 10) || 30)
+                            : null,
+                          cashbackExpiryDate: expiryMode === 'date'
+                            ? (String(form.cashbackExpiryDate ?? cashback.cashbackExpiryDate ?? '') || null)
+                            : null,
+                          cashbackWarningDays: cashback.cashbackWarningDays ?? 7,
                         });
                         setCashback(await getClubeCashback());
                       } catch { setError('Erro ao salvar cashback'); }

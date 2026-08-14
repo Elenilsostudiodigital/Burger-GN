@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { ordersTable, orderItemsTable, couponsTable, deliveryZonesTable, kmDeliveryConfigTable, kmDeliveryTiersTable, paymentSettingsTable, productsTable, categoriesTable, clubeMembersTable, deliveryStreetsTable, deliveryStreetRequestsTable, deliveryAreasTable, companiesTable } from "@workspace/db";
+import { ordersTable, orderItemsTable, couponsTable, deliveryZonesTable, kmDeliveryConfigTable, kmDeliveryTiersTable, paymentSettingsTable, productsTable, categoriesTable, clubeMembersTable, clubeSettingsTable, deliveryStreetsTable, deliveryStreetRequestsTable, deliveryAreasTable, companiesTable } from "@workspace/db";
 import { eq, and, desc, sql, asc, inArray, ne } from "drizzle-orm";
 import { requireCompanyAuth, tryGetCompanySession } from "../middlewares/auth";
 import { resolvePublicCompany } from "../middlewares/company";
@@ -20,12 +20,21 @@ import { mercadoPagoNotificationUrl } from "../lib/publicUrl";
 import { applyMercadoPagoStatus } from "../lib/mpReconcile";
 import { syncClubeMemberOnOrder } from "../lib/clubeClientSync";
 import {
+  appendClientLedger,
+  hasLedgerForOrder,
   isFidelityFreeBurgerProduct,
   normalizeClientPhone,
   parseClientNotes,
   redeemAvailableReward,
   serializeClientNotes,
 } from "../lib/clientMeta";
+import {
+  applyLazyCashbackExpiry,
+  applyLazyFidelityExpiry,
+  computeCashbackApplicable,
+  readMaxUsePercent,
+  roundMoney,
+} from "../lib/clubBenefits";
 import { applyOrderCompletionRewards } from "../lib/orderRewards";
 import { buildPublicClubeMe, type PublicClubeMePayload } from "../lib/clubePublicMe";
 import { getOrCreateBusinessHours } from "../lib/businessHoursStore";
@@ -159,6 +168,8 @@ router.post("/orders", resolvePublicCompany, async (req, res) => {
       /** Optional Clube fidelity free-burger redemption (additive). */
       fidelityRewardId?: string;
       fidelityFreeProductId?: number;
+      /** Opt-in: use available cashback on this order (server recalculates amount). */
+      useCashback?: boolean;
       /** Attendant panel only — honored when admin session cookie is present. */
       source?: "online" | "attendant";
       items: Array<{
@@ -479,7 +490,77 @@ router.post("/orders", resolvePublicCompany, async (req, res) => {
       discountAmount = Math.min(subtotal, Math.round((discountAmount + fidelityDiscount) * 100) / 100);
     }
 
-    const total = Math.max(0, subtotal + deliveryFee - discountAmount);
+    // Cashback redeem — server-side only; never negative / never over balance / respects % cap.
+    let cashbackUsedAmount = 0;
+    let cashbackMemberId: number | null = null;
+    const wantCashback = body.useCashback === true;
+    const payableBeforeCashback = roundMoney(Math.max(0, subtotal + deliveryFee - discountAmount));
+
+    if (wantCashback) {
+      const orderPhonePreview = normalizeClientPhone(body.phone) || body.phone;
+      const memberForCash = await syncClubeMemberOnOrder({
+        companyId,
+        customerName: body.customerName,
+        phone: orderPhonePreview,
+        origin: "pedido",
+      });
+
+      if (!memberForCash) {
+        res.status(400).json({ error: "Não foi possível localizar seu cadastro no Clube Burger para usar cashback." });
+        return;
+      }
+
+      const [cbSettings] = await db
+        .select()
+        .from(clubeSettingsTable)
+        .where(eq(clubeSettingsTable.companyId, companyId));
+
+      if (cbSettings && cbSettings.cashbackEnabled === false) {
+        res.status(400).json({ error: "Cashback está desativado no momento." });
+        return;
+      }
+
+      const { publicNotes: cbNotes, meta: cbMetaRaw } = parseClientNotes(memberForCash.notes);
+      let cbMeta = cbMetaRaw;
+      let liveBalance = parseFloat(String(memberForCash.cashbackBalance)) || 0;
+      let liveStamps = memberForCash.points ?? 0;
+
+      const expiredCb = applyLazyCashbackExpiry({ balance: liveBalance, meta: cbMeta });
+      liveBalance = expiredCb.balance;
+      cbMeta = expiredCb.meta;
+      const expiredFid = applyLazyFidelityExpiry({ stamps: liveStamps, meta: cbMeta });
+      liveStamps = expiredFid.stamps;
+      cbMeta = expiredFid.meta;
+
+      if (expiredCb.changed || expiredFid.changed) {
+        await db
+          .update(clubeMembersTable)
+          .set({
+            cashbackBalance: liveBalance.toFixed(2),
+            points: liveStamps,
+            notes: serializeClientNotes(cbNotes, cbMeta),
+          })
+          .where(and(
+            eq(clubeMembersTable.id, memberForCash.id),
+            eq(clubeMembersTable.companyId, companyId),
+          ));
+      }
+
+      cashbackUsedAmount = computeCashbackApplicable({
+        balance: liveBalance,
+        payableTotal: payableBeforeCashback,
+        maxUsePercent: readMaxUsePercent(cbSettings?.cashbackMaxUsePercent),
+      });
+
+      if (cashbackUsedAmount <= 0) {
+        res.status(400).json({ error: "Você não possui cashback disponível para este pedido." });
+        return;
+      }
+      cashbackMemberId = memberForCash.id;
+    }
+
+    const total = Math.max(0, roundMoney(payableBeforeCashback - cashbackUsedAmount));
+    const discountAmountStored = roundMoney(discountAmount + cashbackUsedAmount);
     const trackingId = crypto.randomUUID();
 
     const [{ maxNum }] = await db.select({ maxNum: sql<number>`COALESCE(MAX(order_number), 0)` }).from(ordersTable).where(eq(ordersTable.companyId, companyId));
@@ -616,6 +697,9 @@ router.post("/orders", resolvePublicCompany, async (req, res) => {
         if (fidelityFreeProductName) meta.fidelityFreeProductName = fidelityFreeProductName;
         meta.fidelityDiscountAmount = fidelityDiscount;
       }
+      if (cashbackUsedAmount > 0) {
+        meta.cashbackUsedAmount = cashbackUsedAmount;
+      }
     } catch (syncErr) {
       req.log.warn({ err: syncErr }, "Clube/CRM member sync skipped");
     }
@@ -638,7 +722,7 @@ router.post("/orders", resolvePublicCompany, async (req, res) => {
         changeFor: body.changeFor ? String(body.changeFor) : null,
         subtotal: String(subtotal.toFixed(2)),
         deliveryFee: String(deliveryFee.toFixed(2)),
-        discountAmount: String(discountAmount.toFixed(2)),
+        discountAmount: String(discountAmountStored.toFixed(2)),
         couponCode: validatedCouponCode,
         total: String(total.toFixed(2)),
         mpPaymentId,
@@ -682,6 +766,60 @@ router.post("/orders", resolvePublicCompany, async (req, res) => {
                 eq(clubeMembersTable.id, syncedMemberId),
                 eq(clubeMembersTable.companyId, companyId),
               ));
+          }
+        }
+      }
+
+      // Debit cashback atomically (balance check prevents overdraft / double-spend races).
+      if (cashbackUsedAmount > 0 && cashbackMemberId) {
+        const [memberRow] = await tx
+          .select()
+          .from(clubeMembersTable)
+          .where(and(
+            eq(clubeMembersTable.id, cashbackMemberId),
+            eq(clubeMembersTable.companyId, companyId),
+          ));
+        if (!memberRow) {
+          throw new Error("CASHBACK_MEMBER_MISSING");
+        }
+        const { publicNotes, meta: memberMeta } = parseClientNotes(memberRow.notes);
+        if (hasLedgerForOrder(memberMeta, order.id, "cashback_utilizado")) {
+          // Already debited for this order — skip.
+        } else {
+          let liveBalance = parseFloat(String(memberRow.cashbackBalance)) || 0;
+          const expired = applyLazyCashbackExpiry({ balance: liveBalance, meta: memberMeta });
+          liveBalance = expired.balance;
+          let nextMeta = expired.meta;
+          const apply = Math.min(cashbackUsedAmount, liveBalance);
+          if (apply + 0.001 < cashbackUsedAmount || apply <= 0) {
+            throw new Error("CASHBACK_INSUFFICIENT");
+          }
+          const before = liveBalance;
+          const after = roundMoney(liveBalance - apply);
+          nextMeta = appendClientLedger(nextMeta, {
+            at: new Date().toISOString(),
+            type: "cashback_utilizado",
+            orderId: order.id,
+            orderNumber,
+            cashbackDelta: -apply,
+            balanceBefore: before,
+            balanceAfter: after,
+            description: `Cashback utilizado no pedido #${orderNumber}`,
+          });
+          const updated = await tx
+            .update(clubeMembersTable)
+            .set({
+              cashbackBalance: after.toFixed(2),
+              notes: serializeClientNotes(publicNotes, nextMeta),
+            })
+            .where(and(
+              eq(clubeMembersTable.id, cashbackMemberId),
+              eq(clubeMembersTable.companyId, companyId),
+              sql`CAST(${clubeMembersTable.cashbackBalance} AS NUMERIC) >= ${apply}`,
+            ))
+            .returning({ id: clubeMembersTable.id });
+          if (!updated.length) {
+            throw new Error("CASHBACK_INSUFFICIENT");
           }
         }
       }
@@ -732,13 +870,23 @@ router.post("/orders", resolvePublicCompany, async (req, res) => {
     // cardCheckoutUrl kept null — online card checkout is reserved for a later switch.
     res.status(201).json({
       ok: true, trackingId, orderNumber, orderId: result.id,
-      deliveryFee, distanceKm: customerDistanceKm, discountAmount, couponCode: validatedCouponCode,
+      deliveryFee, distanceKm: customerDistanceKm,
+      discountAmount: discountAmountStored,
+      cashbackUsedAmount,
+      couponCode: validatedCouponCode,
       pixPayment, pixConfigured, pixUnavailableReason, pixMode,
       cardCheckoutUrl: null,
       paymentStatus: "pending",
       workflow: isPix ? "awaiting_payment" : "new",
     });
   } catch (err) {
+    const msg = err instanceof Error ? err.message : "";
+    if (msg === "CASHBACK_INSUFFICIENT" || msg === "CASHBACK_MEMBER_MISSING") {
+      res.status(409).json({
+        error: "Cashback indisponível ou saldo insuficiente. Atualize a página e tente novamente.",
+      });
+      return;
+    }
     req.log.error({ err }, "Failed to create order");
     res.status(500).json({ error: "Internal server error" });
   }

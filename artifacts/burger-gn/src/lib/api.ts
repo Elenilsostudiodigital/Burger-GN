@@ -893,6 +893,8 @@ export interface CreateOrderPayload {
   couponCode?: string;
   fidelityRewardId?: string;
   fidelityFreeProductId?: number;
+  /** When true, server applies available cashback (capped). */
+  useCashback?: boolean;
   /** Attendant panel — only applied when admin session cookie is present. */
   source?: "online" | "attendant";
   items: Array<{ productId?: number; productName: string; productPrice: number; quantity: number; addons?: Addon[]; notes?: string }>;
@@ -900,7 +902,9 @@ export interface CreateOrderPayload {
 export interface PixPaymentResult { paymentId: string; qrCode: string; qrCodeBase64: string; pixKey?: string; }
 export const createOrder = (d: CreateOrderPayload) => api.post("/orders", d) as Promise<{
   ok: boolean; trackingId: string; orderNumber: number; orderId: number;
-  deliveryFee: number; distanceKm: number | null; discountAmount: number; couponCode: string | null;
+  deliveryFee: number; distanceKm: number | null; discountAmount: number;
+  cashbackUsedAmount?: number;
+  couponCode: string | null;
   pixPayment: PixPaymentResult | null; pixConfigured?: boolean; pixUnavailableReason?: string | null;
   pixMode?: PixMode | null;
   cardCheckoutUrl: string | null; paymentStatus?: PaymentStatus; workflow?: WorkflowStage;
@@ -1473,6 +1477,10 @@ export interface ClubeFidelitySettings {
   fidelityEnabled: boolean;
   stampsRequired: number;
   stampRewardTitle: string;
+  fidelityExpiryMode?: "none" | "days" | "date";
+  fidelityExpiryDays?: number | null;
+  fidelityExpiryDate?: string | null;
+  fidelityWarningDays?: number;
 }
 
 export interface ClubeMember {
@@ -1558,6 +1566,11 @@ export interface ClubeCashbackData {
   cashbackMinOrder: string;
   cashbackEnabled?: boolean;
   cashbackMaxPerOrder?: string | null;
+  cashbackMaxUsePercent?: string | null;
+  cashbackExpiryMode?: "none" | "days" | "date";
+  cashbackExpiryDays?: number | null;
+  cashbackExpiryDate?: string | null;
+  cashbackWarningDays?: number;
   totalBalance: number;
   membersWithBalance: ClubeMember[];
 }
@@ -1572,6 +1585,11 @@ export interface PublicClubeRules {
     percent: string;
     minOrder: string;
     maxPerOrder: string | null;
+    maxUsePercent?: string | null;
+    expiryMode?: "none" | "days" | "date";
+    expiryDays?: number | null;
+    expiryDate?: string | null;
+    warningDays?: number;
     howItWorks: string[];
     whenToUse: string;
   };
@@ -1579,6 +1597,10 @@ export interface PublicClubeRules {
     enabled: boolean;
     stampsRequired: number;
     stampRewardTitle: string;
+    expiryMode?: "none" | "days" | "date";
+    expiryDays?: number | null;
+    expiryDate?: string | null;
+    warningDays?: number;
     howItWorks: string[];
     whenToUse: string;
   };
@@ -1616,14 +1638,22 @@ export interface PublicClubeMeResponse {
     percent: string;
     minOrder: string;
     maxPerOrder: string | null;
+    maxUsePercent?: string | null;
     balance: string;
     receivedTotal: number;
     usedTotal: number;
+    expiresAt?: string | null;
+    warning?: { active: boolean; daysLeft: number; message: string } | null;
   };
   summary?: {
     stampsEarned: number;
     cashbackReceived: number;
     cashbackUsed: number;
+    cashbackRemaining?: number;
+  };
+  warnings?: {
+    cashback: { active: boolean; daysLeft: number; message: string } | null;
+    fidelity: { active: boolean; daysLeft: number; message: string } | null;
   };
   history?: ClientOrderHistoryItem[];
   ledger?: ClientLedgerEntry[];
@@ -1660,6 +1690,11 @@ export const updateClubeCashback = (d: {
   cashbackMinOrder?: string;
   cashbackEnabled?: boolean;
   cashbackMaxPerOrder?: string | null;
+  cashbackMaxUsePercent?: string | null;
+  cashbackExpiryMode?: "none" | "days" | "date";
+  cashbackExpiryDays?: number | null;
+  cashbackExpiryDate?: string | null;
+  cashbackWarningDays?: number;
 }) => api.put("/admin/clube/cashback", d) as Promise<ClubeSettings>;
 
 export const getClubeFidelity = () =>
@@ -1779,6 +1814,8 @@ export type ClientLedgerType =
   | "selo_bloqueado"
   | "cashback_pedido"
   | "cashback_utilizado"
+  | "cashback_expirado"
+  | "fidelity_expirada"
   | "ajuste_selo"
   | "ajuste_cashback"
   | "recompensa_disponivel"
@@ -1792,6 +1829,8 @@ export interface ClientLedgerEntry {
   orderNumber: number | null;
   stampsDelta: number | null;
   cashbackDelta: number | null;
+  balanceBefore?: number | null;
+  balanceAfter?: number | null;
   description: string | null;
   rewardId: string | null;
   rewardTitle: string | null;

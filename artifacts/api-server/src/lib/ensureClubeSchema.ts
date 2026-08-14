@@ -45,6 +45,24 @@ ALTER TABLE clube_settings
   ADD COLUMN IF NOT EXISTS cashback_enabled BOOLEAN NOT NULL DEFAULT true;
 ALTER TABLE clube_settings
   ADD COLUMN IF NOT EXISTS cashback_max_per_order NUMERIC(10,2);
+ALTER TABLE clube_settings
+  ADD COLUMN IF NOT EXISTS cashback_max_use_percent NUMERIC(10,2);
+ALTER TABLE clube_settings
+  ADD COLUMN IF NOT EXISTS cashback_expiry_mode TEXT NOT NULL DEFAULT 'none';
+ALTER TABLE clube_settings
+  ADD COLUMN IF NOT EXISTS cashback_expiry_days INTEGER;
+ALTER TABLE clube_settings
+  ADD COLUMN IF NOT EXISTS cashback_expiry_date DATE;
+ALTER TABLE clube_settings
+  ADD COLUMN IF NOT EXISTS cashback_warning_days INTEGER NOT NULL DEFAULT 7;
+ALTER TABLE clube_settings
+  ADD COLUMN IF NOT EXISTS fidelity_expiry_mode TEXT NOT NULL DEFAULT 'none';
+ALTER TABLE clube_settings
+  ADD COLUMN IF NOT EXISTS fidelity_expiry_days INTEGER;
+ALTER TABLE clube_settings
+  ADD COLUMN IF NOT EXISTS fidelity_expiry_date DATE;
+ALTER TABLE clube_settings
+  ADD COLUMN IF NOT EXISTS fidelity_warning_days INTEGER NOT NULL DEFAULT 7;
 
 CREATE TABLE IF NOT EXISTS clube_members (
   id SERIAL PRIMARY KEY,

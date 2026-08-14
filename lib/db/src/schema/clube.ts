@@ -59,8 +59,20 @@ export const clubeSettingsTable = pgTable(
       .default("1 hambúrguer grátis"),
     /** Cashback automático em pedidos concluídos. */
     cashbackEnabled: boolean("cashback_enabled").notNull().default(true),
-    /** Limite máximo de cashback por pedido (null = sem limite). */
+    /** Limite máximo de cashback gerado por pedido (null = sem limite). */
     cashbackMaxPerOrder: numeric("cashback_max_per_order", { precision: 10, scale: 2 }),
+    /** Máximo % do valor do pedido que o cliente pode usar de cashback (null = 100%). */
+    cashbackMaxUsePercent: numeric("cashback_max_use_percent", { precision: 10, scale: 2 }),
+    /** none | days | date */
+    cashbackExpiryMode: text("cashback_expiry_mode").notNull().default("none"),
+    cashbackExpiryDays: integer("cashback_expiry_days"),
+    cashbackExpiryDate: date("cashback_expiry_date"),
+    cashbackWarningDays: integer("cashback_warning_days").notNull().default(7),
+    /** none | days | date */
+    fidelityExpiryMode: text("fidelity_expiry_mode").notNull().default("none"),
+    fidelityExpiryDays: integer("fidelity_expiry_days"),
+    fidelityExpiryDate: date("fidelity_expiry_date"),
+    fidelityWarningDays: integer("fidelity_warning_days").notNull().default(7),
     birthdayDiscountType: clubeDiscountTypeEnum("birthday_discount_type")
       .notNull()
       .default("percentage"),

@@ -69,6 +69,8 @@ export interface OrderMeta {
   fidelityFreeProductId?: number;
   fidelityFreeProductName?: string;
   fidelityDiscountAmount?: number;
+  /** Cashback redeemed on this order (BRL). */
+  cashbackUsedAmount?: number;
   /** Prep timer: when kitchen accepted / started preparing (ISO). */
   prepStartedAt?: string;
   /** Prep timer: when marked ready (ISO). */
@@ -156,6 +158,9 @@ export function serializeOrderNotes(publicNotes: string, meta: OrderMeta): strin
   }
   if (typeof meta.fidelityDiscountAmount === "number") {
     cleanMeta.fidelityDiscountAmount = meta.fidelityDiscountAmount;
+  }
+  if (typeof meta.cashbackUsedAmount === "number" && meta.cashbackUsedAmount > 0) {
+    cleanMeta.cashbackUsedAmount = meta.cashbackUsedAmount;
   }
   if (meta.prepStartedAt) cleanMeta.prepStartedAt = meta.prepStartedAt;
   if (meta.prepFinishedAt) cleanMeta.prepFinishedAt = meta.prepFinishedAt;

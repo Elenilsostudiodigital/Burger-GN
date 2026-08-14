@@ -17,6 +17,11 @@ import {
   parseClientNotes,
   serializeClientNotes,
 } from "./clientMeta";
+import {
+  parseExpiryMode,
+  resolveBenefitExpiresAt,
+  roundMoney,
+} from "./clubBenefits";
 import { syncClubeMemberOnOrder } from "./clubeClientSync";
 import type { OrderMeta } from "./orderMeta";
 
@@ -41,10 +46,6 @@ export type ApplyRewardsResult = {
   rewardGranted: boolean;
   memberId: number | null;
 };
-
-function roundMoney(n: number): number {
-  return Math.round(n * 100) / 100;
-}
 
 /** Cashback/stamps only after a completed sale — never for unpaid PIX, cancelled, or refused. */
 export function isEligibleForOrderRewards(order: {
@@ -175,6 +176,16 @@ export async function applyOrderCompletionRewards(
       result.stampsAwarded = true;
       changed = true;
 
+      const fidelityExpiry = resolveBenefitExpiresAt({
+        mode: parseExpiryMode((settings as { fidelityExpiryMode?: string }).fidelityExpiryMode),
+        days: (settings as { fidelityExpiryDays?: number | null }).fidelityExpiryDays,
+        date: (settings as { fidelityExpiryDate?: string | null }).fidelityExpiryDate
+          ? String((settings as { fidelityExpiryDate?: string | null }).fidelityExpiryDate)
+          : null,
+        fromMs: nowMs,
+      });
+      workingMeta = { ...workingMeta, fidelityExpiresAt: fidelityExpiry };
+
       // Punch card: each full set of stampsRequired → available reward
       const required = Math.max(1, Math.min(100, Number(settings.stampsRequired) || 10));
       const rewardTitle =
@@ -229,15 +240,27 @@ export async function applyOrderCompletionRewards(
       }
 
       if (amount > 0) {
+        const before = cashbackBalance;
         cashbackBalance = roundMoney(cashbackBalance + amount);
+        const cashbackExpiry = resolveBenefitExpiresAt({
+          mode: parseExpiryMode((settings as { cashbackExpiryMode?: string }).cashbackExpiryMode),
+          days: (settings as { cashbackExpiryDays?: number | null }).cashbackExpiryDays,
+          date: (settings as { cashbackExpiryDate?: string | null }).cashbackExpiryDate
+            ? String((settings as { cashbackExpiryDate?: string | null }).cashbackExpiryDate)
+            : null,
+          fromMs: nowMs,
+        });
         workingMeta = appendClientLedger(workingMeta, {
           at: now,
           type: "cashback_pedido",
           orderId: order.id,
           orderNumber: order.orderNumber,
           cashbackDelta: amount,
+          balanceBefore: before,
+          balanceAfter: cashbackBalance,
           description: `Cashback do pedido #${order.orderNumber}`,
         });
+        workingMeta = { ...workingMeta, cashbackExpiresAt: cashbackExpiry };
         result.cashbackAwarded = true;
         result.cashbackAmount = amount;
         changed = true;

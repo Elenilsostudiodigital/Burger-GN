@@ -32,6 +32,8 @@ const LEDGER_LABEL: Record<ClientLedgerType, string> = {
   selo_bloqueado: 'Selo do período já conquistado',
   cashback_pedido: 'Cashback recebido',
   cashback_utilizado: 'Cashback utilizado',
+  cashback_expirado: 'Cashback expirado',
+  fidelity_expirada: 'Fidelidade expirada',
   ajuste_selo: 'Ajuste de selos',
   ajuste_cashback: 'Ajuste de cashback',
   recompensa_disponivel: 'Recompensa disponível',
@@ -395,6 +397,21 @@ export default function ClubeCliente() {
                         </p>
                       </div>
                     </div>
+
+                    {(data.warnings?.cashback?.active || data.warnings?.fidelity?.active) && (
+                      <div className="space-y-2">
+                        {data.warnings?.cashback?.active && (
+                          <p className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-amber-300 text-xs font-medium">
+                            {data.warnings.cashback.message}
+                          </p>
+                        )}
+                        {data.warnings?.fidelity?.active && (
+                          <p className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-amber-300 text-xs font-medium">
+                            {data.warnings.fidelity.message}
+                          </p>
+                        )}
+                      </div>
+                    )}
                   </section>
 
                   <section className="rounded-2xl border border-zinc-800 bg-zinc-900/90 p-4 space-y-3">
@@ -464,17 +481,23 @@ export default function ClubeCliente() {
                   <section className="rounded-2xl border border-zinc-800 bg-zinc-900/90 p-4 space-y-3">
                     <div className="flex items-center gap-2">
                       <Wallet size={16} className="text-amber-500" />
-                      <h3 className="text-white font-black uppercase text-sm tracking-wide">Resumo</h3>
+                      <h3 className="text-white font-black uppercase text-sm tracking-wide">Resumo do Cashback</h3>
                     </div>
-                    <div className="grid grid-cols-3 gap-2 text-center">
+                    <div className="grid grid-cols-2 gap-2 text-center">
                       <div className="rounded-xl bg-zinc-950 border border-zinc-800 px-2 py-2">
-                        <p className="text-zinc-500 text-[10px] uppercase font-bold leading-tight">Cashback recebido</p>
+                        <p className="text-zinc-500 text-[10px] uppercase font-bold leading-tight">Saldo disponível</p>
+                        <p className="text-emerald-400 font-black text-sm mt-1">
+                          {fmtMoney(data.summary?.cashbackRemaining ?? member.cashbackBalance)}
+                        </p>
+                      </div>
+                      <div className="rounded-xl bg-zinc-950 border border-zinc-800 px-2 py-2">
+                        <p className="text-zinc-500 text-[10px] uppercase font-bold leading-tight">Total recebido</p>
                         <p className="text-emerald-400 font-black text-sm mt-1">
                           {fmtMoney(data.summary?.cashbackReceived ?? cashbackProgram.receivedTotal)}
                         </p>
                       </div>
                       <div className="rounded-xl bg-zinc-950 border border-zinc-800 px-2 py-2">
-                        <p className="text-zinc-500 text-[10px] uppercase font-bold leading-tight">Cashback utilizado</p>
+                        <p className="text-zinc-500 text-[10px] uppercase font-bold leading-tight">Total utilizado</p>
                         <p className="text-white font-black text-sm mt-1">
                           {fmtMoney(data.summary?.cashbackUsed ?? cashbackProgram.usedTotal)}
                         </p>
@@ -545,6 +568,11 @@ export default function ClubeCliente() {
                                     : e.rewardTitle || '—')}
                               {e.orderNumber != null ? ` · Pedido #${e.orderNumber}` : ''}
                             </p>
+                            {(e.balanceBefore != null || e.balanceAfter != null) && (
+                              <p className="text-zinc-600 text-[11px] mt-1">
+                                Saldo: {fmtMoney(e.balanceBefore ?? 0)} → {fmtMoney(e.balanceAfter ?? 0)}
+                              </p>
+                            )}
                           </li>
                         ))}
                       </ul>

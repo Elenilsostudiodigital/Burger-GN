@@ -31,6 +31,8 @@ const LEDGER_LABEL: Record<ClientLedgerType, string> = {
   selo_bloqueado: 'Selo bloqueado (mesmo dia)',
   cashback_pedido: 'Cashback recebido',
   cashback_utilizado: 'Cashback utilizado',
+  cashback_expirado: 'Cashback expirado',
+  fidelity_expirada: 'Fidelidade expirada',
   ajuste_selo: 'Ajuste de selos',
   ajuste_cashback: 'Ajuste de cashback',
   recompensa_disponivel: 'Recompensa disponível',

@@ -16,6 +16,7 @@ import {
   ClubeFidelityRedeemPrompt,
   FidelityRedeemSelection,
 } from '../components/ClubeFidelityRedeemPrompt';
+import { ClubeCashbackCheckoutCard } from '../components/ClubeCashbackCheckoutCard';
 import { getSavedClubePhone } from '../lib/clubeCliente';
 import { setPresenceIdentity } from '../lib/menuPresence';
 import {
@@ -110,6 +111,8 @@ export default function Checkout() {
   const [couponLoading, setCouponLoading] = useState(false);
   const [couponError, setCouponError] = useState('');
   const [fidelityRedeem, setFidelityRedeem] = useState<FidelityRedeemSelection | null>(null);
+  const [useCashback, setUseCashback] = useState(false);
+  const [cashbackAmount, setCashbackAmount] = useState(0);
 
   const isDelivery = orderType === 'delivery';
   const usingKm = isDelivery && needsCoordsFee && customerCoords !== null;
@@ -122,7 +125,8 @@ export default function Checkout() {
     'Ainda não conseguimos calcular a taxa de entrega para este endereço. Verifique o endereço ou fale conosco.';
   /** Delivery may only checkout when a fee was successfully resolved (R$ 0 is OK if configured). */
   const hasValidDeliveryFee = !isDelivery || feeFound === true;
-  const total = Math.max(0, subtotal + (isDelivery && feeFound === true ? deliveryFee : 0) - discount);
+  const payableBeforeCashback = Math.max(0, subtotal + (isDelivery && feeFound === true ? deliveryFee : 0) - discount);
+  const total = Math.max(0, payableBeforeCashback - (useCashback ? cashbackAmount : 0));
   const fmt = (v: number) => `R$ ${v.toFixed(2).replace('.', ',')}`;
   const cashBlockedForDelivery = isDelivery && paySettings !== null && !paySettings.cashOnDeliveryEnabled;
   const clubePhoneForRedeem = form.telefone || getSavedClubePhone();
@@ -744,6 +748,7 @@ export default function Checkout() {
         couponCode: appliedCoupon?.code,
         fidelityRewardId: fidelityRedeem?.rewardId,
         fidelityFreeProductId: fidelityRedeem?.product.id,
+        useCashback: useCashback && cashbackAmount > 0,
         items: cartItems.map(ci => ({
           productId: ci.item.id,
           productName: ci.item.name,
@@ -1507,6 +1512,18 @@ export default function Checkout() {
               </div>
 
               <div className="space-y-2">
+                <ClubeCashbackCheckoutCard
+                  phone={clubePhoneForRedeem}
+                  payableBeforeCashback={payableBeforeCashback}
+                  useCashback={useCashback}
+                  onChange={({ use, amount }) => {
+                    setUseCashback(use);
+                    setCashbackAmount(amount);
+                  }}
+                />
+              </div>
+
+              <div className="space-y-2">
                 <Label className="text-zinc-400 text-sm flex items-center gap-1.5"><Tag size={14} /> Cupom</Label>
                 {appliedCoupon ? (
                   <div className="flex items-center justify-between bg-green-900/20 border border-green-800/50 rounded-xl px-4 py-3">
@@ -1556,6 +1573,12 @@ export default function Checkout() {
               </span>
               <span className="text-amber-500 font-black text-lg">{fmt(total)}</span>
             </div>
+            {useCashback && cashbackAmount > 0 && (
+              <div className="flex justify-between text-xs text-emerald-400 -mt-1">
+                <span>Cashback</span>
+                <span>-{fmt(cashbackAmount)}</span>
+              </div>
+            )}
             {isDelivery && (
               <div className="flex justify-between text-xs text-zinc-500 -mt-1">
                 <span>Taxa de entrega</span>

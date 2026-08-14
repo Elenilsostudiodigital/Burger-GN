@@ -9,8 +9,16 @@ import {
   nextFidelityStampAvailableAt,
   parseClientNotes,
   phonesMatch,
+  serializeClientNotes,
   type ClientMeta,
 } from "./clientMeta";
+import {
+  applyLazyCashbackExpiry,
+  applyLazyFidelityExpiry,
+  buildExpiryWarning,
+  parseExpiryMode,
+  readMaxUsePercent,
+} from "./clubBenefits";
 import {
   computeClientOrderStats,
   filterOrdersForClient,
@@ -51,6 +59,8 @@ function publicLedgerPayload(meta: ClientMeta) {
     orderNumber: e.orderNumber ?? null,
     stampsDelta: e.stampsDelta ?? null,
     cashbackDelta: e.cashbackDelta ?? null,
+    balanceBefore: e.balanceBefore ?? null,
+    balanceAfter: e.balanceAfter ?? null,
     description: e.description ?? null,
     rewardId: e.rewardId ?? null,
     rewardTitle: e.rewardTitle ?? null,
@@ -67,6 +77,9 @@ export function publicClubRules(settings: Awaited<ReturnType<typeof ensureSettin
     settings.cashbackMaxPerOrder != null && String(settings.cashbackMaxPerOrder).trim() !== ""
       ? parseFloat(String(settings.cashbackMaxPerOrder))
       : null;
+  const maxUsePercent = readMaxUsePercent(settings.cashbackMaxUsePercent);
+  const cashbackExpiryMode = parseExpiryMode(settings.cashbackExpiryMode);
+  const fidelityExpiryMode = parseExpiryMode(settings.fidelityExpiryMode);
 
   return {
     enabled: settings.enabled !== false,
@@ -79,6 +92,13 @@ export function publicClubRules(settings: Awaited<ReturnType<typeof ensureSettin
       percent: settings.cashbackPercent,
       minOrder: settings.cashbackMinOrder,
       maxPerOrder: settings.cashbackMaxPerOrder ?? null,
+      maxUsePercent: maxUsePercent != null ? String(maxUsePercent) : null,
+      expiryMode: cashbackExpiryMode,
+      expiryDays: settings.cashbackExpiryDays ?? null,
+      expiryDate: settings.cashbackExpiryDate
+        ? String(settings.cashbackExpiryDate).slice(0, 10)
+        : null,
+      warningDays: settings.cashbackWarningDays ?? 7,
       howItWorks: [
         `A cada pedido concluído você recebe ${cashbackPercent.toFixed(0)}% de cashback sobre o valor do pedido.`,
         cashbackMinOrder > 0
@@ -87,6 +107,9 @@ export function publicClubRules(settings: Awaited<ReturnType<typeof ensureSettin
         cashbackMax != null && Number.isFinite(cashbackMax)
           ? `O limite máximo de cashback por pedido é R$ ${cashbackMax.toFixed(2).replace(".", ",")}.`
           : "Não há limite máximo de cashback por pedido.",
+        maxUsePercent != null
+          ? `No checkout você pode utilizar até ${maxUsePercent.toFixed(0)}% do valor do pedido em cashback.`
+          : "No checkout você pode utilizar todo o saldo disponível (até o total do pedido).",
         "Você poderá utilizar o cashback disponível nos próximos pedidos, conforme saldo acumulado.",
       ],
       whenToUse:
@@ -96,6 +119,12 @@ export function publicClubRules(settings: Awaited<ReturnType<typeof ensureSettin
       enabled: settings.fidelityEnabled !== false,
       stampsRequired,
       stampRewardTitle,
+      expiryMode: fidelityExpiryMode,
+      expiryDays: settings.fidelityExpiryDays ?? null,
+      expiryDate: settings.fidelityExpiryDate
+        ? String(settings.fidelityExpiryDate).slice(0, 10)
+        : null,
+      warningDays: settings.fidelityWarningDays ?? 7,
       howItWorks: [
         "Você ganha no máximo 1 selo por dia elegível (fuso de Brasília), na primeira compra do dia.",
         "Pedidos extras no mesmo dia geram Cashback normalmente, mas não geram novo selo.",
@@ -176,20 +205,30 @@ export type PublicClubeMePayload =
         }>;
         nextStampAvailableAt: string | null;
         nextRewardMessage: string;
+        expiresAt: string | null;
+        warning: { active: boolean; daysLeft: number; message: string } | null;
       };
       cashbackProgram: {
         enabled: boolean;
         percent: string;
         minOrder: string;
         maxPerOrder: string | null;
+        maxUsePercent: string | null;
         balance: string;
         receivedTotal: number;
         usedTotal: number;
+        expiresAt: string | null;
+        warning: { active: boolean; daysLeft: number; message: string } | null;
       };
       summary: {
         stampsEarned: number;
         cashbackReceived: number;
         cashbackUsed: number;
+        cashbackRemaining: number;
+      };
+      warnings?: {
+        cashback: { active: boolean; daysLeft: number; message: string } | null;
+        fidelity: { active: boolean; daysLeft: number; message: string } | null;
       };
       history: Array<{
         id: number;
@@ -259,8 +298,30 @@ export async function buildPublicClubeMe(
         o.createdAt instanceof Date ? o.createdAt.toISOString() : String(o.createdAt),
     }));
 
-  const { meta } = parseClientNotes(member.notes);
-  const progress = fidelityProgress(member.points ?? 0, rules.fidelity.stampsRequired);
+  const { publicNotes, meta: rawMeta } = parseClientNotes(member.notes);
+  let meta = rawMeta;
+  let cashBalance = parseFloat(String(member.cashbackBalance)) || 0;
+  let stamps = member.points ?? 0;
+
+  const expiredCb = applyLazyCashbackExpiry({ balance: cashBalance, meta });
+  cashBalance = expiredCb.balance;
+  meta = expiredCb.meta;
+  const expiredFid = applyLazyFidelityExpiry({ stamps, meta });
+  stamps = expiredFid.stamps;
+  meta = expiredFid.meta;
+
+  if (expiredCb.changed || expiredFid.changed) {
+    await db
+      .update(clubeMembersTable)
+      .set({
+        cashbackBalance: cashBalance.toFixed(2),
+        points: stamps,
+        notes: serializeClientNotes(publicNotes, meta),
+      })
+      .where(eq(clubeMembersTable.id, member.id));
+  }
+
+  const progress = fidelityProgress(stamps, rules.fidelity.stampsRequired);
   const availableRewards = (meta.availableRewards ?? []).map((r) => ({
     id: r.id,
     title: r.title,
@@ -275,11 +336,24 @@ export async function buildPublicClubeMe(
     .filter((e) => e.type === "cashback_pedido" || (e.type === "ajuste_cashback" && (e.cashbackDelta ?? 0) > 0))
     .reduce((sum, e) => sum + (e.cashbackDelta ?? 0), 0);
   const cashbackUsed = (meta.ledger ?? [])
-    .filter((e) => e.type === "cashback_utilizado" || (e.type === "ajuste_cashback" && (e.cashbackDelta ?? 0) < 0))
+    .filter((e) =>
+      e.type === "cashback_utilizado"
+      || e.type === "cashback_expirado"
+      || (e.type === "ajuste_cashback" && (e.cashbackDelta ?? 0) < 0),
+    )
     .reduce((sum, e) => sum + Math.abs(e.cashbackDelta ?? 0), 0);
   const stampsEarned = (meta.ledger ?? [])
     .filter((e) => e.type === "selo_pedido" || (e.type === "ajuste_selo" && (e.stampsDelta ?? 0) > 0))
     .reduce((sum, e) => sum + Math.max(0, e.stampsDelta ?? 0), 0);
+
+  const cashWarn = buildExpiryWarning(
+    meta.cashbackExpiresAt,
+    rules.cashback.warningDays ?? 7,
+  );
+  const fidWarn = buildExpiryWarning(
+    meta.fidelityExpiresAt,
+    rules.fidelity.warningDays ?? 7,
+  );
 
   return {
     found: true,
@@ -288,7 +362,7 @@ export async function buildPublicClubeMe(
       id: member.id,
       name: member.name,
       phone: member.phone,
-      cashbackBalance: member.cashbackBalance,
+      cashbackBalance: cashBalance.toFixed(2),
       stamps: progress.stamps,
       orderCount: stats.orderCount,
       lastOrderAt: stats.lastOrderAt,
@@ -308,20 +382,53 @@ export async function buildPublicClubeMe(
           progress.remaining <= 0
             ? `Você completou a meta! Recompensa: ${rules.fidelity.stampRewardTitle}.`
             : `Faltam apenas ${progress.remaining} selo${progress.remaining === 1 ? "" : "s"} para ganhar ${rules.fidelity.stampRewardTitle}.`,
+        expiresAt: meta.fidelityExpiresAt ?? null,
+        warning: fidWarn
+          ? { ...fidWarn, message: `⚠️ Sua fidelidade vence em ${fidWarn.daysLeft} dia${fidWarn.daysLeft === 1 ? "" : "s"}. Utilize antes de perder.` }
+          : null,
       },
     cashbackProgram: {
       enabled: rules.cashback.enabled,
       percent: rules.cashback.percent,
       minOrder: rules.cashback.minOrder,
       maxPerOrder: rules.cashback.maxPerOrder,
-      balance: member.cashbackBalance,
+      maxUsePercent: rules.cashback.maxUsePercent,
+      balance: cashBalance.toFixed(2),
       receivedTotal: Math.round(cashbackReceived * 100) / 100,
       usedTotal: Math.round(cashbackUsed * 100) / 100,
+      expiresAt: meta.cashbackExpiresAt ?? null,
+      warning: cashWarn
+        ? {
+            ...cashWarn,
+            message:
+              cashWarn.daysLeft === 0
+                ? "⚠️ Seu cashback vence hoje. Utilize antes de perder."
+                : `⚠️ Seu cashback vence em ${cashWarn.daysLeft} dia${cashWarn.daysLeft === 1 ? "" : "s"}. Utilize antes de perder.`,
+          }
+        : null,
     },
     summary: {
       stampsEarned,
       cashbackReceived: Math.round(cashbackReceived * 100) / 100,
       cashbackUsed: Math.round(cashbackUsed * 100) / 100,
+      cashbackRemaining: Math.round(cashBalance * 100) / 100,
+    },
+    warnings: {
+      cashback: cashWarn
+        ? {
+            ...cashWarn,
+            message:
+              cashWarn.daysLeft === 0
+                ? "⚠️ Seu cashback vence hoje. Utilize antes de perder."
+                : `⚠️ Seu cashback vence em ${cashWarn.daysLeft} dia${cashWarn.daysLeft === 1 ? "" : "s"}. Utilize antes de perder.`,
+          }
+        : null,
+      fidelity: fidWarn
+        ? {
+            ...fidWarn,
+            message: `⚠️ Sua fidelidade vence em ${fidWarn.daysLeft} dia${fidWarn.daysLeft === 1 ? "" : "s"}. Utilize antes de perder.`,
+          }
+        : null,
     },
     history,
     ledger: publicLedgerPayload(meta),

@@ -31,6 +31,7 @@ Atualizar esta lista conforme o andamento do projeto.
 - 🔄 Produtos e Promoções (Marketing)
 
 - 🔄 Divulgação do Cardápio
+- 🔄 Clube Burger — utilização de Cashback e Fidelidade (aguardando validação manual)
 
 ---
 
@@ -45,4 +46,4 @@ _Nenhum bug aberto registrado neste momento. Incluir aqui qualquer falha reprodu
 
 ## PRÓXIMA ETAPA
 
-Aguardando próxima solicitação do proprietário.
+Validação manual do proprietário: utilização de Cashback no checkout + configs admin (cashback/fidelidade/validade).

@@ -25,6 +25,8 @@ export type ClientLedgerType =
   | "selo_bloqueado"
   | "cashback_pedido"
   | "cashback_utilizado"
+  | "cashback_expirado"
+  | "fidelity_expirada"
   | "ajuste_selo"
   | "ajuste_cashback"
   | "recompensa_disponivel"
@@ -47,6 +49,10 @@ export interface ClientLedgerEntry {
   orderNumber?: number | null;
   stampsDelta?: number;
   cashbackDelta?: number;
+  /** Balance before this cashback movement (BRL). */
+  balanceBefore?: number;
+  /** Balance after this cashback movement (BRL). */
+  balanceAfter?: number;
   description?: string;
   rewardId?: string | null;
   rewardTitle?: string | null;
@@ -70,6 +76,10 @@ export interface ClientMeta {
   ledger?: ClientLedgerEntry[];
   /** Rewards earned via stamp card (not yet / already redeemed). */
   availableRewards?: AvailableReward[];
+  /** ISO — cashback balance expires at this instant (null = no expiry). */
+  cashbackExpiresAt?: string | null;
+  /** ISO — fidelity stamps expire at this instant (null = no expiry). */
+  fidelityExpiresAt?: string | null;
 }
 
 const META_RE = /<!--BGN_CLIENT:([\s\S]*?):BGN_CLIENT-->/;
@@ -82,6 +92,8 @@ const LEDGER_TYPES = new Set<ClientLedgerType>([
   "selo_bloqueado",
   "cashback_pedido",
   "cashback_utilizado",
+  "cashback_expirado",
+  "fidelity_expirada",
   "ajuste_selo",
   "ajuste_cashback",
   "recompensa_disponivel",
@@ -153,6 +165,8 @@ function parseLedgerEntry(value: unknown): ClientLedgerEntry | null {
     orderNumber: typeof o.orderNumber === "number" ? o.orderNumber : null,
     stampsDelta: typeof o.stampsDelta === "number" ? o.stampsDelta : undefined,
     cashbackDelta: typeof o.cashbackDelta === "number" ? o.cashbackDelta : undefined,
+    balanceBefore: typeof o.balanceBefore === "number" ? o.balanceBefore : undefined,
+    balanceAfter: typeof o.balanceAfter === "number" ? o.balanceAfter : undefined,
     description: typeof o.description === "string" ? o.description.slice(0, 500) : undefined,
     rewardId: typeof o.rewardId === "string" ? o.rewardId : null,
     rewardTitle: typeof o.rewardTitle === "string" ? o.rewardTitle : null,
@@ -192,6 +206,8 @@ export function parseClientNotes(notes: string | null | undefined): {
       recoveryHistory?: unknown;
       ledger?: unknown;
       availableRewards?: unknown;
+      cashbackExpiresAt?: unknown;
+      fidelityExpiresAt?: unknown;
     };
     meta.origin = resolveOrigin(parsed.origin);
     const last = parseRecoveryRecord(parsed.lastRecovery);
@@ -216,6 +232,16 @@ export function parseClientNotes(notes: string | null | undefined): {
         .filter((r): r is AvailableReward => !!r)
         .slice(0, MAX_AVAILABLE_REWARDS);
       if (rewards.length) meta.availableRewards = rewards;
+    }
+    if (typeof parsed.cashbackExpiresAt === "string" && parsed.cashbackExpiresAt) {
+      meta.cashbackExpiresAt = parsed.cashbackExpiresAt;
+    } else if (parsed.cashbackExpiresAt === null) {
+      meta.cashbackExpiresAt = null;
+    }
+    if (typeof parsed.fidelityExpiresAt === "string" && parsed.fidelityExpiresAt) {
+      meta.fidelityExpiresAt = parsed.fidelityExpiresAt;
+    } else if (parsed.fidelityExpiresAt === null) {
+      meta.fidelityExpiresAt = null;
     }
   } catch {
     /* keep default */
@@ -255,6 +281,8 @@ export function serializeClientNotes(publicNotes: string, meta: ClientMeta): str
       orderNumber: e.orderNumber ?? null,
       stampsDelta: e.stampsDelta,
       cashbackDelta: e.cashbackDelta,
+      balanceBefore: e.balanceBefore,
+      balanceAfter: e.balanceAfter,
       description: e.description ? String(e.description).slice(0, 500) : undefined,
       rewardId: e.rewardId ?? null,
       rewardTitle: e.rewardTitle ?? null,
@@ -270,6 +298,10 @@ export function serializeClientNotes(publicNotes: string, meta: ClientMeta): str
       redeemedAt: r.redeemedAt ?? null,
     }));
   }
+  if (meta.cashbackExpiresAt) payload.cashbackExpiresAt = meta.cashbackExpiresAt;
+  else if (meta.cashbackExpiresAt === null) payload.cashbackExpiresAt = null;
+  if (meta.fidelityExpiresAt) payload.fidelityExpiresAt = meta.fidelityExpiresAt;
+  else if (meta.fidelityExpiresAt === null) payload.fidelityExpiresAt = null;
   const body = (publicNotes || "").trim();
   const tag = `<!--BGN_CLIENT:${JSON.stringify(payload)}:BGN_CLIENT-->`;
   return body ? `${body}\n\n${tag}` : tag;
@@ -306,6 +338,8 @@ export function appendClientLedger(
     orderNumber: entry.orderNumber ?? null,
     stampsDelta: entry.stampsDelta,
     cashbackDelta: entry.cashbackDelta,
+    balanceBefore: entry.balanceBefore,
+    balanceAfter: entry.balanceAfter,
     description: entry.description ? String(entry.description).slice(0, 500) : undefined,
     rewardId: entry.rewardId ?? null,
     rewardTitle: entry.rewardTitle ?? null,

@@ -5,6 +5,18 @@ Toda nova implementação aprovada pelo proprietário gera uma nova versão.
 
 ---
 
+## Burger GN v1.5 (em validação)
+
+- Utilização de Cashback e Fidelidade (Clube Burger GN)
+  - Checkout: card de cashback, checkbox opcional, desconto em tempo real (sem saldo negativo)
+  - Limite % máximo de uso por pedido (admin)
+  - Validade do cashback e da fidelidade (sem validade / dias / data) + expiração automática no histórico
+  - Avisos quando faltam poucos dias para vencer
+  - Histórico com saldo anterior/atual; resumo no Clube do cliente
+  - Cálculos e débito 100% no servidor (anti overdraft / duplicação)
+
+---
+
 ## Burger GN v1.4.1
 
 - Correção pontual: pedidos #3 e #7 (PIX legado `pending` já em Entregue)

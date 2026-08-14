@@ -18,7 +18,8 @@ import {
   parseClientNotes,
   serializeClientNotes,
 } from "../lib/clientMeta";
-import { buildPublicClubeMe } from "../lib/clubePublicMe";
+import { buildPublicClubeMe, publicClubRules } from "../lib/clubePublicMe";
+import { parseExpiryMode } from "../lib/clubBenefits";
 
 const router = Router();
 
@@ -38,55 +39,70 @@ async function ensureSettings(companyId: number) {
   return created;
 }
 
-function publicClubRules(settings: Awaited<ReturnType<typeof ensureSettings>>) {
-  const cashbackPercent = parseFloat(String(settings.cashbackPercent)) || 0;
-  const cashbackMinOrder = parseFloat(String(settings.cashbackMinOrder)) || 0;
-  const stampsRequired = Math.max(1, Number(settings.stampsRequired) || 10);
-  const stampRewardTitle =
-    (settings.stampRewardTitle || "").trim() || "1 hambúrguer grátis";
-  const cashbackMax =
-    settings.cashbackMaxPerOrder != null && String(settings.cashbackMaxPerOrder).trim() !== ""
-      ? parseFloat(String(settings.cashbackMaxPerOrder))
-      : null;
+function applyExpiryFields(
+  updateData: Record<string, unknown>,
+  body: Record<string, unknown>,
+  prefix: "cashback" | "fidelity",
+) {
+  const modeKey = `${prefix}ExpiryMode` as const;
+  const daysKey = `${prefix}ExpiryDays` as const;
+  const dateKey = `${prefix}ExpiryDate` as const;
+  const warnKey = `${prefix}WarningDays` as const;
 
+  if (body[modeKey] !== undefined) {
+    updateData[modeKey] = parseExpiryMode(body[modeKey]);
+  }
+  if (body[daysKey] !== undefined) {
+    if (body[daysKey] === null || body[daysKey] === "") {
+      updateData[daysKey] = null;
+    } else {
+      const n = Math.round(Number(body[daysKey]));
+      updateData[daysKey] = Number.isFinite(n) ? Math.max(1, Math.min(3650, n)) : null;
+    }
+  }
+  if (body[dateKey] !== undefined) {
+    const raw = body[dateKey];
+    if (raw === null || raw === "") {
+      updateData[dateKey] = null;
+    } else {
+      const s = String(raw).slice(0, 10);
+      updateData[dateKey] = /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
+    }
+  }
+  if (body[warnKey] !== undefined) {
+    const n = Math.round(Number(body[warnKey]));
+    updateData[warnKey] = Number.isFinite(n) ? Math.max(1, Math.min(90, n)) : 7;
+  }
+}
+
+function cashbackAdminPayload(settings: Awaited<ReturnType<typeof ensureSettings>>, extra: Record<string, unknown>) {
   return {
-    enabled: settings.enabled !== false,
-    clubName: settings.clubName || "Clube Burger GN",
-    welcomeMessage:
-      settings.welcomeMessage ||
-      "Bem-vindo ao Clube Burger GN! Acumule cashback e selos a cada pedido.",
-    cashback: {
-      enabled: settings.cashbackEnabled !== false,
-      percent: settings.cashbackPercent,
-      minOrder: settings.cashbackMinOrder,
-      maxPerOrder: settings.cashbackMaxPerOrder ?? null,
-      howItWorks: [
-        `A cada pedido concluído você recebe ${cashbackPercent.toFixed(0)}% de cashback sobre o valor do pedido.`,
-        cashbackMinOrder > 0
-          ? `O cashback vale para pedidos a partir de R$ ${cashbackMinOrder.toFixed(2).replace(".", ",")}.`
-          : "Não há valor mínimo para gerar cashback.",
-        cashbackMax != null && Number.isFinite(cashbackMax)
-          ? `O limite máximo de cashback por pedido é R$ ${cashbackMax.toFixed(2).replace(".", ",")}.`
-          : "Não há limite máximo de cashback por pedido.",
-        "Você poderá utilizar o cashback disponível nos próximos pedidos, conforme saldo acumulado.",
-      ],
-      whenToUse:
-        "O cashback fica disponível após a conclusão do pedido e pode ser usado em compras futuras na The Burger GN.",
-    },
-    fidelity: {
-      enabled: settings.fidelityEnabled !== false,
-      stampsRequired,
-      stampRewardTitle,
-      howItWorks: [
-        "Você ganha no máximo 1 selo por dia elegível (fuso de Brasília), na primeira compra do dia.",
-        "Pedidos extras no mesmo dia geram Cashback normalmente, mas não geram novo selo.",
-        `Ao completar ${stampsRequired} selos, você desbloqueia: ${stampRewardTitle}.`,
-        "O prêmio vale para qualquer hambúrguer do cardápio (não inclui Combos). Na entrega, cobra-se apenas a taxa quando houver.",
-        "Os selos reiniciam o ciclo após a recompensa ser conquistada.",
-      ],
-      whenToUse:
-        "Na próxima compra após completar a meta, você poderá resgatar o hambúrguer grátis no checkout ou guardar para depois.",
-    },
+    cashbackPercent: settings.cashbackPercent,
+    cashbackMinOrder: settings.cashbackMinOrder,
+    cashbackEnabled: settings.cashbackEnabled ?? true,
+    cashbackMaxPerOrder: settings.cashbackMaxPerOrder ?? null,
+    cashbackMaxUsePercent: settings.cashbackMaxUsePercent ?? null,
+    cashbackExpiryMode: parseExpiryMode(settings.cashbackExpiryMode),
+    cashbackExpiryDays: settings.cashbackExpiryDays ?? null,
+    cashbackExpiryDate: settings.cashbackExpiryDate
+      ? String(settings.cashbackExpiryDate).slice(0, 10)
+      : null,
+    cashbackWarningDays: settings.cashbackWarningDays ?? 7,
+    ...extra,
+  };
+}
+
+function fidelityAdminPayload(settings: Awaited<ReturnType<typeof ensureSettings>>) {
+  return {
+    fidelityEnabled: settings.fidelityEnabled ?? true,
+    stampsRequired: settings.stampsRequired ?? 10,
+    stampRewardTitle: settings.stampRewardTitle || "1 hambúrguer grátis",
+    fidelityExpiryMode: parseExpiryMode(settings.fidelityExpiryMode),
+    fidelityExpiryDays: settings.fidelityExpiryDays ?? null,
+    fidelityExpiryDate: settings.fidelityExpiryDate
+      ? String(settings.fidelityExpiryDate).slice(0, 10)
+      : null,
+    fidelityWarningDays: settings.fidelityWarningDays ?? 7,
   };
 }
 
@@ -584,14 +600,10 @@ router.get("/admin/clube/cashback", requireCompanyAuth, async (req, res) => {
       .from(clubeMembersTable)
       .where(eq(clubeMembersTable.companyId, req.companyId!));
 
-    res.json({
-      cashbackPercent: settings.cashbackPercent,
-      cashbackMinOrder: settings.cashbackMinOrder,
-      cashbackEnabled: settings.cashbackEnabled ?? true,
-      cashbackMaxPerOrder: settings.cashbackMaxPerOrder ?? null,
+    res.json(cashbackAdminPayload(settings, {
       totalBalance: parseFloat(totalBalance ?? "0"),
       membersWithBalance: members,
-    });
+    }));
   } catch (err) {
     req.log.error({ err }, "Failed to fetch cashback data");
     res.status(500).json({ error: "Internal server error" });
@@ -606,6 +618,11 @@ router.put("/admin/clube/cashback", requireCompanyAuth, async (req, res) => {
       cashbackMinOrder: string;
       cashbackEnabled: boolean;
       cashbackMaxPerOrder: string | null;
+      cashbackMaxUsePercent: string | null;
+      cashbackExpiryMode: string;
+      cashbackExpiryDays: number | null;
+      cashbackExpiryDate: string | null;
+      cashbackWarningDays: number;
     }>;
     const updateData: Record<string, unknown> = { updatedAt: new Date() };
     if (body.cashbackPercent !== undefined) updateData["cashbackPercent"] = body.cashbackPercent;
@@ -619,6 +636,16 @@ router.put("/admin/clube/cashback", requireCompanyAuth, async (req, res) => {
         updateData["cashbackMaxPerOrder"] = Number.isFinite(n) && n >= 0 ? n.toFixed(2) : null;
       }
     }
+    if (body.cashbackMaxUsePercent !== undefined) {
+      if (body.cashbackMaxUsePercent === null || body.cashbackMaxUsePercent === "") {
+        updateData["cashbackMaxUsePercent"] = null;
+      } else {
+        const n = parseFloat(String(body.cashbackMaxUsePercent));
+        updateData["cashbackMaxUsePercent"] =
+          Number.isFinite(n) && n >= 0 ? Math.min(100, n).toFixed(2) : null;
+      }
+    }
+    applyExpiryFields(updateData, body as Record<string, unknown>, "cashback");
 
     const [settings] = await db
       .update(clubeSettingsTable)
@@ -636,11 +663,7 @@ router.put("/admin/clube/cashback", requireCompanyAuth, async (req, res) => {
 router.get("/admin/clube/fidelity", requireCompanyAuth, async (req, res) => {
   try {
     const settings = await ensureSettings(req.companyId!);
-    res.json({
-      fidelityEnabled: settings.fidelityEnabled ?? true,
-      stampsRequired: settings.stampsRequired ?? 10,
-      stampRewardTitle: settings.stampRewardTitle || "1 hambúrguer grátis",
-    });
+    res.json(fidelityAdminPayload(settings));
   } catch (err) {
     req.log.error({ err }, "Failed to fetch fidelity settings");
     res.status(500).json({ error: "Internal server error" });
@@ -654,6 +677,10 @@ router.put("/admin/clube/fidelity", requireCompanyAuth, async (req, res) => {
       fidelityEnabled: boolean;
       stampsRequired: number;
       stampRewardTitle: string;
+      fidelityExpiryMode: string;
+      fidelityExpiryDays: number | null;
+      fidelityExpiryDate: string | null;
+      fidelityWarningDays: number;
     }>;
     const updateData: Record<string, unknown> = { updatedAt: new Date() };
     if (body.fidelityEnabled !== undefined) updateData["fidelityEnabled"] = Boolean(body.fidelityEnabled);
@@ -665,16 +692,13 @@ router.put("/admin/clube/fidelity", requireCompanyAuth, async (req, res) => {
       updateData["stampRewardTitle"] =
         String(body.stampRewardTitle || "").trim().slice(0, 200) || "1 hambúrguer grátis";
     }
+    applyExpiryFields(updateData, body as Record<string, unknown>, "fidelity");
     const [settings] = await db
       .update(clubeSettingsTable)
       .set(updateData)
       .where(eq(clubeSettingsTable.companyId, req.companyId!))
       .returning();
-    res.json({
-      fidelityEnabled: settings.fidelityEnabled,
-      stampsRequired: settings.stampsRequired,
-      stampRewardTitle: settings.stampRewardTitle,
-    });
+    res.json(fidelityAdminPayload(settings));
   } catch (err) {
     req.log.error({ err }, "Failed to update fidelity settings");
     res.status(500).json({ error: "Internal server error" });
