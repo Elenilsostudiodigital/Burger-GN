@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button';
 
 export default function Cart() {
   const [, setLocation] = useLocation();
-  const { cartItems, updateQuantity, removeItem, subtotal, totalItems } = useCart();
+  const { cartItems, updateQuantity, removeItem, clearCart, subtotal, totalItems } = useCart();
   const { isClosed, status } = useStoreStatus(true);
 
   const lineTotal = (item: (typeof cartItems)[number]) => {
@@ -23,6 +23,13 @@ export default function Cart() {
   const deliveryFeePlaceholder = null as number | null;
   const discount = 0;
   const estimatedTotal = Math.max(0, subtotal + (deliveryFeePlaceholder ?? 0) - discount);
+
+  const handleClearCart = () => {
+    if (!window.confirm('Limpar carrinho?\n\nTodos os produtos e adicionais serão removidos.')) {
+      return;
+    }
+    clearCart();
+  };
 
   return (
     <PageTransition className="bg-[#0a0a0a]">
@@ -109,6 +116,15 @@ export default function Cart() {
                 ))}
               </AnimatePresence>
             </div>
+
+            <button
+              type="button"
+              onClick={handleClearCart}
+              className="w-full flex items-center justify-center gap-2 py-3 rounded-xl border border-zinc-800 bg-zinc-950/60 text-red-400 text-sm font-bold uppercase tracking-wider hover:border-red-500/40 hover:bg-red-500/5 transition-colors"
+            >
+              <Trash2 size={16} />
+              Limpar carrinho
+            </button>
 
             <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-3 shadow-[0_8px_28px_rgba(0,0,0,0.25)]">
               <h3 className="text-white font-black uppercase tracking-wider text-sm">Resumo do pedido</h3>

@@ -32,6 +32,7 @@ Atualizar esta lista conforme o andamento do projeto.
 
 - 🔄 Divulgação do Cardápio
 - 🔄 Clube Burger — utilização de Cashback e Fidelidade (aguardando validação manual)
+- 🔄 Carrinho — Limpar carrinho (aguardando validação manual)
 
 ---
 
@@ -46,4 +47,5 @@ _Nenhum bug aberto registrado neste momento. Incluir aqui qualquer falha reprodu
 
 ## PRÓXIMA ETAPA
 
-Validação manual do proprietário: utilização de Cashback no checkout + configs admin (cashback/fidelidade/validade).
+1. Validação manual: Limpar carrinho (com confirmação + persistência vazia).
+2. Em seguida: validação do cashback/fidelidade (v1.5).

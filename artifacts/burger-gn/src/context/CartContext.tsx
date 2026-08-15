@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useMemo } from 'react';
+import React, { createContext, useContext, useState, useMemo, useEffect } from 'react';
 import type { Addon } from '../lib/api';
 
 export interface CartProduct {
@@ -29,6 +29,48 @@ function makeLineId(productId: number, addons: Addon[], notes: string): string {
   return `${productId}::${addonsKey}::${notes.trim()}`;
 }
 
+const CART_STORAGE_KEY = 'bgn_cart_v1';
+
+function isValidCartItem(value: unknown): value is CartItem {
+  if (!value || typeof value !== 'object') return false;
+  const o = value as Partial<CartItem>;
+  if (typeof o.lineId !== 'string' || !o.lineId) return false;
+  if (!o.item || typeof o.item !== 'object') return false;
+  if (typeof o.item.id !== 'number' || typeof o.item.name !== 'string') return false;
+  if (typeof o.item.price !== 'number') return false;
+  if (typeof o.quantity !== 'number' || o.quantity <= 0) return false;
+  if (!Array.isArray(o.selectedAddons)) return false;
+  if (typeof o.notes !== 'string') return false;
+  return true;
+}
+
+/** Load cart from localStorage (PWA / refresh safe). Invalid data → empty. */
+export function loadCartFromStorage(): CartItem[] {
+  try {
+    if (typeof localStorage === 'undefined') return [];
+    const raw = localStorage.getItem(CART_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(isValidCartItem);
+  } catch {
+    return [];
+  }
+}
+
+export function persistCartToStorage(items: CartItem[]): void {
+  try {
+    if (typeof localStorage === 'undefined') return;
+    if (!items.length) {
+      localStorage.removeItem(CART_STORAGE_KEY);
+      return;
+    }
+    localStorage.setItem(CART_STORAGE_KEY, JSON.stringify(items));
+  } catch {
+    /* quota / private mode — ignore */
+  }
+}
+
 interface CartContextType {
   cartItems: CartItem[];
   addItem: (item: CartProduct, options?: AddItemOptions) => void;
@@ -42,7 +84,11 @@ interface CartContextType {
 const CartContext = createContext<CartContextType | undefined>(undefined);
 
 export function CartProvider({ children }: { children: React.ReactNode }) {
-  const [cartItems, setCartItems] = useState<CartItem[]>([]);
+  const [cartItems, setCartItems] = useState<CartItem[]>(() => loadCartFromStorage());
+
+  useEffect(() => {
+    persistCartToStorage(cartItems);
+  }, [cartItems]);
 
   const addItem = (item: CartProduct, options?: AddItemOptions) => {
     if (!item.available) return;
@@ -70,7 +116,10 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     );
   };
 
-  const clearCart = () => setCartItems([]);
+  const clearCart = () => {
+    setCartItems([]);
+    persistCartToStorage([]);
+  };
 
   const lineTotal = (ci: CartItem) => {
     const addons = Array.isArray(ci.selectedAddons) ? ci.selectedAddons : [];

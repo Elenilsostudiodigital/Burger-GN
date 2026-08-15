@@ -5,6 +5,15 @@ Toda nova implementação aprovada pelo proprietário gera uma nova versão.
 
 ---
 
+## Burger GN v1.5.1 (em validação)
+
+- Limpar carrinho (cliente)
+  - Botão “Limpar carrinho” com confirmação
+  - Remove todos os itens/adicionais; zera subtotal, total e badge
+  - Persistência: carrinho vazio permanece vazio após atualizar a página (PWA/navegador)
+
+---
+
 ## Burger GN v1.5 (em validação)
 
 - Utilização de Cashback e Fidelidade (Clube Burger GN)
