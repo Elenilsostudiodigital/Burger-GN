@@ -1,11 +1,11 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Link, useLocation } from 'wouter';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useCart } from '../context/CartContext';
 import { BottomNav } from '../components/BottomNav';
 import { PageTransition } from '../components/PageTransition';
 import { StoreClosedBanner, useStoreStatus } from '../components/StoreClosedBanner';
-import { ArrowLeft, Trash2, Plus, Minus, ShoppingBag, Tag, Bike } from 'lucide-react';
+import { ArrowLeft, Trash2, Plus, Minus, Tag, Bike } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 export default function Cart() {
@@ -24,12 +24,33 @@ export default function Cart() {
   const discount = 0;
   const estimatedTotal = Math.max(0, subtotal + (deliveryFeePlaceholder ?? 0) - discount);
 
+  /** Carrinho vazio → volta ao cardápio (não permanece nesta tela). */
+  useEffect(() => {
+    if (cartItems.length === 0) {
+      setLocation('/cardapio');
+    }
+  }, [cartItems.length, setLocation]);
+
   const handleClearCart = () => {
     if (!window.confirm('Limpar carrinho?\n\nTodos os produtos e adicionais serão removidos.')) {
       return;
     }
     clearCart();
+    try {
+      sessionStorage.removeItem('lastOrder');
+    } catch { /* ignore */ }
+    setLocation('/cardapio');
   };
+
+  if (cartItems.length === 0) {
+    return (
+      <PageTransition className="bg-[#0a0a0a]">
+        <div className="min-h-screen flex items-center justify-center">
+          <div className="w-8 h-8 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
+        </div>
+      </PageTransition>
+    );
+  }
 
   return (
     <PageTransition className="bg-[#0a0a0a]">
@@ -50,18 +71,6 @@ export default function Cart() {
       </header>
 
       <main className="max-w-md mx-auto px-4 py-6 pb-40">
-        {cartItems.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-20 text-center">
-            <div className="w-24 h-24 bg-zinc-900 rounded-full flex items-center justify-center text-zinc-600 mb-6">
-              <ShoppingBag size={48} />
-            </div>
-            <h2 className="text-2xl font-bold text-white mb-2">Carrinho Vazio</h2>
-            <p className="text-zinc-500 mb-8 max-w-[250px]">Adicione os melhores hambúrgueres para matar sua fome.</p>
-            <Link href="/cardapio">
-              <Button size="lg" className="rounded-xl font-bold tracking-wider px-8">VER CARDÁPIO</Button>
-            </Link>
-          </div>
-        ) : (
           <div className="space-y-5">
             <div className="space-y-3">
               <h2 className="text-zinc-500 text-xs font-bold uppercase tracking-wider px-0.5">Itens do pedido</h2>
@@ -177,7 +186,6 @@ export default function Cart() {
               Continuar comprando
             </Link>
           </div>
-        )}
       </main>
 
       <BottomNav />
