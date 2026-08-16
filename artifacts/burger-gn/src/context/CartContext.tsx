@@ -30,6 +30,7 @@ function makeLineId(productId: number, addons: Addon[], notes: string): string {
 }
 
 const CART_STORAGE_KEY = 'bgn_cart_v1';
+const LAST_ORDER_SESSION_KEY = 'lastOrder';
 
 function isValidCartItem(value: unknown): value is CartItem {
   if (!value || typeof value !== 'object') return false;
@@ -71,6 +72,17 @@ export function persistCartToStorage(items: CartItem[]): void {
   }
 }
 
+/** Remove cart persistence + leftover checkout lastOrder. Does not touch Meu Pedido / clube / presence. */
+export function wipeCartSessionResidue(): void {
+  persistCartToStorage([]);
+  try {
+    if (typeof sessionStorage === 'undefined') return;
+    sessionStorage.removeItem(LAST_ORDER_SESSION_KEY);
+  } catch {
+    /* private mode — ignore */
+  }
+}
+
 interface CartContextType {
   cartItems: CartItem[];
   addItem: (item: CartProduct, options?: AddItemOptions) => void;
@@ -106,19 +118,26 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   };
 
   const removeItem = (lineId: string) => {
-    setCartItems(prev => prev.filter(i => i.lineId !== lineId));
+    setCartItems(prev => {
+      const next = prev.filter(i => i.lineId !== lineId);
+      if (next.length === 0) wipeCartSessionResidue();
+      return next;
+    });
   };
 
   const updateQuantity = (lineId: string, delta: number) => {
-    setCartItems(prev =>
-      prev.map(i => i.lineId === lineId ? { ...i, quantity: Math.max(0, i.quantity + delta) } : i)
-        .filter(i => i.quantity > 0)
-    );
+    setCartItems(prev => {
+      const next = prev
+        .map(i => i.lineId === lineId ? { ...i, quantity: Math.max(0, i.quantity + delta) } : i)
+        .filter(i => i.quantity > 0);
+      if (next.length === 0) wipeCartSessionResidue();
+      return next;
+    });
   };
 
   const clearCart = () => {
     setCartItems([]);
-    persistCartToStorage([]);
+    wipeCartSessionResidue();
   };
 
   const lineTotal = (ci: CartItem) => {

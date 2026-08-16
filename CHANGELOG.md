@@ -11,6 +11,8 @@ Toda nova implementação aprovada pelo proprietário gera uma nova versão.
   - Botão “Limpar carrinho” com confirmação
   - Remove todos os itens/adicionais; zera subtotal, total e badge
   - Persistência: carrinho vazio permanece vazio após atualizar a página (PWA/navegador)
+  - Remove `lastOrder` da sessão; ao zerar o carrinho (botão ou último item) redireciona ao Cardápio
+  - Novo pedido começa sem resíduo do carrinho anterior
 
 ---
 

@@ -24,9 +24,10 @@ export default function Cart() {
   const discount = 0;
   const estimatedTotal = Math.max(0, subtotal + (deliveryFeePlaceholder ?? 0) - discount);
 
-  /** Carrinho vazio → volta ao cardápio (não permanece nesta tela). */
+  /** Carrinho vazio → limpa lastOrder da sessão e volta ao cardápio (igual a Limpar carrinho). */
   useEffect(() => {
     if (cartItems.length === 0) {
+      try { sessionStorage.removeItem('lastOrder'); } catch { /* ignore */ }
       setLocation('/cardapio');
     }
   }, [cartItems.length, setLocation]);
