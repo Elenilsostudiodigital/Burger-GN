@@ -3,46 +3,36 @@ import { Link, useLocation } from 'wouter';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   applyServerOrderToMyOrder,
-  archiveMyOrder,
-  markDeliveredPromptStarted,
+  getMyOrder,
   MY_ORDER_REFRESH_EVENT,
   purgeCustomerOrderTracking,
-  DELIVERY_CONFIRM_TIMEOUT_MS,
 } from '../lib/myOrder';
 import { useVisibleMyOrder } from '../hooks/useMyOrder';
 import { trackOrder } from '../lib/api';
 
-/** Fixed "Meu Pedido" entry — only while a real active order exists. */
+/**
+ * Floating "Meu Pedido" — visible only for in-progress kitchen/delivery statuses.
+ * Always reconciles stored tracking with the server so stale orders cannot keep the tab open.
+ */
 export function MyOrderFab() {
   const [location] = useLocation();
   const myOrder = useVisibleMyOrder();
 
   useEffect(() => {
-    if (!myOrder?.trackingId) return;
     let cancelled = false;
 
     const check = async () => {
+      const stored = getMyOrder();
+      if (!stored?.trackingId) return;
       try {
-        const order = await trackOrder(myOrder.trackingId);
+        const order = await trackOrder(stored.trackingId);
         if (cancelled) return;
-        const state = applyServerOrderToMyOrder(order);
-        if (state === 'inactive') return;
-        if (order.status !== 'done') return;
-        if (order.review) {
-          archiveMyOrder('reviewed');
-          return;
-        }
-        const promptAt = markDeliveredPromptStarted(order.trackingId)
-          || order.deliveredAt
-          || new Date().toISOString();
-        if (Date.now() - new Date(promptAt).getTime() >= DELIVERY_CONFIRM_TIMEOUT_MS) {
-          archiveMyOrder('timeout');
-        }
+        applyServerOrderToMyOrder(order);
       } catch (err) {
         if (cancelled) return;
         const message = err instanceof Error ? err.message : '';
         if (/not found|não encontrado|404/i.test(message)) {
-          purgeCustomerOrderTracking(myOrder.trackingId);
+          purgeCustomerOrderTracking(stored.trackingId);
         }
       }
     };
@@ -56,7 +46,7 @@ export function MyOrderFab() {
       clearInterval(id);
       window.removeEventListener(MY_ORDER_REFRESH_EVENT, onRefresh);
     };
-  }, [myOrder?.trackingId]);
+  }, [location]);
 
   if (!myOrder) return null;
 
