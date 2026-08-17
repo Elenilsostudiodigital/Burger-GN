@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { useParams, Link, useLocation } from 'wouter';
+import { useParams, useLocation } from 'wouter';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   trackOrder, getPaymentSettings, submitOrderReview, uploadOrderReceipt, getPublicClubeMe, Order,
@@ -10,8 +10,9 @@ import {
 } from '../lib/api';
 import { compressReceiptImage } from '../lib/receiptImage';
 import {
-  getMyOrder, clearMyOrder, saveMyOrder, archiveMyOrder,
-  markDeliveredPromptStarted, DELIVERY_CONFIRM_TIMEOUT_MS,
+  getMyOrder, getVisibleMyOrder, archiveMyOrder,
+  applyServerOrderToMyOrder, purgeCustomerOrderTracking, goToCardapio,
+  hideMyOrderUnlessActive, markDeliveredPromptStarted, DELIVERY_CONFIRM_TIMEOUT_MS,
 } from '../lib/myOrder';
 import { notifyOrderStatusChange } from '../lib/pushNotifications';
 import { buildPostDeliverySurveyMessage, sendPostDeliverySurveyWhenReady } from '../lib/whatsappFuture';
@@ -115,14 +116,15 @@ function OrderTimelineView({ trackingId }: { trackingId: string }) {
       try {
         const data = await trackOrder(trackingId);
         if (!alive || closedRef.current) return;
+        if (data.phone) saveClubePhone(data.phone);
+        const orderState = applyServerOrderToMyOrder(data);
+        if (orderState === 'inactive' && data.status !== 'cancelled' && data.workflow !== 'cancelled') {
+          closedRef.current = true;
+          setLocation('/cardapio');
+          return;
+        }
         setOrder(data);
         setError(false);
-        if (data.phone) saveClubePhone(data.phone);
-        saveMyOrder({
-          trackingId: data.trackingId,
-          orderNumber: data.orderNumber,
-          createdAt: data.createdAt,
-        });
 
         const wf = data.status === 'cancelled' ? 'cancelled' : (data.workflow || data.status);
         const payKey = `${data.paymentStatus}:${data.receiptRejectReason || ''}:${data.receiptUploadedAt || ''}`;
@@ -174,8 +176,13 @@ function OrderTimelineView({ trackingId }: { trackingId: string }) {
 
           setDeliveryPhase(prev => prev ?? 'confirm');
         }
-      } catch {
-        if (alive) setError(true);
+      } catch (err) {
+        if (!alive) return;
+        const message = err instanceof Error ? err.message : '';
+        if (/not found|não encontrado|404/i.test(message)) {
+          purgeCustomerOrderTracking(trackingId);
+        }
+        setError(true);
       }
     };
     fetchOrder();
@@ -297,7 +304,7 @@ function OrderTimelineView({ trackingId }: { trackingId: string }) {
     return (
       <PageTransition className="bg-[#0a0a0a] min-h-screen flex flex-col items-center justify-center p-6 text-center">
         <p className="text-zinc-400 mb-4">Pedido não encontrado.</p>
-        <Button onClick={() => { clearMyOrder(); setLocation('/cardapio'); }}>Voltar ao cardápio</Button>
+        <Button onClick={() => goToCardapio(setLocation)}>Voltar ao cardápio</Button>
         <BottomNav />
       </PageTransition>
     );
@@ -400,8 +407,8 @@ function OrderTimelineView({ trackingId }: { trackingId: string }) {
     <PageTransition className="bg-[#0a0a0a]">
       <header className="sticky top-0 z-40 bg-zinc-950/95 border-b border-zinc-800 px-4 py-4">
         <div className="max-w-md mx-auto flex items-center gap-2">
-          <button type="button" onClick={() => setLocation('/cardapio')}
-            className="p-2 -ml-1 text-zinc-400 hover:text-white rounded-xl">
+          <button type="button" onClick={() => goToCardapio(setLocation)}
+            className="p-2 -ml-1 text-zinc-400 hover:text-white rounded-xl" aria-label="Voltar ao cardápio">
             <ArrowLeft size={22} />
           </button>
           <div>
@@ -739,11 +746,9 @@ function OrderTimelineView({ trackingId }: { trackingId: string }) {
           </div>
         </motion.div>
 
-        <Link href="/" className="block">
-          <Button variant="ghost" className="w-full text-zinc-500 hover:text-white gap-2">
-            <Home size={16} /> Voltar ao início
-          </Button>
-        </Link>
+        <Button variant="ghost" className="w-full text-zinc-500 hover:text-white gap-2" onClick={() => goToCardapio(setLocation)}>
+          <Home size={16} /> Voltar ao cardápio
+        </Button>
       </main>
       <BottomNav />
     </PageTransition>
@@ -752,7 +757,11 @@ function OrderTimelineView({ trackingId }: { trackingId: string }) {
 
 export function MyOrderPage() {
   const [, setLocation] = useLocation();
-  const ref = getMyOrder();
+  const ref = getVisibleMyOrder();
+
+  useEffect(() => {
+    hideMyOrderUnlessActive();
+  }, []);
 
   if (!ref?.trackingId) {
     return (
@@ -763,8 +772,8 @@ export function MyOrderPage() {
           <p className="text-zinc-500 text-sm max-w-xs mb-6">
             Você ainda não tem um pedido em andamento. Faça um pedido no cardápio para acompanhar aqui.
           </p>
-          <Button onClick={() => setLocation('/cardapio')} className="rounded-xl font-bold bg-amber-500 text-zinc-950">
-            Ver cardápio
+          <Button onClick={() => goToCardapio(setLocation)} className="rounded-xl font-bold bg-amber-500 text-zinc-950">
+            Voltar ao cardápio
           </Button>
         </div>
         <BottomNav />

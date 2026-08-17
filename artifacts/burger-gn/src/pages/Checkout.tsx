@@ -8,7 +8,7 @@ import {
   checkDeliveryStreet, resolveDeliveryArea, requestDeliveryAreaAnalysis,
   ValidateCouponResult, DeliveryZone, KmDeliveryConfig, PaymentSettingsPublic,
 } from '../lib/api';
-import { saveMyOrder } from '../lib/myOrder';
+import { goToCardapio, saveMyOrder } from '../lib/myOrder';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import { StreetMapPreview } from '../components/StreetMapPreview';
 import { StoreClosedBanner, useStoreStatus } from '../components/StoreClosedBanner';
@@ -177,7 +177,7 @@ export default function Checkout() {
   }, [orderType, paymentMethod, paySettings, pixOnlineAvailable, pixManualAvailable, cardOnlineAvailable]);
 
   useEffect(() => {
-    if (cartItems.length === 0 && !submitting) setLocation('/cardapio');
+    if (cartItems.length === 0 && !submitting) goToCardapio(setLocation);
   }, [cartItems.length, submitting, setLocation]);
 
   const applyCoordinates = useCallback((lat: number, lng: number) => {
@@ -675,7 +675,7 @@ export default function Checkout() {
       setSubmitError(`${storeStatus?.message || 'Estamos fechados no momento.'}${detail}`.trim());
       return;
     }
-    if (cartItems.length === 0) { setLocation('/cardapio'); return; }
+    if (cartItems.length === 0) { goToCardapio(setLocation); return; }
     if (!orderType) { setStep('fulfillment'); return; }
 
     if (orderType !== 'local') {
@@ -818,6 +818,8 @@ export default function Checkout() {
         trackingId: result.trackingId,
         orderNumber: result.orderNumber,
         createdAt: new Date().toISOString(),
+        workflow: result.workflow ?? (apiPaymentMethod === 'pix' ? 'awaiting_payment' : 'new'),
+        status: 'new',
       });
 
       if (result.cardCheckoutUrl) {
@@ -853,7 +855,7 @@ export default function Checkout() {
       <PageTransition className="bg-[#0a0a0a]">
         <div className="min-h-screen flex flex-col items-center justify-center gap-3 px-6 text-center">
           <p className="text-zinc-400 text-sm">Não foi possível carregar o carrinho.</p>
-          <Button type="button" onClick={() => setLocation('/cardapio')} className="bg-amber-500 text-zinc-950 font-bold">
+          <Button type="button" onClick={() => goToCardapio(setLocation)} className="bg-amber-500 text-zinc-950 font-bold">
             Voltar ao cardápio
           </Button>
         </div>

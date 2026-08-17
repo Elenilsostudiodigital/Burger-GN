@@ -83,6 +83,8 @@ export default function Confirmation() {
           trackingId: stored.trackingId,
           orderNumber: stored.orderNumber,
           createdAt: stored.createdAt || new Date().toISOString(),
+          workflow: stored.workflow,
+          status: 'new',
         });
       }
       if (stored.phone) saveClubePhone(stored.phone);
