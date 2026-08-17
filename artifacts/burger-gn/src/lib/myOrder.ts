@@ -8,18 +8,27 @@ const LAST_ORDER_KEY = 'lastOrder';
 export const MY_ORDER_CHANGED_EVENT = 'bgn:my-order-changed';
 export const MY_ORDER_REFRESH_EVENT = 'bgn:my-order-refresh';
 
-/** Workflows that keep "Meu Pedido" visible for the customer. */
-export const ACTIVE_CUSTOMER_WORKFLOWS = [
+/**
+ * Tab/FAB "Meu Pedido" — only while the kitchen/delivery flow is in progress.
+ * Hidden for entregue (done), finalizado and cancelado.
+ */
+export const MY_ORDER_TAB_WORKFLOWS = [
   'awaiting_payment',
   'new',
   'accepted',
   'preparing',
   'ready',
   'out',
-  'done',
 ] as const;
 
-const ACTIVE_CUSTOMER_STATUSES = ['new', 'preparing', 'delivery', 'done'] as const;
+const MY_ORDER_TAB_STATUSES = ['new', 'preparing', 'delivery'] as const;
+
+/** Still persisted for the tracking page until finalized/cancelled. */
+const PERSISTED_CUSTOMER_WORKFLOWS = [...MY_ORDER_TAB_WORKFLOWS, 'done'] as const;
+const PERSISTED_CUSTOMER_STATUSES = [...MY_ORDER_TAB_STATUSES, 'done'] as const;
+
+/** @deprecated use MY_ORDER_TAB_WORKFLOWS / shouldShowMyOrderTab */
+export const ACTIVE_CUSTOMER_WORKFLOWS = MY_ORDER_TAB_WORKFLOWS;
 
 export interface MyOrderRef {
   trackingId: string;
@@ -68,23 +77,44 @@ export function subscribeMyOrderChanged(cb: () => void): () => void {
   };
 }
 
-/** True only while the customer still has a live order to follow. */
+function workflowOf(order: CustomerOrderSnapshot | null | undefined): string {
+  return String(order?.workflow || '').trim();
+}
+
+function statusOf(order: CustomerOrderSnapshot | null | undefined): string {
+  return String(order?.status || '').trim();
+}
+
+export function isCancelledOrFinalized(order: CustomerOrderSnapshot | null | undefined): boolean {
+  const workflow = workflowOf(order);
+  const status = statusOf(order);
+  return status === 'cancelled' || workflow === 'cancelled' || workflow === 'finalized';
+}
+
+/** True while tracking data may still be kept (includes entregue until finalized). */
 export function isActiveCustomerOrder(order: CustomerOrderSnapshot | null | undefined): boolean {
   if (!order) return false;
-  const workflow = String(order.workflow || '').trim();
-  const status = String(order.status || '').trim();
-  if (status === 'cancelled' || workflow === 'cancelled') return false;
-  if (workflow === 'finalized') return false;
-  if (workflow) return (ACTIVE_CUSTOMER_WORKFLOWS as readonly string[]).includes(workflow);
-  if (status) return (ACTIVE_CUSTOMER_STATUSES as readonly string[]).includes(status);
-  // Fresh checkout persist (tracking id only) is treated as active until the server says otherwise.
+  if (isCancelledOrFinalized(order)) return false;
+  const workflow = workflowOf(order);
+  const status = statusOf(order);
+  if (workflow) return (PERSISTED_CUSTOMER_WORKFLOWS as readonly string[]).includes(workflow);
+  if (status) return (PERSISTED_CUSTOMER_STATUSES as readonly string[]).includes(status);
   return Boolean(order.trackingId);
 }
 
-export function shouldShowMyOrderTab(ref: MyOrderRef | null | undefined = getMyOrder()): boolean {
+/**
+ * Floating / nav "Meu Pedido" visibility.
+ * Requires an explicit in-progress workflow — leftover tracking ids never keep the tab open.
+ */
+export function shouldShowMyOrderTab(ref: MyOrderRef | CustomerOrderSnapshot | null | undefined = getMyOrder()): boolean {
   if (!ref?.trackingId) return false;
-  if (ref.workflow || ref.status) return isActiveCustomerOrder(ref);
-  return true;
+  if (isCancelledOrFinalized(ref)) return false;
+  const workflow = workflowOf(ref);
+  const status = statusOf(ref);
+  if (workflow === 'done' || status === 'done') return false;
+  if (workflow) return (MY_ORDER_TAB_WORKFLOWS as readonly string[]).includes(workflow);
+  if (status) return (MY_ORDER_TAB_STATUSES as readonly string[]).includes(status);
+  return false;
 }
 
 export function getMyOrder(): MyOrderRef | null {
@@ -179,10 +209,13 @@ export function purgeCustomerOrderTracking(trackingId?: string) {
   const id = trackingId || current?.trackingId;
   clearMyOrder();
   removeLastOrderDraft();
+  try { localStorage.removeItem(LAST_ORDER_KEY); } catch { /* ignore */ }
+  try { sessionStorage.removeItem(LAST_ORDER_KEY); } catch { /* ignore */ }
   if (id) {
     removeTrackingFromList(HISTORY_KEY, id);
     removeTrackingFromList(PUSH_QUEUE_KEY, id);
   }
+  requestMyOrderRefresh();
 }
 
 /**
@@ -193,7 +226,7 @@ export function hideMyOrderUnlessActive() {
   removeLastOrderDraft();
   const ref = getMyOrder();
   if (!ref) return;
-  if (!shouldShowMyOrderTab(ref)) {
+  if (isCancelledOrFinalized(ref) || !isActiveCustomerOrder(ref)) {
     purgeCustomerOrderTracking(ref.trackingId);
     return;
   }

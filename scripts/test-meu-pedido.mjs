@@ -7,32 +7,43 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const ACTIVE_CUSTOMER_WORKFLOWS = [
+const MY_ORDER_TAB_WORKFLOWS = [
   "awaiting_payment",
   "new",
   "accepted",
   "preparing",
   "ready",
   "out",
-  "done",
 ];
-const ACTIVE_CUSTOMER_STATUSES = ["new", "preparing", "delivery", "done"];
+const MY_ORDER_TAB_STATUSES = ["new", "preparing", "delivery"];
+const PERSISTED_CUSTOMER_WORKFLOWS = [...MY_ORDER_TAB_WORKFLOWS, "done"];
+const PERSISTED_CUSTOMER_STATUSES = [...MY_ORDER_TAB_STATUSES, "done"];
+
+function isCancelledOrFinalized(order) {
+  const workflow = String(order?.workflow || "").trim();
+  const status = String(order?.status || "").trim();
+  return status === "cancelled" || workflow === "cancelled" || workflow === "finalized";
+}
 
 function isActiveCustomerOrder(order) {
   if (!order) return false;
+  if (isCancelledOrFinalized(order)) return false;
   const workflow = String(order.workflow || "").trim();
   const status = String(order.status || "").trim();
-  if (status === "cancelled" || workflow === "cancelled") return false;
-  if (workflow === "finalized") return false;
-  if (workflow) return ACTIVE_CUSTOMER_WORKFLOWS.includes(workflow);
-  if (status) return ACTIVE_CUSTOMER_STATUSES.includes(status);
+  if (workflow) return PERSISTED_CUSTOMER_WORKFLOWS.includes(workflow);
+  if (status) return PERSISTED_CUSTOMER_STATUSES.includes(status);
   return Boolean(order.trackingId);
 }
 
 function shouldShowMyOrderTab(ref) {
   if (!ref?.trackingId) return false;
-  if (ref.workflow || ref.status) return isActiveCustomerOrder(ref);
-  return true;
+  if (isCancelledOrFinalized(ref)) return false;
+  const workflow = String(ref.workflow || "").trim();
+  const status = String(ref.status || "").trim();
+  if (workflow === "done" || status === "done") return false;
+  if (workflow) return MY_ORDER_TAB_WORKFLOWS.includes(workflow);
+  if (status) return MY_ORDER_TAB_STATUSES.includes(status);
+  return false;
 }
 
 const memory = new Map();
@@ -122,7 +133,7 @@ function hideMyOrderUnlessActive() {
   sessionStorage.removeItem(LAST_ORDER_KEY);
   const ref = getMyOrder();
   if (!ref) return;
-  if (!shouldShowMyOrderTab(ref)) {
+  if (isCancelledOrFinalized(ref) || !isActiveCustomerOrder(ref)) {
     purgeCustomerOrderTracking(ref.trackingId);
   }
 }
@@ -198,21 +209,31 @@ ok("voltar ao cardápio não reabre aba só porque usou o carrinho", tabVisible(
 
 // 3–7. Fluxo operacional
 const stages = [
-  ["criar novo pedido", { workflow: "new", status: "new" }, true],
-  ["pedido em análise (awaiting_payment)", { workflow: "awaiting_payment", status: "new" }, true],
-  ["pedido aceito", { workflow: "accepted", status: "preparing" }, true],
-  ["em preparo", { workflow: "preparing", status: "preparing" }, true],
-  ["saiu para entrega", { workflow: "out", status: "delivery" }, true],
-  ["entregue", { workflow: "done", status: "done" }, true],
-  ["finalizado", { workflow: "finalized", status: "done" }, false],
+  ["criar novo pedido", { workflow: "new", status: "new" }, true, "active"],
+  ["pedido em análise (awaiting_payment)", { workflow: "awaiting_payment", status: "new" }, true, "active"],
+  ["pedido aceito", { workflow: "accepted", status: "preparing" }, true, "active"],
+  ["em preparo", { workflow: "preparing", status: "preparing" }, true, "active"],
+  ["saiu para entrega", { workflow: "out", status: "delivery" }, true, "active"],
+  ["entregue", { workflow: "done", status: "done" }, false, "active"],
+  ["finalizado", { workflow: "finalized", status: "done" }, false, "inactive"],
+  ["cancelado", { workflow: "cancelled", status: "cancelled" }, false, "inactive"],
 ];
 
-for (const [label, extra, visible] of stages) {
+for (const [label, extra, visible, persist] of stages) {
   reset();
   const state = applyServerOrderToMyOrder({ ...base, ...extra });
   ok(`${label}: aba ${visible ? "visível" : "oculta"}`, tabVisible() === visible);
-  ok(`${label}: apply retorna ${visible ? "active" : "inactive"}`, state === (visible ? "active" : "inactive"));
+  ok(`${label}: persistência ${persist}`, state === persist);
 }
+
+reset();
+saveMyOrder({ ...base });
+ok("reabrir app com tracking antigo sem workflow não mostra aba", tabVisible() === false);
+
+reset();
+saveMyOrder({ ...base, workflow: "done", status: "done" });
+ok("reabrir app com pedido entregue não mostra aba", tabVisible() === false);
+ok("entregue ainda pode persistir até finalizar", getMyOrder()?.trackingId === "trk-1");
 
 // 8. Finalizado remove referências
 reset();
@@ -240,9 +261,9 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const src = (p) => fs.readFileSync(path.join(root, p), "utf8");
 
 const myOrderSrc = src("artifacts/burger-gn/src/lib/myOrder.ts");
-ok("helper isActiveCustomerOrder exportado", /export function isActiveCustomerOrder/.test(myOrderSrc));
-ok("helper hideMyOrderUnlessActive exportado", /export function hideMyOrderUnlessActive/.test(myOrderSrc));
-ok("finalized não está na lista ativa", !/ACTIVE_CUSTOMER_WORKFLOWS = \[[^\]]*finalized/.test(myOrderSrc));
+ok("helper shouldShowMyOrderTab exportado", /export function shouldShowMyOrderTab/.test(myOrderSrc));
+ok("done não está na lista da aba", !/MY_ORDER_TAB_WORKFLOWS = \[[^\]]*done/.test(myOrderSrc));
+ok("finalized não está na lista da aba", !/MY_ORDER_TAB_WORKFLOWS = \[[^\]]*finalized/.test(myOrderSrc));
 
 const cartSrc = src("artifacts/burger-gn/src/pages/Cart.tsx");
 ok("Limpar carrinho redireciona com goToCardapio", /goToCardapio\(setLocation\)/.test(cartSrc));
@@ -257,7 +278,7 @@ ok("BottomNav tem aba Meu Pedido", /Meu Pedido/.test(navSrc));
 ok("BottomNav só renderiza aba com pedido visível", /useVisibleMyOrder/.test(navSrc) && /showMyOrder/.test(navSrc));
 
 const fabSrc = src("artifacts/burger-gn/src/components/MyOrderFab.tsx");
-ok("FAB aplica pedido do servidor e some se inativo", /applyServerOrderToMyOrder/.test(fabSrc));
+ok("FAB reconcilia pedido salvo mesmo com aba oculta", /getMyOrder\(/.test(fabSrc) && /applyServerOrderToMyOrder/.test(fabSrc));
 ok("FAB some em 404", /purgeCustomerOrderTracking/.test(fabSrc));
 
 const trackSrc = src("artifacts/burger-gn/src/pages/OrderTracking.tsx");
