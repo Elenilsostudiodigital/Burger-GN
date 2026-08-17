@@ -7,6 +7,7 @@ import { PageTransition } from '../components/PageTransition';
 import { StoreClosedBanner, useStoreStatus } from '../components/StoreClosedBanner';
 import { ArrowLeft, Trash2, Plus, Minus, Tag, Bike } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { goToCardapio } from '../lib/myOrder';
 
 export default function Cart() {
   const [, setLocation] = useLocation();
@@ -27,7 +28,7 @@ export default function Cart() {
   /** Carrinho vazio → volta ao cardápio (não permanece nesta tela). */
   useEffect(() => {
     if (cartItems.length === 0) {
-      setLocation('/cardapio');
+      goToCardapio(setLocation);
     }
   }, [cartItems.length, setLocation]);
 
@@ -36,10 +37,7 @@ export default function Cart() {
       return;
     }
     clearCart();
-    try {
-      sessionStorage.removeItem('lastOrder');
-    } catch { /* ignore */ }
-    setLocation('/cardapio');
+    goToCardapio(setLocation);
   };
 
   if (cartItems.length === 0) {
@@ -57,7 +55,7 @@ export default function Cart() {
       <header className="sticky top-0 z-40 bg-zinc-950 border-b border-zinc-800 px-6 py-4">
         <div className="max-w-md mx-auto flex items-center justify-between">
           <div className="flex items-center">
-            <button onClick={() => setLocation('/cardapio')} className="p-2 -ml-2 text-zinc-400 hover:text-white transition-colors">
+            <button onClick={() => goToCardapio(setLocation)} className="p-2 -ml-2 text-zinc-400 hover:text-white transition-colors">
               <ArrowLeft size={24} />
             </button>
             <h1 className="text-xl font-black text-white uppercase tracking-tight ml-2">Carrinho</h1>
@@ -182,9 +180,13 @@ export default function Cart() {
                 </Button>
               </Link>
             )}
-            <Link href="/cardapio" className="block text-center text-zinc-500 text-sm font-bold uppercase tracking-wider hover:text-amber-500 transition-colors py-1">
-              Continuar comprando
-            </Link>
+            <button
+              type="button"
+              onClick={() => goToCardapio(setLocation)}
+              className="block w-full text-center text-zinc-500 text-sm font-bold uppercase tracking-wider hover:text-amber-500 transition-colors py-1"
+            >
+              Voltar ao cardápio
+            </button>
           </div>
       </main>
 

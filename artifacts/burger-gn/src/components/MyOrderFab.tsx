@@ -1,29 +1,22 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect } from 'react';
 import { Link, useLocation } from 'wouter';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  getMyOrder, MyOrderRef, archiveMyOrder, markDeliveredPromptStarted,
+  applyServerOrderToMyOrder,
+  archiveMyOrder,
+  markDeliveredPromptStarted,
+  MY_ORDER_REFRESH_EVENT,
+  purgeCustomerOrderTracking,
   DELIVERY_CONFIRM_TIMEOUT_MS,
 } from '../lib/myOrder';
+import { useVisibleMyOrder } from '../hooks/useMyOrder';
 import { trackOrder } from '../lib/api';
 
-/** Fixed "Meu Pedido" entry — survives navigation via localStorage. */
+/** Fixed "Meu Pedido" entry — only while a real active order exists. */
 export function MyOrderFab() {
   const [location] = useLocation();
-  const [myOrder, setMyOrder] = useState<MyOrderRef | null>(() => getMyOrder());
+  const myOrder = useVisibleMyOrder();
 
-  useEffect(() => {
-    const sync = () => setMyOrder(getMyOrder());
-    sync();
-    window.addEventListener('storage', sync);
-    window.addEventListener('bgn:my-order-changed', sync as EventListener);
-    return () => {
-      window.removeEventListener('storage', sync);
-      window.removeEventListener('bgn:my-order-changed', sync as EventListener);
-    };
-  }, [location]);
-
-  // Background: if delivered and 60s elapsed without answer, archive + hide FAB.
   useEffect(() => {
     if (!myOrder?.trackingId) return;
     let cancelled = false;
@@ -32,10 +25,8 @@ export function MyOrderFab() {
       try {
         const order = await trackOrder(myOrder.trackingId);
         if (cancelled) return;
-        if (order.status === 'cancelled') {
-          archiveMyOrder('manual');
-          return;
-        }
+        const state = applyServerOrderToMyOrder(order);
+        if (state === 'inactive') return;
         if (order.status !== 'done') return;
         if (order.review) {
           archiveMyOrder('reviewed');
@@ -47,12 +38,24 @@ export function MyOrderFab() {
         if (Date.now() - new Date(promptAt).getTime() >= DELIVERY_CONFIRM_TIMEOUT_MS) {
           archiveMyOrder('timeout');
         }
-      } catch { /* ignore */ }
+      } catch (err) {
+        if (cancelled) return;
+        const message = err instanceof Error ? err.message : '';
+        if (/not found|não encontrado|404/i.test(message)) {
+          purgeCustomerOrderTracking(myOrder.trackingId);
+        }
+      }
     };
 
     check();
-    const id = setInterval(check, 10000);
-    return () => { cancelled = true; clearInterval(id); };
+    const id = setInterval(check, 8000);
+    const onRefresh = () => { void check(); };
+    window.addEventListener(MY_ORDER_REFRESH_EVENT, onRefresh);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+      window.removeEventListener(MY_ORDER_REFRESH_EVENT, onRefresh);
+    };
   }, [myOrder?.trackingId]);
 
   if (!myOrder) return null;
