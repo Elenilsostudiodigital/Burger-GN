@@ -256,6 +256,19 @@ ok("próxima compra reaparece só com pedido novo", getMyOrder()?.trackingId ===
 ok("cancelled nunca mostra aba", isActiveCustomerOrder({ ...base, workflow: "cancelled", status: "cancelled" }) === false);
 ok("pedido só no carrinho (sem tracking) não é pedido ativo", isActiveCustomerOrder({}) === false);
 
+reset();
+{
+  const fromBalcao = applyServerOrderToMyOrder({
+    trackingId: "trk-balcao-61",
+    orderNumber: 61,
+    createdAt: "2026-08-21T15:49:00.000Z",
+    workflow: "preparing",
+    status: "preparing",
+  });
+  ok("pedido do balcão em preparo persiste", fromBalcao === "active");
+  ok("pedido do balcão em preparo abre Meu Pedido", tabVisible() === true);
+}
+
 // Source wiring
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const src = (p) => fs.readFileSync(path.join(root, p), "utf8");

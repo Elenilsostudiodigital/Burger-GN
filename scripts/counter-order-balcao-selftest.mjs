@@ -23,9 +23,57 @@ function isEstablishedClubeMember(joinedAt, nowMs = Date.now()) {
 function shouldSyncAttendantOrderToCustomerApp(opts) {
   if (!opts.isAttendantOrder) return false;
   if (opts.memberActive === false) return false;
-  if (!opts.memberJoinedAt && !opts.linkToCustomerApp) return false;
   if (opts.linkToCustomerApp === true) return true;
+  if (opts.memberFound === false) return false;
+  if (!opts.memberJoinedAt) return false;
   return isEstablishedClubeMember(opts.memberJoinedAt, opts.nowMs);
+}
+
+function phonesMatch(a, b) {
+  const normalize = (phone) => {
+    let digits = String(phone || "").replace(/\D/g, "").replace(/^0+/, "");
+    if (!digits) return "";
+    if (digits.startsWith("55")) {
+      const national = digits.slice(2);
+      if (national.length === 10 || national.length === 11) return `55${national}`;
+      if (national.length > 11) return `55${national.slice(-11)}`;
+      return digits;
+    }
+    if (digits.length === 10 || digits.length === 11) return `55${digits}`;
+    if (digits.length > 11) return `55${digits.slice(-11)}`;
+    return digits;
+  };
+  const key = (phone) => {
+    const n = normalize(phone);
+    if (!n) return "";
+    const national = n.startsWith("55") ? n.slice(2) : n;
+    if (national.length >= 11) return national.slice(-11);
+    return national;
+  };
+  const keysOf = (phone) => {
+    const k = key(phone);
+    if (!k) return [];
+    const keys = new Set([k]);
+    if (k.length === 11 && k[2] === "9") keys.add(k.slice(0, 2) + k.slice(3));
+    else if (k.length === 10) keys.add(k.slice(0, 2) + "9" + k.slice(2));
+    return [...keys];
+  };
+  const ka = keysOf(a);
+  const kb = keysOf(b);
+  if (!ka.length || !kb.length) return false;
+  return ka.some((k) => kb.includes(k));
+}
+
+function isCustomerTabActiveWorkflow(workflow) {
+  return ["awaiting_payment", "new", "accepted", "preparing", "ready", "out"].includes(String(workflow || ""));
+}
+
+function isCustomerVisibleOrder(opts) {
+  if (opts.status === "cancelled" || opts.workflow === "cancelled" || opts.workflow === "finalized") {
+    return false;
+  }
+  if (!isCustomerTabActiveWorkflow(opts.workflow)) return false;
+  return phonesMatch(String(opts.phone || ""), opts.queryPhone);
 }
 
 function evaluateCounterOrderEdit(opts) {
@@ -289,11 +337,76 @@ const hook = src("artifacts/burger-gn/src/hooks/useCustomerOrderSync.ts");
 ok("hook consulta pedido ativo do cliente", /getCustomerActiveOrder/.test(hook));
 ok("hook enfileira push futuro", /notifyOrderStatusChange/.test(hook));
 ok("hook conecta SSE do cliente", /customer-stream/.test(hook));
+ok("hook usa telefone do Clube e da presença", /getClubeSessionProfile/.test(hook) && /getPresenceIdentity/.test(hook));
+ok("hook faz polling ≤ 2s", /setInterval\(\s*\(\)\s*=>\s*\{\s*void pull\(\);\s*\},\s*2000\s*\)/.test(hook));
 
 const myOrder = src("artifacts/burger-gn/src/lib/myOrder.ts");
 ok("fila de push futura permanece", /queuePushNotification/.test(myOrder));
 ok("isPushIntegrated continua false", /function isPushIntegrated[\s\S]*?return false;/.test(myOrder));
 
 ok("cashback não é reescrito neste módulo de regras", !/debitCashback|cashbackBalance/.test(src("artifacts/api-server/src/lib/counterOrderRules.ts")));
+
+ok(
+  "lookup do app não exige syncToCustomerApp",
+  /isCustomerVisibleOrder/.test(ordersApi) && !/syncToCustomerApp === true/.test(
+    ordersApi.slice(ordersApi.indexOf("findActiveSyncedOrderForPhone")),
+  ),
+);
+
+ok(
+  "pedido #61 (preparing, 55…) aparece para WhatsApp nacional 71…",
+  isCustomerVisibleOrder({
+    status: "preparing",
+    workflow: "preparing",
+    phone: "5571993958477",
+    queryPhone: "71993958477",
+  }) === true,
+);
+
+ok(
+  "pedido sem flag sync ainda é visível pelo telefone",
+  isCustomerVisibleOrder({
+    status: "new",
+    workflow: "new",
+    phone: "5571993958477",
+    queryPhone: "(71) 99395-8477",
+  }) === true,
+);
+
+{
+  const tab = (workflow, status) => {
+    if (!workflow && !status) return false;
+    const MY = ["awaiting_payment", "new", "accepted", "preparing", "ready", "out"];
+    if (status === "cancelled" || workflow === "cancelled" || workflow === "finalized") return false;
+    if (workflow === "done" || status === "done") return false;
+    if (workflow) return MY.includes(workflow);
+    return ["new", "preparing", "delivery"].includes(status);
+  };
+  ok("aba Meu Pedido para pedido do balcão em preparo", tab("preparing", "preparing") === true);
+}
+
+ok(
+  "membro encontrado agora (walk-in) não sincroniza sem flag",
+  shouldSyncAttendantOrderToCustomerApp({
+    isAttendantOrder: true,
+    linkToCustomerApp: false,
+    memberFound: true,
+    memberJoinedAt: new Date(now - 5_000).toISOString(),
+    memberActive: true,
+    nowMs: now,
+  }) === false,
+);
+
+ok(
+  "membro cadastrado antigo sincroniza mesmo sem flag da UI",
+  shouldSyncAttendantOrderToCustomerApp({
+    isAttendantOrder: true,
+    linkToCustomerApp: false,
+    memberFound: true,
+    memberJoinedAt: "2026-08-11T00:00:00.000Z",
+    memberActive: true,
+    nowMs: now,
+  }) === true,
+);
 
 console.log(`\ncounter-order-balcao-selftest: ${passed} checks passed.`);

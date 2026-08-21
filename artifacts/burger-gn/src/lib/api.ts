@@ -919,7 +919,7 @@ export const createOrder = (d: CreateOrderPayload) => api.post("/orders", d) as 
 export const getOrders = () => api.get("/orders") as Promise<Order[]>;
 export const trackOrder = (trackingId: string) => api.get(`/orders/track/${trackingId}`) as Promise<Order>;
 export const getCustomerActiveOrder = (phone: string) =>
-  api.get(`/orders/customer-active?phone=${encodeURIComponent(phone.replace(/\D/g, ""))}`) as Promise<{
+  api.get(`/orders/customer-active?phone=${encodeURIComponent(phone.replace(/\D/g, ""))}&_=${Date.now()}`) as Promise<{
     found: boolean;
     order: Order | null;
   }>;

@@ -21,7 +21,7 @@ import { applyMercadoPagoStatus } from "../lib/mpReconcile";
 import { findClubeMemberByPhone, syncClubeMemberOnOrder } from "../lib/clubeClientSync";
 import {
   evaluateCounterOrderEdit,
-  isCustomerTabActiveWorkflow,
+  isCustomerVisibleOrder,
   recalculateCounterOrderTotals,
   shouldSyncAttendantOrderToCustomerApp,
 } from "../lib/counterOrderRules";
@@ -31,7 +31,6 @@ import {
   isFidelityFreeBurgerProduct,
   normalizeClientPhone,
   parseClientNotes,
-  phonesMatch,
   redeemAvailableReward,
   serializeClientNotes,
 } from "../lib/clientMeta";
@@ -118,7 +117,11 @@ function notifyLinkedCustomerApp(
   event: string,
   data: unknown,
 ) {
-  if (order.syncToCustomerApp !== true) return;
+  // SSE is best-effort (same Node instance). Polling via customer-active is the
+  // reliable path on Vercel. Broadcast by WhatsApp so a logged-in PWA updates
+  // even when the sync flag was missing on older counter orders.
+  if (!order.phone) return;
+  void order.syncToCustomerApp;
   broadcastCustomerSSE(order.companyId, order.phone, event, data);
 }
 
@@ -170,7 +173,6 @@ router.get("/products/popular", resolvePublicCompany, async (req, res) => {
 // Create order (public)
 router.post("/orders", resolvePublicCompany, async (req, res) => {
   try {
-    const companyId = req.companyId!;
     const body = req.body as {
       customerName: string; phone: string;
       address?: string; addressNumber?: string; addressComplement?: string;
@@ -219,10 +221,15 @@ router.post("/orders", resolvePublicCompany, async (req, res) => {
     }
 
     const adminSession = tryGetCompanySession(req);
-    const isAttendantOrder =
-      body.source === "attendant"
-      && !!adminSession
-      && adminSession.companyId === companyId;
+    // Public storefront company vs session company can differ in preview;
+    // a valid admin cookie + source=attendant is enough to mark the channel.
+    const isAttendantOrder = body.source === "attendant" && !!adminSession;
+    // Attendant orders must land in the admin's company — the customer app
+    // queries the default storefront, which is the same company in production.
+    if (isAttendantOrder && adminSession?.companyId) {
+      req.companyId = adminSession.companyId;
+    }
+    const companyId = req.companyId!;
 
     // Online storefront must respect business hours / manual close.
     // Attendant panel orders (authenticated) may still be placed when closed.
@@ -615,6 +622,7 @@ router.post("/orders", resolvePublicCompany, async (req, res) => {
     const syncToCustomerApp = shouldSyncAttendantOrderToCustomerApp({
       isAttendantOrder,
       linkToCustomerApp: body.linkToCustomerApp === true,
+      memberFound: !!existingMember,
       memberJoinedAt: existingMember?.joinedAt ?? existingMember?.createdAt ?? null,
       memberActive: existingMember?.active ?? null,
     });
@@ -862,9 +870,9 @@ router.post("/orders", resolvePublicCompany, async (req, res) => {
     if (!isPix || isAttendantOrder) {
       broadcastSSE(companyId, "new_order", fullOrder);
     }
-    if (syncToCustomerApp && fullOrder) {
+    if (fullOrder && orderPhone) {
       notifyLinkedCustomerApp(
-        { companyId, phone: orderPhone, syncToCustomerApp: true },
+        { companyId, phone: orderPhone, syncToCustomerApp },
         "counter_order",
         fullOrder,
       );
@@ -977,17 +985,18 @@ async function findActiveSyncedOrderForPhone(companyId: number, rawPhone: string
   const orders = await db
     .select()
     .from(ordersTable)
-    .where(eq(ordersTable.companyId, companyId))
+    .where(and(eq(ordersTable.companyId, companyId), ne(ordersTable.status, "cancelled")))
     .orderBy(desc(ordersTable.createdAt))
-    .limit(80);
+    .limit(250);
   const match = orders.find((o) => {
     const { meta } = parseOrderNotes(o.notes);
-    if (meta.syncToCustomerApp !== true) return false;
-    if (o.status === "cancelled") return false;
     const workflow = resolveWorkflow(o.status, meta);
-    if (!isCustomerTabActiveWorkflow(workflow)) return false;
-    const orderPhone = normalizeClientPhone(o.phone) || o.phone.replace(/\D/g, "");
-    return phonesMatch(orderPhone, phone) || phonesMatch(o.phone, phone);
+    return isCustomerVisibleOrder({
+      status: o.status,
+      workflow,
+      phone: o.phone,
+      queryPhone: rawPhone || phone,
+    });
   });
   if (!match) return null;
   return getOrderWithItems(match.id);
@@ -996,6 +1005,7 @@ async function findActiveSyncedOrderForPhone(companyId: number, rawPhone: string
 // Customer app: latest counter order linked to this WhatsApp (registered clients only).
 router.get("/orders/customer-active", resolvePublicCompany, async (req, res) => {
   try {
+    res.setHeader("Cache-Control", "no-store");
     const phone = String(req.query["phone"] || "");
     const order = await findActiveSyncedOrderForPhone(req.companyId!, phone);
     if (!order) {

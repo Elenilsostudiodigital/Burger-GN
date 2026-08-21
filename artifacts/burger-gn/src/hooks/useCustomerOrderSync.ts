@@ -1,7 +1,8 @@
 import { useEffect } from 'react';
 import { useLocation } from 'wouter';
 import { customerInAppStatusMessage, getCustomerActiveOrder, type Order } from '../lib/api';
-import { getSavedClubePhone } from '../lib/clubeCliente';
+import { getClubeSessionProfile, getSavedClubePhone } from '../lib/clubeCliente';
+import { getPresenceIdentity } from '../lib/menuPresence';
 import {
   applyServerOrderToMyOrder,
   getMyOrder,
@@ -11,8 +12,22 @@ import {
 } from '../lib/myOrder';
 import { notifyOrderStatusChange } from '../lib/pushNotifications';
 
-function digitsPhone(): string {
-  return getSavedClubePhone().replace(/\D/g, '');
+/**
+ * WhatsApp used to discover counter orders. Clube session, profile cache and
+ * checkout presence can each hold a slightly different format (71… vs 55…).
+ */
+export function resolveCustomerSyncPhone(): string {
+  const candidates = [
+    getSavedClubePhone(),
+    getClubeSessionProfile()?.phone || '',
+    getPresenceIdentity().phone,
+  ];
+  let best = '';
+  for (const raw of candidates) {
+    const digits = String(raw || '').replace(/\D/g, '');
+    if (digits.length >= 10 && digits.length > best.length) best = digits;
+  }
+  return best;
 }
 
 function adoptRemoteOrder(order: Order, opts?: { notify?: boolean }) {
@@ -38,6 +53,7 @@ function adoptRemoteOrder(order: Order, opts?: { notify?: boolean }) {
 /**
  * Registered customers: pick up attendant-created orders while the PWA is open.
  * Closed-app push stays queued via notifyOrderStatusChange (not wired to FCM yet).
+ * Polling is the reliable path on Vercel; SSE is best-effort on the same instance.
  */
 export function useCustomerOrderSync() {
   const [location] = useLocation();
@@ -48,6 +64,8 @@ export function useCustomerOrderSync() {
     let cancelled = false;
     let es: EventSource | null = null;
     let lastFingerprint = '';
+    let lastPhone = '';
+    let reconnectTimer: number | null = null;
 
     const fingerprintOf = (order: Order) =>
       [
@@ -62,7 +80,7 @@ export function useCustomerOrderSync() {
       ].join(':');
 
     const pull = async () => {
-      const phone = digitsPhone();
+      const phone = resolveCustomerSyncPhone();
       if (phone.length < 10) return;
       try {
         const result = await getCustomerActiveOrder(phone);
@@ -96,8 +114,10 @@ export function useCustomerOrderSync() {
     };
 
     const connect = () => {
-      const phone = digitsPhone();
+      const phone = resolveCustomerSyncPhone();
       if (phone.length < 10) return;
+      if (es && lastPhone === phone) return;
+      lastPhone = phone;
       if (es) {
         es.close();
         es = null;
@@ -131,30 +151,44 @@ export function useCustomerOrderSync() {
           requestMyOrderRefresh();
         } catch { /* ignore */ }
       });
+      es.onerror = () => {
+        if (cancelled) return;
+        es?.close();
+        es = null;
+        lastPhone = '';
+        if (reconnectTimer != null) window.clearTimeout(reconnectTimer);
+        reconnectTimer = window.setTimeout(() => {
+          if (!cancelled) connect();
+        }, 3000);
+      };
     };
 
     void pull();
     connect();
-    const interval = window.setInterval(() => { void pull(); }, 4000);
+    const interval = window.setInterval(() => { void pull(); }, 2000);
 
     const onVisible = () => {
       if (document.visibilityState === 'visible') void pull();
     };
     const onSession = () => {
+      lastPhone = '';
       connect();
       void pull();
     };
     document.addEventListener('visibilitychange', onVisible);
     window.addEventListener('focus', onVisible);
     window.addEventListener('bgn:clube-session-changed', onSession);
+    window.addEventListener('storage', onSession);
 
     return () => {
       cancelled = true;
       window.clearInterval(interval);
+      if (reconnectTimer != null) window.clearTimeout(reconnectTimer);
       es?.close();
       document.removeEventListener('visibilitychange', onVisible);
       window.removeEventListener('focus', onVisible);
       window.removeEventListener('bgn:clube-session-changed', onSession);
+      window.removeEventListener('storage', onSession);
     };
   }, [location]);
 }

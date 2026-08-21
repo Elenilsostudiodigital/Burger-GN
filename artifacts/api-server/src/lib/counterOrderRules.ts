@@ -3,6 +3,8 @@
  * No schema change — flags live in order meta.
  */
 
+import { phonesMatch } from "./clientMeta";
+
 export const PIX_PAID_EDIT_MESSAGE =
   "Pedidos pagos via PIX não podem ser alterados. Crie um novo pedido.";
 
@@ -67,13 +69,32 @@ export function shouldSyncAttendantOrderToCustomerApp(opts: {
   linkToCustomerApp?: boolean;
   memberJoinedAt?: Date | string | null;
   memberActive?: boolean | null;
+  memberFound?: boolean;
   nowMs?: number;
 }): boolean {
   if (!opts.isAttendantOrder) return false;
   if (opts.memberActive === false) return false;
-  if (!opts.memberJoinedAt && !opts.linkToCustomerApp) return false;
+  // Admin UI already confirmed an existing Clube cadastro.
   if (opts.linkToCustomerApp === true) return true;
+  // Walk-in CRM rows created seconds earlier by Novo Pedido must not get the flag.
+  // Established members still sync even if the UI lookup missed.
+  if (opts.memberFound === false) return false;
+  if (!opts.memberJoinedAt) return false;
   return isEstablishedClubeMember(opts.memberJoinedAt, opts.nowMs);
+}
+
+/** Latest in-progress order for this WhatsApp — does not require syncToCustomerApp. */
+export function isCustomerVisibleOrder(opts: {
+  status?: string | null;
+  workflow?: string | null;
+  phone?: string | null;
+  queryPhone: string;
+}): boolean {
+  if (opts.status === "cancelled" || opts.workflow === "cancelled" || opts.workflow === "finalized") {
+    return false;
+  }
+  if (!isCustomerTabActiveWorkflow(opts.workflow)) return false;
+  return phonesMatch(String(opts.phone || ""), opts.queryPhone);
 }
 
 export function evaluateCounterOrderEdit(opts: {
