@@ -22,7 +22,7 @@ Estes módulos já foram aprovados manualmente.
 Aqui ficam apenas os módulos ainda em evolução.  
 Atualizar esta lista conforme o andamento do projeto.
 
-- 🔄 Pedidos — edição de pedidos aceitos (aguardando validação manual)
+- 🔄 Pedidos
 - 🔄 Clientes
 - 🔄 Mercado Pago
 - 🔄 Segurança
@@ -47,6 +47,5 @@ _Nenhum bug aberto registrado neste momento. Incluir aqui qualquer falha reprodu
 
 ## PRÓXIMA ETAPA
 
-1. Validação manual: edição de pedidos aceitos no painel (botão Editar → modal → salvar).
-2. Validação manual: Limpar carrinho (com confirmação + persistência vazia).
-3. Em seguida: validação do cashback/fidelidade (v1.5).
+1. Validação manual: Limpar carrinho (com confirmação + persistência vazia).
+2. Em seguida: validação do cashback/fidelidade (v1.5).

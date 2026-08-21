@@ -5,7 +5,7 @@ Toda nova implementação aprovada pelo proprietário gera uma nova versão.
 
 ---
 
-## Burger GN v1.5.2 (em validação)
+## Burger GN v1.5.2
 
 - Edição de pedidos aceitos (painel da hamburgueria)
   - Botão “Editar” no card do pedido (Em preparo / Pronto / Saiu)
