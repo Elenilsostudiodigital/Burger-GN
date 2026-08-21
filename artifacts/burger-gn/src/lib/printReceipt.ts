@@ -1,5 +1,11 @@
+/**
+ * Local Burger GN print agent client + ESC/POS text builders.
+ * Silent print only — never opens the browser print dialog.
+ */
 import type { Order, OrderType } from './api';
 import { ORDER_TYPE_LABELS, formatPaymentMethod, buildOrderTrackingUrl } from './api';
+
+export const PRINT_AGENT_BASE = 'http://127.0.0.1:19191';
 
 export type PrinterConnection = 'system' | 'usb' | 'bluetooth';
 export type PrinterStatus = 'connected' | 'disconnected' | 'offline' | 'error';
@@ -13,32 +19,24 @@ export interface PrinterDevice {
   productId?: number;
   bluetoothId?: string;
   lastSeenAt?: string | null;
+  driverName?: string;
+  portName?: string;
 }
 
 export interface PrinterSettings {
   printers: PrinterDevice[];
   defaultPrinterId: string | null;
   autoPrintOnAccept: boolean;
-  printSecondCopy: boolean;
+  copies: number;
   highlightOrderNumber: boolean;
   printTrackingQr: boolean;
 }
 
-export const SYSTEM_PRINTER_ID = 'system-browser';
-
 export const DEFAULT_PRINTER_SETTINGS: PrinterSettings = {
-  printers: [
-    {
-      id: SYSTEM_PRINTER_ID,
-      name: 'Impressora do sistema (navegador)',
-      connection: 'system',
-      status: 'connected',
-      lastSeenAt: null,
-    },
-  ],
+  printers: [],
   defaultPrinterId: null,
   autoPrintOnAccept: false,
-  printSecondCopy: false,
+  copies: 1,
   highlightOrderNumber: true,
   printTrackingQr: true,
 };
@@ -50,237 +48,285 @@ export const PRINTER_STATUS_LABELS: Record<PrinterStatus, string> = {
   error: 'Erro',
 };
 
+const LAST_ORDER_KEY = 'bgn_last_printed_order_v1';
+
 function fmtMoney(v: string | number) {
   const n = typeof v === 'number' ? v : parseFloat(String(v));
   return `R$ ${(Number.isFinite(n) ? n : 0).toFixed(2).replace('.', ',')}`;
 }
 
-export type PrintReceiptOptions = {
-  highlightOrderNumber?: boolean;
-  printTrackingQr?: boolean;
-  copies?: number;
-  autoPrint?: boolean;
-};
-
-/** Kitchen / test receipt HTML (thermal-friendly). */
-export function buildReceiptHTML(
-  order: Order,
-  opts: PrintReceiptOptions = {},
-): string {
-  const highlight = opts.highlightOrderNumber === true;
-  const withQr = opts.printTrackingQr === true && !!order.trackingId;
-  const copies = Math.max(1, Math.min(3, opts.copies ?? 1));
-  const autoPrint = opts.autoPrint !== false;
-  const trackingUrl = order.trackingId
-    ? buildOrderTrackingUrl(order.trackingId)
-    : '';
-  const qrSrc = withQr
-    ? `https://api.qrserver.com/v1/create-qr-code/?size=140x140&data=${encodeURIComponent(trackingUrl)}`
-    : '';
-
-  const items = (order.items || []).map((i) =>
-    `<tr><td>${i.quantity}x ${i.productName}</td><td style="text-align:right">${fmtMoney(i.subtotal)}</td></tr>`,
-  ).join('');
-
-  const orderTitle = highlight
-    ? `<div class="order-num">#${order.orderNumber}</div>`
-    : `Pedido #${order.orderNumber}`;
-
-  const sheet = `
-  <div class="sheet">
-    <h1>THE BURGER GN</h1>
-    ${orderTitle}
-    <p><b>Cliente:</b> ${escapeHtml(order.customerName)}<br>
-    <b>Tel:</b> ${escapeHtml(order.phone)}<br>
-    <b>Tipo:</b> ${ORDER_TYPE_LABELS[order.orderType as OrderType] || order.orderType}<br>
-    ${order.orderType === 'delivery' ? `<b>End.:</b> ${escapeHtml(order.address || '')}, ${escapeHtml(order.neighborhood || '')}<br>` : ''}
-    <b>Pagamento:</b> ${escapeHtml(formatPaymentMethod(order))}
-    ${order.changeFor ? ` (troco p/ ${fmtMoney(order.changeFor)})` : ''}</p>
-    <table>${items}</table>
-    <table class="total">
-      <tr><td>Subtotal</td><td style="text-align:right">${fmtMoney(order.subtotal)}</td></tr>
-      <tr><td>Entrega</td><td style="text-align:right">${parseFloat(String(order.deliveryFee)) > 0 ? fmtMoney(order.deliveryFee) : 'Grátis'}</td></tr>
-      ${parseFloat(String(order.discountAmount)) > 0 ? `<tr><td>Desconto</td><td style="text-align:right">-${fmtMoney(order.discountAmount)}</td></tr>` : ''}
-      <tr><td><b>TOTAL</b></td><td style="text-align:right"><b>${fmtMoney(order.total)}</b></td></tr>
-    </table>
-    ${order.notes ? `<p><b>Obs.:</b> ${escapeHtml(order.notes)}</p>` : ''}
-    ${withQr ? `<div class="qr"><img src="${qrSrc}" alt="QR" width="120" height="120" /><p>Acompanhe o pedido</p></div>` : ''}
-  </div>`;
-
-  const body = Array.from({ length: copies }, () => sheet).join('<div class="break"></div>');
-
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Pedido #${order.orderNumber}</title>
-  <style>
-    body { font-family: monospace; font-size: 12px; max-width: 300px; margin: 0 auto; padding: 10px; color:#000; }
-    h1 { text-align: center; font-size: 14px; border-bottom: 1px dashed #000; padding-bottom: 6px; margin: 0 0 8px; }
-    .order-num { text-align:center; font-size: 28px; font-weight: 900; letter-spacing: 1px; margin: 4px 0 10px; }
-    table { width: 100%; border-collapse: collapse; margin: 8px 0; }
-    td { padding: 2px 0; }
-    .total { font-weight: bold; border-top: 1px dashed #000; padding-top: 4px; }
-    .qr { text-align:center; margin-top: 10px; }
-    .qr p { font-size: 10px; margin: 4px 0 0; }
-    .break { page-break-after: always; height: 0; }
-    @media print { .break { page-break-after: always; } }
-  </style></head><body>
-  ${body}
-  ${autoPrint ? '<script>window.onload=()=>{window.print();setTimeout(()=>window.close(),400);}</script>' : ''}
-  </body></html>`;
+export async function pingPrintAgent(): Promise<boolean> {
+  try {
+    const res = await fetch(`${PRINT_AGENT_BASE}/health`, { method: 'GET' });
+    if (!res.ok) return false;
+    const data = (await res.json()) as { ok?: boolean };
+    return !!data.ok;
+  } catch {
+    return false;
+  }
 }
 
-export function buildTestPrintHTML(printerName?: string): string {
+export async function fetchAgentPrinters(): Promise<PrinterDevice[]> {
+  const res = await fetch(`${PRINT_AGENT_BASE}/printers`);
+  if (!res.ok) throw new Error('Não foi possível listar impressoras do agente local.');
+  const data = (await res.json()) as { printers?: PrinterDevice[] };
+  return Array.isArray(data.printers) ? data.printers : [];
+}
+
+export async function agentPrint(opts: {
+  printerName: string;
+  text: string;
+  copies?: number;
+}): Promise<{ ok: boolean; error?: string }> {
+  const res = await fetch(`${PRINT_AGENT_BASE}/print`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      printerName: opts.printerName,
+      text: opts.text,
+      copies: Math.max(1, Math.min(4, opts.copies ?? 1)),
+    }),
+  });
+  const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+  if (!res.ok || data.ok === false) {
+    throw new Error(data.error || `Falha na impressão (HTTP ${res.status})`);
+  }
+  return { ok: true };
+}
+
+/** Plain-text thermal ticket (ESC/POS friendly width ~32 chars). */
+export function buildOrderPrintText(
+  order: Order,
+  opts: { highlightOrderNumber?: boolean; printTrackingQr?: boolean } = {},
+): string {
+  const w = 32;
+  const line = (ch = '-') => ch.repeat(w);
+  const center = (s: string) => {
+    const t = s.slice(0, w);
+    const pad = Math.max(0, Math.floor((w - t.length) / 2));
+    return ' '.repeat(pad) + t;
+  };
+  const rows: string[] = [];
+  rows.push(center('THE BURGER GN'));
+  rows.push(line('='));
+  if (opts.highlightOrderNumber) {
+    rows.push(center(`*** #${order.orderNumber} ***`));
+  } else {
+    rows.push(center(`Pedido #${order.orderNumber}`));
+  }
+  rows.push(line());
+  rows.push(`Cliente: ${order.customerName}`);
+  rows.push(`Tel: ${order.phone}`);
+  rows.push(`Tipo: ${ORDER_TYPE_LABELS[order.orderType as OrderType] || order.orderType}`);
+  if (order.orderType === 'delivery') {
+    rows.push(`End: ${order.address || ''} ${order.addressNumber || ''}`);
+    rows.push(`${order.neighborhood || ''}`);
+  }
+  rows.push(`Pag: ${formatPaymentMethod(order)}`);
+  if (order.changeFor) rows.push(`Troco p/: ${fmtMoney(order.changeFor)}`);
+  rows.push(line());
+  for (const i of order.items || []) {
+    rows.push(`${i.quantity}x ${i.productName}`);
+    rows.push(`   ${fmtMoney(i.subtotal)}`);
+    if (i.addons?.length) {
+      rows.push(`   + ${i.addons.map((a) => a.name).join(', ')}`);
+    }
+  }
+  rows.push(line());
+  rows.push(`Subtotal ${fmtMoney(order.subtotal)}`);
+  rows.push(
+    `Entrega  ${parseFloat(String(order.deliveryFee)) > 0 ? fmtMoney(order.deliveryFee) : 'Gratis'}`,
+  );
+  if (parseFloat(String(order.discountAmount)) > 0) {
+    rows.push(`Desconto -${fmtMoney(order.discountAmount)}`);
+  }
+  rows.push(`TOTAL    ${fmtMoney(order.total)}`);
+  if (order.notes) {
+    rows.push(line());
+    rows.push(`Obs: ${order.notes}`);
+  }
+  if (opts.printTrackingQr && order.trackingId) {
+    rows.push(line());
+    rows.push('Acompanhe:');
+    rows.push(buildOrderTrackingUrl(order.trackingId));
+  }
+  rows.push(line('='));
+  rows.push(center('Obrigado!'));
+  rows.push('');
+  return rows.join('\n');
+}
+
+export function buildTestPrintText(printerName?: string): string {
   const now = new Date();
   const data = now.toLocaleDateString('pt-BR');
-  const hora = now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-  const nome = escapeHtml(printerName || 'Impressora do sistema');
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Teste de impressão</title>
-  <style>
-    body { font-family: monospace; font-size: 13px; max-width: 300px; margin: 0 auto; padding: 16px; text-align: center; color:#000; }
-    .line { border-top: 1px dashed #000; margin: 10px 0; }
-    h1 { font-size: 18px; margin: 0 0 6px; letter-spacing: 1px; }
-    .sub { font-size: 14px; font-weight: 700; margin: 8px 0; }
-  </style></head><body>
-  <div class="line"></div>
-  <h1>BURGER GN</h1>
-  <div class="sub">TESTE DE IMPRESSÃO</div>
-  <p>Data: ${data}<br>Hora: ${hora}</p>
-  <p>Impressora: ${nome}</p>
-  <p><b>Impressora funcionando corretamente.</b></p>
-  <div class="line"></div>
-  <script>window.onload=()=>{window.print();setTimeout(()=>window.close(),400);}</script>
-  </body></html>`;
+  const hora = now.toLocaleTimeString('pt-BR', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+  return [
+    '--------------------------------',
+    'BURGER GN',
+    'TESTE DE IMPRESSAO',
+    `Data: ${data}`,
+    `Hora: ${hora}`,
+    `Impressora: ${printerName || '-'}`,
+    'Impressora funcionando corretamente.',
+    '--------------------------------',
+    '',
+  ].join('\n');
 }
 
-function escapeHtml(s: string) {
-  return String(s || '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+export function resolveDefaultPrinter(
+  settings: PrinterSettings,
+): PrinterDevice | null {
+  if (!settings.defaultPrinterId) return null;
+  return settings.printers.find((p) => p.id === settings.defaultPrinterId) || null;
 }
 
-/** Opens a print window with the given HTML. Returns false if popup blocked. */
-export function openPrintHtml(html: string): boolean {
-  const win = window.open('', '_blank', 'width=360,height=640');
-  if (!win) return false;
-  win.document.write(html);
-  win.document.close();
-  return true;
+export function saveLastPrintedOrder(order: Order) {
+  try {
+    localStorage.setItem(LAST_ORDER_KEY, JSON.stringify(order));
+  } catch {
+    /* ignore */
+  }
 }
 
-export function printOrderReceipt(order: Order, settings?: Partial<PrinterSettings>): boolean {
-  const copies = settings?.printSecondCopy ? 2 : 1;
-  return openPrintHtml(
-    buildReceiptHTML(order, {
-      highlightOrderNumber: !!settings?.highlightOrderNumber,
-      printTrackingQr: !!settings?.printTrackingQr,
+export function loadLastPrintedOrder(): Order | null {
+  try {
+    const raw = localStorage.getItem(LAST_ORDER_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw) as Order;
+  } catch {
+    return null;
+  }
+}
+
+export type SilentPrintResult =
+  | { ok: true; printerName: string; copies: number }
+  | { ok: false; reason: 'no_agent' | 'no_printer' | 'error'; message: string };
+
+/**
+ * Silent print via local agent. Never opens browser print UI.
+ */
+export async function silentPrintOrder(
+  order: Order,
+  settings: PrinterSettings,
+): Promise<SilentPrintResult> {
+  const alive = await pingPrintAgent();
+  if (!alive) {
+    return {
+      ok: false,
+      reason: 'no_agent',
+      message:
+        'Agente de impressão offline. Abra tools/burger-gn-print-agent/start.bat neste computador.',
+    };
+  }
+  const printer = resolveDefaultPrinter(settings);
+  if (!printer?.name) {
+    return {
+      ok: false,
+      reason: 'no_printer',
+      message: 'Nenhuma impressora padrão configurada em Configurações → Impressoras.',
+    };
+  }
+  const copies = Math.max(1, Math.min(4, settings.copies || 1));
+  const text = buildOrderPrintText(order, {
+    highlightOrderNumber: settings.highlightOrderNumber,
+    printTrackingQr: settings.printTrackingQr,
+  });
+  try {
+    await agentPrint({ printerName: printer.name, text, copies });
+    saveLastPrintedOrder(order);
+    return { ok: true, printerName: printer.name, copies };
+  } catch (err) {
+    return {
+      ok: false,
+      reason: 'error',
+      message: err instanceof Error ? err.message : 'Erro ao imprimir',
+    };
+  }
+}
+
+export async function silentPrintTest(
+  settings: PrinterSettings,
+): Promise<SilentPrintResult> {
+  const alive = await pingPrintAgent();
+  if (!alive) {
+    return {
+      ok: false,
+      reason: 'no_agent',
+      message:
+        'Agente de impressão offline. Abra tools/burger-gn-print-agent/start.bat neste computador.',
+    };
+  }
+  const printer = resolveDefaultPrinter(settings);
+  if (!printer?.name) {
+    return {
+      ok: false,
+      reason: 'no_printer',
+      message: 'Nenhuma impressora padrão configurada.',
+    };
+  }
+  const copies = Math.max(1, Math.min(4, settings.copies || 1));
+  try {
+    await agentPrint({
+      printerName: printer.name,
+      text: buildTestPrintText(printer.name),
       copies,
-      autoPrint: true,
-    }),
-  );
-}
-
-export function printTestReceipt(printerName?: string): boolean {
-  return openPrintHtml(buildTestPrintHTML(printerName));
-}
-
-/** Refresh USB devices previously authorized in this browser. */
-export async function refreshUsbPrinters(): Promise<PrinterDevice[]> {
-  const nav = navigator as Navigator & { usb?: { getDevices: () => Promise<USBDevice[]> } };
-  if (!nav.usb?.getDevices) return [];
-  try {
-    const devices = await nav.usb.getDevices();
-    return devices.map((d, i) => ({
-      id: `usb-${d.vendorId}-${d.productId}-${i}`,
-      name: d.productName || `USB ${d.vendorId}:${d.productId}`,
-      connection: 'usb' as const,
-      status: 'connected' as const,
-      vendorId: d.vendorId,
-      productId: d.productId,
-      lastSeenAt: new Date().toISOString(),
-    }));
-  } catch {
-    return [];
-  }
-}
-
-export async function requestUsbPrinter(): Promise<PrinterDevice | null> {
-  const nav = navigator as Navigator & {
-    usb?: { requestDevice: (opts: { filters: object[] }) => Promise<USBDevice> };
-  };
-  if (!nav.usb?.requestDevice) return null;
-  try {
-    const d = await nav.usb.requestDevice({ filters: [] });
-    return {
-      id: `usb-${d.vendorId}-${d.productId}`,
-      name: d.productName || `USB ${d.vendorId}:${d.productId}`,
-      connection: 'usb',
-      status: 'connected',
-      vendorId: d.vendorId,
-      productId: d.productId,
-      lastSeenAt: new Date().toISOString(),
-    };
-  } catch {
-    return null;
-  }
-}
-
-export function bluetoothSupported(): boolean {
-  return !!(navigator as Navigator & { bluetooth?: unknown }).bluetooth;
-}
-
-export async function requestBluetoothPrinter(): Promise<PrinterDevice | null> {
-  const nav = navigator as Navigator & {
-    bluetooth?: {
-      requestDevice: (opts: {
-        acceptAllDevices?: boolean;
-        optionalServices?: string[];
-      }) => Promise<BluetoothDevice>;
-    };
-  };
-  if (!nav.bluetooth?.requestDevice) return null;
-  try {
-    const d = await nav.bluetooth.requestDevice({
-      acceptAllDevices: true,
-      optionalServices: ['000018f0-0000-1000-8000-00805f9b34fb'],
     });
+    return { ok: true, printerName: printer.name, copies };
+  } catch (err) {
     return {
-      id: `bt-${d.id}`,
-      name: d.name || 'Impressora Bluetooth',
-      connection: 'bluetooth',
-      status: d.gatt?.connected ? 'connected' : 'disconnected',
-      bluetoothId: d.id,
-      lastSeenAt: new Date().toISOString(),
+      ok: false,
+      reason: 'error',
+      message: err instanceof Error ? err.message : 'Erro ao imprimir teste',
     };
-  } catch {
-    return null;
   }
 }
 
-// Minimal typings for WebUSB / Web Bluetooth used above
-interface USBDevice {
-  vendorId: number;
-  productId: number;
-  productName?: string;
-}
-interface BluetoothDevice {
-  id: string;
-  name?: string;
-  gatt?: { connected: boolean };
-}
-
-/** Merge discovered devices into saved list (by id). */
+/** Merge discovered OS printers into saved list. */
 export function mergePrinterLists(
   saved: PrinterDevice[],
   discovered: PrinterDevice[],
 ): PrinterDevice[] {
   const map = new Map<string, PrinterDevice>();
-  for (const p of saved) map.set(p.id, p);
+  for (const p of saved) {
+    if (p.id === 'system-browser') continue;
+    map.set(p.id, p);
+  }
   for (const d of discovered) {
     const prev = map.get(d.id);
-    map.set(d.id, { ...prev, ...d, status: d.status || prev?.status || 'connected' });
-  }
-  if (![...map.keys()].includes(SYSTEM_PRINTER_ID)) {
-    map.set(SYSTEM_PRINTER_ID, DEFAULT_PRINTER_SETTINGS.printers[0]!);
+    map.set(d.id, {
+      ...prev,
+      ...d,
+      status: d.status || prev?.status || 'connected',
+      lastSeenAt: new Date().toISOString(),
+    });
   }
   return [...map.values()];
+}
+
+/**
+ * @deprecated Browser print removed — kept name for Dashboard import migration.
+ * Prefer silentPrintOrder.
+ */
+export async function printOrderReceipt(
+  order: Order,
+  settings?: Partial<PrinterSettings> & { printSecondCopy?: boolean },
+): Promise<boolean> {
+  const copies =
+    typeof settings?.copies === 'number'
+      ? settings.copies
+      : settings?.printSecondCopy
+        ? 2
+        : 1;
+  const merged: PrinterSettings = {
+    ...DEFAULT_PRINTER_SETTINGS,
+    ...settings,
+    printers: settings?.printers || DEFAULT_PRINTER_SETTINGS.printers,
+    copies: Math.max(1, Math.min(4, copies)),
+  };
+  const result = await silentPrintOrder(order, merged);
+  return result.ok;
 }

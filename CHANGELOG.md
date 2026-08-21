@@ -5,6 +5,15 @@ Toda nova implementação aprovada pelo proprietário gera uma nova versão.
 
 ---
 
+## Burger GN v1.5.6
+
+- Impressão automática silenciosa (sem janela do navegador)
+  - Agente local `tools/burger-gn-print-agent` (Windows RAW / ESC/POS)
+  - Configurações → Impressoras: automática, vias 1–4, testar, reimprimir
+  - Ao aceitar pedido: envia direto à impressora padrão (ex.: POS-58)
+
+---
+
 ## Burger GN v1.5.5
 
 - Módulo Impressoras (Configurações)

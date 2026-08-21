@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-  Loader2, Printer, RefreshCw, Usb, Bluetooth, Check, Save, Star,
+  Loader2, Printer, RefreshCw, Check, Save, Star, AlertTriangle,
 } from 'lucide-react';
 import {
   getAdminPrinterSettings,
@@ -9,15 +9,14 @@ import {
 import {
   DEFAULT_PRINTER_SETTINGS,
   PRINTER_STATUS_LABELS,
-  SYSTEM_PRINTER_ID,
   PrinterDevice,
   PrinterSettings,
-  bluetoothSupported,
+  fetchAgentPrinters,
+  loadLastPrintedOrder,
   mergePrinterLists,
-  printTestReceipt,
-  refreshUsbPrinters,
-  requestBluetoothPrinter,
-  requestUsbPrinter,
+  pingPrintAgent,
+  silentPrintOrder,
+  silentPrintTest,
 } from '../../lib/printReceipt';
 
 export function PrintersTab() {
@@ -25,18 +24,36 @@ export function PrintersTab() {
   const [saving, setSaving] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [testing, setTesting] = useState(false);
+  const [reprinting, setReprinting] = useState(false);
+  const [agentOnline, setAgentOnline] = useState(false);
   const [config, setConfig] = useState<PrinterSettings>(DEFAULT_PRINTER_SETTINGS);
   const [success, setSuccess] = useState('');
   const [error, setError] = useState('');
-  const usbOk = typeof navigator !== 'undefined' && !!(navigator as Navigator & { usb?: unknown }).usb;
-  const btOk = bluetoothSupported();
 
   const load = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
+      const online = await pingPrintAgent();
+      setAgentOnline(online);
       const res = await getAdminPrinterSettings();
-      setConfig(res.config);
+      let next = res.config as PrinterSettings;
+      if (online) {
+        try {
+          const discovered = await fetchAgentPrinters();
+          next = {
+            ...next,
+            printers: mergePrinterLists(next.printers || [], discovered),
+          };
+        } catch {
+          /* keep saved */
+        }
+      }
+      setConfig({
+        ...DEFAULT_PRINTER_SETTINGS,
+        ...next,
+        copies: Math.max(1, Math.min(4, Number(next.copies) || 1)),
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erro ao carregar impressoras');
     } finally {
@@ -46,14 +63,26 @@ export function PrintersTab() {
 
   useEffect(() => {
     void load();
+    const id = window.setInterval(() => {
+      void pingPrintAgent().then(setAgentOnline);
+    }, 8000);
+    return () => window.clearInterval(id);
   }, [load]);
 
   const persist = async (next: PrinterSettings, okMsg = 'Salvo') => {
     setSaving(true);
     setError('');
     try {
-      const res = await updateAdminPrinterSettings(next);
-      setConfig(res.config);
+      const payload = {
+        ...next,
+        copies: Math.max(1, Math.min(4, next.copies || 1)),
+      };
+      const res = await updateAdminPrinterSettings(payload);
+      setConfig({
+        ...DEFAULT_PRINTER_SETTINGS,
+        ...(res.config as PrinterSettings),
+        copies: Math.max(1, Math.min(4, Number((res.config as PrinterSettings).copies) || 1)),
+      });
       setSuccess(okMsg);
       setTimeout(() => setSuccess(''), 2500);
     } catch (err) {
@@ -67,20 +96,22 @@ export function PrintersTab() {
     setScanning(true);
     setError('');
     try {
-      const usb = await refreshUsbPrinters();
+      const online = await pingPrintAgent();
+      setAgentOnline(online);
+      if (!online) {
+        setError('Agente offline. Execute tools/burger-gn-print-agent/start.bat neste PC.');
+        return;
+      }
+      const discovered = await fetchAgentPrinters();
       const next: PrinterSettings = {
         ...config,
-        printers: mergePrinterLists(config.printers, [
-          ...usb,
-          {
-            id: SYSTEM_PRINTER_ID,
-            name: 'Impressora do sistema (navegador)',
-            connection: 'system',
-            status: 'connected',
-            lastSeenAt: new Date().toISOString(),
-          },
-        ]),
+        printers: mergePrinterLists(config.printers, discovered),
       };
+      // Prefer POS-58 as default when present and none selected
+      const pos = next.printers.find((p) => /pos-?58/i.test(p.name));
+      if (pos && !next.defaultPrinterId) {
+        next.defaultPrinterId = pos.id;
+      }
       setConfig(next);
       await persist(next, 'Lista atualizada');
     } catch (err) {
@@ -90,79 +121,46 @@ export function PrintersTab() {
     }
   };
 
-  const handleUsb = async () => {
-    setScanning(true);
-    setError('');
-    try {
-      const device = await requestUsbPrinter();
-      if (!device) {
-        setError(usbOk
-          ? 'Nenhuma impressora USB selecionada (ou permissão negada).'
-          : 'WebUSB não disponível neste navegador. Use Chrome/Edge.');
-        return;
-      }
-      const next: PrinterSettings = {
-        ...config,
-        printers: mergePrinterLists(config.printers, [device]),
-        defaultPrinterId: config.defaultPrinterId || device.id,
-      };
-      setConfig(next);
-      await persist(next, 'USB conectada');
-    } finally {
-      setScanning(false);
-    }
-  };
-
-  const handleBluetooth = async () => {
-    setScanning(true);
-    setError('');
-    try {
-      const device = await requestBluetoothPrinter();
-      if (!device) {
-        setError(btOk
-          ? 'Nenhuma impressora Bluetooth selecionada (ou permissão negada).'
-          : 'Bluetooth não disponível neste sistema/navegador.');
-        return;
-      }
-      const next: PrinterSettings = {
-        ...config,
-        printers: mergePrinterLists(config.printers, [device]),
-        defaultPrinterId: config.defaultPrinterId || device.id,
-      };
-      setConfig(next);
-      await persist(next, 'Bluetooth conectado');
-    } finally {
-      setScanning(false);
-    }
-  };
-
   const setDefault = async (id: string) => {
-    const next = { ...config, defaultPrinterId: id, autoPrintOnAccept: config.autoPrintOnAccept };
+    const next = { ...config, defaultPrinterId: id };
     setConfig(next);
     await persist(next, 'Impressora padrão definida');
   };
 
-  const toggle = async (key: keyof Pick<
-    PrinterSettings,
-    'autoPrintOnAccept' | 'printSecondCopy' | 'highlightOrderNumber' | 'printTrackingQr'
-  >) => {
-    const next = { ...config, [key]: !config[key] };
-    setConfig(next);
-    await persist(next);
-  };
-
-  const handleTest = () => {
+  const handleTest = async () => {
     setTesting(true);
     setError('');
-    const selected = config.printers.find((p) => p.id === config.defaultPrinterId);
-    const ok = printTestReceipt(selected?.name);
-    if (!ok) {
-      setError('Pop-up bloqueado. Permita janelas pop-up para imprimir.');
-    } else {
-      setSuccess('Comprovante de teste enviado à impressão');
-      setTimeout(() => setSuccess(''), 3000);
+    try {
+      const result = await silentPrintTest(config);
+      if (!result.ok) {
+        setError(result.message);
+      } else {
+        setSuccess(`Teste enviado para ${result.printerName} (${result.copies} via${result.copies > 1 ? 's' : ''})`);
+        setTimeout(() => setSuccess(''), 3500);
+      }
+    } finally {
+      setTesting(false);
     }
-    setTesting(false);
+  };
+
+  const handleReprint = async () => {
+    setReprinting(true);
+    setError('');
+    try {
+      const last = loadLastPrintedOrder();
+      if (!last) {
+        setError('Nenhum pedido recente para reimprimir.');
+        return;
+      }
+      const result = await silentPrintOrder(last, config);
+      if (!result.ok) setError(result.message);
+      else {
+        setSuccess(`Reimpresso #${last.orderNumber} em ${result.printerName}`);
+        setTimeout(() => setSuccess(''), 3500);
+      }
+    } finally {
+      setReprinting(false);
+    }
   };
 
   if (loading) {
@@ -173,6 +171,8 @@ export function PrintersTab() {
     );
   }
 
+  const defaultPrinter = config.printers.find((p) => p.id === config.defaultPrinterId);
+
   return (
     <div className="space-y-4">
       <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4 space-y-2">
@@ -180,10 +180,24 @@ export function PrintersTab() {
           <Printer size={16} className="text-amber-500" /> Impressoras
         </h3>
         <p className="text-zinc-400 text-sm leading-relaxed">
-          Detecte e registre impressoras USB/Bluetooth neste computador. A impressão usa o diálogo do sistema —
-          escolha a térmica e marque “lembrar” no navegador.
+          Impressão silenciosa via agente local (sem janela do navegador). Mantenha o agente
+          rodando neste computador.
+        </p>
+        <p className={`text-xs font-bold ${agentOnline ? 'text-green-400' : 'text-amber-400'}`}>
+          Agente local: {agentOnline ? 'Conectado (127.0.0.1:19191)' : 'Offline — inicie start.bat'}
         </p>
       </div>
+
+      {!agentOnline && (
+        <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-amber-200 text-sm flex gap-2">
+          <AlertTriangle size={16} className="shrink-0 mt-0.5" />
+          <span>
+            Para imprimir automaticamente, execute{' '}
+            <code className="text-amber-300">tools/burger-gn-print-agent/start.bat</code> neste PC
+            da loja.
+          </span>
+        </div>
+      )}
 
       {error && (
         <p className="text-red-400 text-sm bg-red-950/30 border border-red-900/40 rounded-xl px-3 py-2">{error}</p>
@@ -206,88 +220,141 @@ export function PrintersTab() {
         </button>
         <button
           type="button"
-          disabled={scanning || saving}
-          onClick={() => void handleUsb()}
-          className="h-10 px-3 rounded-xl border border-zinc-700 text-zinc-200 text-xs font-black uppercase flex items-center gap-1.5"
-        >
-          <Usb size={14} /> Conectar USB
-        </button>
-        <button
-          type="button"
-          disabled={scanning || saving || !btOk}
-          onClick={() => void handleBluetooth()}
-          className="h-10 px-3 rounded-xl border border-zinc-700 text-zinc-200 text-xs font-black uppercase flex items-center gap-1.5 disabled:opacity-40"
-          title={btOk ? 'Bluetooth' : 'Bluetooth indisponível'}
-        >
-          <Bluetooth size={14} /> Conectar Bluetooth
-        </button>
-        <button
-          type="button"
-          disabled={testing}
-          onClick={handleTest}
-          className="h-10 px-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-zinc-950 text-xs font-black uppercase flex items-center gap-1.5 ml-auto"
+          disabled={testing || !config.defaultPrinterId}
+          onClick={() => void handleTest()}
+          className="h-10 px-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-zinc-950 text-xs font-black uppercase flex items-center gap-1.5 disabled:opacity-40"
         >
           {testing ? <Loader2 size={14} className="animate-spin" /> : <Printer size={14} />}
-          🖨️ Testar Impressora
+          🖨️ Testar impressão
+        </button>
+        <button
+          type="button"
+          disabled={reprinting || !config.defaultPrinterId}
+          onClick={() => void handleReprint()}
+          className="h-10 px-3 rounded-xl border border-zinc-700 text-zinc-200 text-xs font-black uppercase flex items-center gap-1.5 disabled:opacity-40"
+        >
+          {reprinting ? <Loader2 size={14} className="animate-spin" /> : <Printer size={14} />}
+          🖨️ Reimprimir último pedido
         </button>
       </div>
 
       <div className="space-y-2">
-        {config.printers.map((p: PrinterDevice) => {
-          const isDefault = config.defaultPrinterId === p.id;
-          const statusClass =
-            p.status === 'connected' ? 'text-green-400' :
-            p.status === 'error' ? 'text-red-400' :
-            p.status === 'offline' ? 'text-amber-400' : 'text-zinc-500';
-          return (
-            <div
-              key={p.id}
-              className={`rounded-xl border px-3 py-3 flex items-center gap-3 ${
-                isDefault ? 'border-amber-500/50 bg-amber-500/5' : 'border-zinc-800 bg-zinc-900/50'
-              }`}
-            >
-              <Printer size={18} className={isDefault ? 'text-amber-500' : 'text-zinc-500'} />
-              <div className="flex-1 min-w-0">
-                <p className="text-white font-bold text-sm truncate">{p.name}</p>
-                <p className="text-zinc-500 text-[10px] uppercase font-bold tracking-wider">
-                  {p.connection} · <span className={statusClass}>{PRINTER_STATUS_LABELS[p.status]}</span>
-                </p>
-              </div>
-              <button
-                type="button"
-                disabled={saving}
-                onClick={() => void setDefault(p.id)}
-                className={`h-9 px-2.5 rounded-lg text-[10px] font-black uppercase flex items-center gap-1 ${
-                  isDefault
-                    ? 'bg-amber-500 text-zinc-950'
-                    : 'bg-zinc-800 text-zinc-300 hover:text-white'
+        {config.printers.length === 0 ? (
+          <p className="text-zinc-500 text-sm text-center py-6">
+            Nenhuma impressora detectada. Atualize a lista com o agente online.
+          </p>
+        ) : (
+          config.printers.map((p: PrinterDevice) => {
+            const isDefault = config.defaultPrinterId === p.id;
+            const statusClass =
+              p.status === 'connected' ? 'text-green-400' :
+              p.status === 'error' ? 'text-red-400' :
+              p.status === 'offline' ? 'text-amber-400' : 'text-zinc-500';
+            return (
+              <div
+                key={p.id}
+                className={`rounded-xl border px-3 py-3 flex items-center gap-3 ${
+                  isDefault ? 'border-amber-500/50 bg-amber-500/5' : 'border-zinc-800 bg-zinc-900/50'
                 }`}
               >
-                <Star size={12} /> {isDefault ? 'Padrão' : 'Definir padrão'}
-              </button>
-            </div>
-          );
-        })}
+                <Printer size={18} className={isDefault ? 'text-amber-500' : 'text-zinc-500'} />
+                <div className="flex-1 min-w-0">
+                  <p className="text-white font-bold text-sm truncate">{p.name}</p>
+                  <p className="text-zinc-500 text-[10px] uppercase font-bold tracking-wider">
+                    <span className={statusClass}>{PRINTER_STATUS_LABELS[p.status] || p.status}</span>
+                    {/pos-?58/i.test(p.name) ? ' · POS-58' : ''}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  disabled={saving}
+                  onClick={() => void setDefault(p.id)}
+                  className={`h-9 px-2.5 rounded-lg text-[10px] font-black uppercase flex items-center gap-1 ${
+                    isDefault
+                      ? 'bg-amber-500 text-zinc-950'
+                      : 'bg-zinc-800 text-zinc-300 hover:text-white'
+                  }`}
+                >
+                  <Star size={12} /> {isDefault ? 'Padrão' : 'Definir padrão'}
+                </button>
+              </div>
+            );
+          })
+        )}
       </div>
 
+      {!defaultPrinter && (
+        <p className="text-amber-300 text-sm flex items-center gap-2">
+          <AlertTriangle size={14} /> Selecione uma impressora padrão para a impressão automática.
+        </p>
+      )}
+
       <div className="rounded-2xl border border-zinc-800 bg-zinc-900/50 p-4 space-y-3">
-        <p className="text-[10px] font-bold uppercase text-zinc-500 tracking-wider">Opções de impressão</p>
-        {([
-          ['autoPrintOnAccept', 'Impressão automática ao aceitar pedido'],
-          ['printSecondCopy', 'Imprimir segunda via'],
-          ['highlightOrderNumber', 'Imprimir número do pedido em destaque'],
-          ['printTrackingQr', 'Imprimir QR Code do acompanhamento'],
-        ] as const).map(([key, label]) => (
-          <label key={key} className="flex items-center gap-3 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={!!config[key]}
-              onChange={() => void toggle(key)}
-              className="size-4 accent-amber-500"
-            />
-            <span className="text-sm text-zinc-200">{label}</span>
-          </label>
-        ))}
+        <p className="text-[10px] font-bold uppercase text-zinc-500 tracking-wider">Opções</p>
+        <label className="flex items-center gap-3 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={!!config.autoPrintOnAccept}
+            onChange={() => {
+              const next = { ...config, autoPrintOnAccept: !config.autoPrintOnAccept };
+              setConfig(next);
+              void persist(next);
+            }}
+            className="size-4 accent-amber-500"
+          />
+          <span className="text-sm text-zinc-200">Impressão automática</span>
+        </label>
+
+        <div>
+          <p className="text-sm text-zinc-300 mb-2">Quantidade de vias</p>
+          <div className="flex gap-2">
+            {[1, 2, 3, 4].map((n) => (
+              <button
+                key={n}
+                type="button"
+                onClick={() => {
+                  const next = { ...config, copies: n };
+                  setConfig(next);
+                  void persist(next);
+                }}
+                className={`h-10 w-12 rounded-xl font-black text-sm ${
+                  config.copies === n
+                    ? 'bg-amber-500 text-zinc-950'
+                    : 'bg-zinc-800 text-zinc-300 border border-zinc-700'
+                }`}
+              >
+                {n}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <label className="flex items-center gap-3 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={!!config.highlightOrderNumber}
+            onChange={() => {
+              const next = { ...config, highlightOrderNumber: !config.highlightOrderNumber };
+              setConfig(next);
+              void persist(next);
+            }}
+            className="size-4 accent-amber-500"
+          />
+          <span className="text-sm text-zinc-200">Número do pedido em destaque</span>
+        </label>
+        <label className="flex items-center gap-3 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={!!config.printTrackingQr}
+            onChange={() => {
+              const next = { ...config, printTrackingQr: !config.printTrackingQr };
+              setConfig(next);
+              void persist(next);
+            }}
+            className="size-4 accent-amber-500"
+          />
+          <span className="text-sm text-zinc-200">Incluir link de acompanhamento</span>
+        </label>
       </div>
 
       <button
