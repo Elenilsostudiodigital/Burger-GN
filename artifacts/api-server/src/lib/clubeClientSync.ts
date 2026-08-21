@@ -12,6 +12,21 @@ import {
 
 export type SyncedClubeMember = typeof clubeMembersTable.$inferSelect;
 
+/** Lookup only — does not create a CRM row. */
+export async function findClubeMemberByPhone(
+  companyId: number,
+  rawPhone: string,
+): Promise<SyncedClubeMember | null> {
+  if (isPlaceholderPhone(rawPhone)) return null;
+  const phone = normalizeClientPhone(rawPhone);
+  if (!phone) return null;
+  const members = await db
+    .select()
+    .from(clubeMembersTable)
+    .where(eq(clubeMembersTable.companyId, companyId));
+  return members.find((m) => phonesMatch(m.phone, phone)) ?? null;
+}
+
 /**
  * Locate CRM client (clube member) by WhatsApp or auto-create.
  * Additive side-effect — does not alter order pricing/status.

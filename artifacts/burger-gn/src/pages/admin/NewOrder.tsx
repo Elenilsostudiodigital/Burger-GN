@@ -538,6 +538,7 @@ export default function AdminNewOrder() {
           ? parseFloat(changeFor.replace(',', '.'))
           : undefined,
         source: 'attendant',
+        linkToCustomerApp: clientStatus === 'found',
         items: cart.map((l) => ({
           productId: l.product.id,
           productName: l.product.name,

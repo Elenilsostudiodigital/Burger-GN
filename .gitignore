@@ -55,6 +55,7 @@ Thumbs.db
 
 # Local embedded PostgreSQL data
 .pgdata/
+.pgdata-e2e/
 
 # Scraped Anota import artifacts
 scripts/anota-menu.json

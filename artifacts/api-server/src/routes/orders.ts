@@ -4,7 +4,7 @@ import { ordersTable, orderItemsTable, couponsTable, deliveryZonesTable, kmDeliv
 import { eq, and, desc, sql, asc, inArray, ne } from "drizzle-orm";
 import { requireCompanyAuth, tryGetCompanySession } from "../middlewares/auth";
 import { resolvePublicCompany } from "../middlewares/company";
-import { addSSEClient, removeSSEClient, broadcastSSE } from "../lib/sse";
+import { addSSEClient, removeSSEClient, addCustomerSSEClient, removeCustomerSSEClient, broadcastSSE, broadcastCustomerSSE } from "../lib/sse";
 import { calcDiscount } from "./coupons";
 import { haversineKm, findKmTier } from "./km_delivery";
 import { normalizeStreetKey } from "../lib/deliveryStreets";
@@ -18,7 +18,13 @@ import { buildStaticPixPayload, decodePixSettings, normalizePixKey } from "../li
 import { createPixPayment, getMPSettings, getMPAccessToken, fetchMPPayment } from "../lib/mercadopago";
 import { mercadoPagoNotificationUrl } from "../lib/publicUrl";
 import { applyMercadoPagoStatus } from "../lib/mpReconcile";
-import { syncClubeMemberOnOrder } from "../lib/clubeClientSync";
+import { findClubeMemberByPhone, syncClubeMemberOnOrder } from "../lib/clubeClientSync";
+import {
+  evaluateCounterOrderEdit,
+  isCustomerVisibleOrder,
+  recalculateCounterOrderTotals,
+  shouldSyncAttendantOrderToCustomerApp,
+} from "../lib/counterOrderRules";
 import {
   appendClientLedger,
   hasLedgerForOrder,
@@ -101,7 +107,22 @@ function enrichOrder<T extends { notes: string; status: string }>(
     fidelityRewardTitle: meta.fidelityRewardTitle ?? null,
     fidelityRewardId: meta.fidelityRewardId ?? null,
     source: meta.source ?? null,
+    syncToCustomerApp: meta.syncToCustomerApp === true,
+    itemsUpdatedAt: meta.itemsUpdatedAt ?? null,
   };
+}
+
+function notifyLinkedCustomerApp(
+  order: { companyId: number; phone: string; syncToCustomerApp?: boolean | null },
+  event: string,
+  data: unknown,
+) {
+  // SSE is best-effort (same Node instance). Polling via customer-active is the
+  // reliable path on Vercel. Broadcast by WhatsApp so a logged-in PWA updates
+  // even when the sync flag was missing on older counter orders.
+  if (!order.phone) return;
+  void order.syncToCustomerApp;
+  broadcastCustomerSSE(order.companyId, order.phone, event, data);
 }
 
 async function getOrderWithItems(orderId: number) {
@@ -152,7 +173,6 @@ router.get("/products/popular", resolvePublicCompany, async (req, res) => {
 // Create order (public)
 router.post("/orders", resolvePublicCompany, async (req, res) => {
   try {
-    const companyId = req.companyId!;
     const body = req.body as {
       customerName: string; phone: string;
       address?: string; addressNumber?: string; addressComplement?: string;
@@ -172,6 +192,8 @@ router.post("/orders", resolvePublicCompany, async (req, res) => {
       useCashback?: boolean;
       /** Attendant panel only — honored when admin session cookie is present. */
       source?: "online" | "attendant";
+      /** Attendant UI: phone lookup found an existing Clube cadastro. */
+      linkToCustomerApp?: boolean;
       items: Array<{
         productId?: number; productName: string; productPrice: number; quantity: number;
         addons?: Array<{ name: string; price: number }>; notes?: string;
@@ -199,10 +221,15 @@ router.post("/orders", resolvePublicCompany, async (req, res) => {
     }
 
     const adminSession = tryGetCompanySession(req);
-    const isAttendantOrder =
-      body.source === "attendant"
-      && !!adminSession
-      && adminSession.companyId === companyId;
+    // Public storefront company vs session company can differ in preview;
+    // a valid admin cookie + source=attendant is enough to mark the channel.
+    const isAttendantOrder = body.source === "attendant" && !!adminSession;
+    // Attendant orders must land in the admin's company — the customer app
+    // queries the default storefront, which is the same company in production.
+    if (isAttendantOrder && adminSession?.companyId) {
+      req.companyId = adminSession.companyId;
+    }
+    const companyId = req.companyId!;
 
     // Online storefront must respect business hours / manual close.
     // Attendant panel orders (authenticated) may still be placed when closed.
@@ -590,6 +617,17 @@ router.post("/orders", resolvePublicCompany, async (req, res) => {
     if (body.paymentMethod === "cash") meta.needsChange = !!body.needsChange || !!body.changeFor;
     if (isAttendantOrder) meta.source = "attendant";
 
+    // Link to the customer app only when the WhatsApp already belonged to a cadastrado.
+    const existingMember = await findClubeMemberByPhone(companyId, body.phone);
+    const syncToCustomerApp = shouldSyncAttendantOrderToCustomerApp({
+      isAttendantOrder,
+      linkToCustomerApp: body.linkToCustomerApp === true,
+      memberFound: !!existingMember,
+      memberJoinedAt: existingMember?.joinedAt ?? existingMember?.createdAt ?? null,
+      memberActive: existingMember?.active ?? null,
+    });
+    if (syncToCustomerApp) meta.syncToCustomerApp = true;
+
     if (isPix) {
       const [paySettings] = await db.select().from(paymentSettingsTable).where(eq(paymentSettingsTable.companyId, companyId));
       const pixCfg = decodePixSettings(paySettings?.gatewayProvider)
@@ -832,6 +870,13 @@ router.post("/orders", resolvePublicCompany, async (req, res) => {
     if (!isPix || isAttendantOrder) {
       broadcastSSE(companyId, "new_order", fullOrder);
     }
+    if (fullOrder && orderPhone) {
+      notifyLinkedCustomerApp(
+        { companyId, phone: orderPhone, syncToCustomerApp },
+        "counter_order",
+        fullOrder,
+      );
+    }
 
     // Link pending street analysis request to this order (learning module).
     if (body.orderType === "delivery" && body.address) {
@@ -874,10 +919,11 @@ router.post("/orders", resolvePublicCompany, async (req, res) => {
       discountAmount: discountAmountStored,
       cashbackUsedAmount,
       couponCode: validatedCouponCode,
-      pixPayment, pixConfigured, pixUnavailableReason, pixMode,
+      pixPayment, pixConfigured, pixUnavailableReason,       pixMode,
       cardCheckoutUrl: null,
       paymentStatus: "pending",
       workflow: isPix ? "awaiting_payment" : "new",
+      syncToCustomerApp,
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "";
@@ -924,6 +970,73 @@ router.get("/admin/prep-stats", requireCompanyAuth, async (req, res) => {
     req.log.error({ err }, "Failed to fetch prep stats");
     res.status(500).json({ error: "Internal server error" });
   }
+});
+
+function customerActivePayload(order: Awaited<ReturnType<typeof getOrderWithItems>>) {
+  if (!order) return null;
+  const { receiptDataUrl: _omit, ...rest } = order as typeof order & { receiptDataUrl?: string | null };
+  void _omit;
+  return rest;
+}
+
+async function findActiveSyncedOrderForPhone(companyId: number, rawPhone: string) {
+  const phone = normalizeClientPhone(rawPhone) || String(rawPhone || "").replace(/\D/g, "");
+  if (!phone || phone.length < 10) return null;
+  const orders = await db
+    .select()
+    .from(ordersTable)
+    .where(and(eq(ordersTable.companyId, companyId), ne(ordersTable.status, "cancelled")))
+    .orderBy(desc(ordersTable.createdAt))
+    .limit(250);
+  const match = orders.find((o) => {
+    const { meta } = parseOrderNotes(o.notes);
+    const workflow = resolveWorkflow(o.status, meta);
+    return isCustomerVisibleOrder({
+      status: o.status,
+      workflow,
+      phone: o.phone,
+      queryPhone: rawPhone || phone,
+    });
+  });
+  if (!match) return null;
+  return getOrderWithItems(match.id);
+}
+
+// Customer app: latest counter order linked to this WhatsApp (registered clients only).
+router.get("/orders/customer-active", resolvePublicCompany, async (req, res) => {
+  try {
+    res.setHeader("Cache-Control", "no-store");
+    const phone = String(req.query["phone"] || "");
+    const order = await findActiveSyncedOrderForPhone(req.companyId!, phone);
+    if (!order) {
+      res.json({ found: false, order: null });
+      return;
+    }
+    res.json({ found: true, order: customerActivePayload(order) });
+  } catch (err) {
+    req.log.error({ err }, "Failed to load customer active order");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Live updates while the customer PWA is open. Structure also queues future push.
+router.get("/orders/customer-stream", resolvePublicCompany, (req, res) => {
+  const phone = normalizeClientPhone(String(req.query["phone"] || "")) || String(req.query["phone"] || "").replace(/\D/g, "");
+  if (!phone || phone.length < 10) {
+    res.status(400).json({ error: "Informe o WhatsApp do cliente." });
+    return;
+  }
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
+  res.flushHeaders();
+  res.write("event: connected\ndata: {}\n\n");
+  addCustomerSSEClient(res, req.companyId!, phone);
+  const heartbeat = setInterval(() => {
+    try { res.write(": heartbeat\n\n"); } catch { clearInterval(heartbeat); }
+  }, 25000);
+  req.on("close", () => { clearInterval(heartbeat); removeCustomerSSEClient(res); });
 });
 
 // Track order (public)
@@ -1194,6 +1307,16 @@ router.patch("/orders/:id/status", requireCompanyAuth, async (req, res) => {
       customerNotifyMessage,
       futureWhatsappSurvey,
     });
+    notifyLinkedCustomerApp(
+      { companyId: req.companyId!, phone: order.phone, syncToCustomerApp: !!nextMeta.syncToCustomerApp },
+      "order_status",
+      {
+        trackingId: order.trackingId,
+        workflow: enriched.workflow,
+        status: order.status,
+        customerNotifyMessage,
+      },
+    );
     res.json({
       ...enriched,
       items: (await getOrderWithItems(order.id))?.items ?? [],
@@ -1202,6 +1325,184 @@ router.patch("/orders/:id/status", requireCompanyAuth, async (req, res) => {
     });
   } catch (err) {
     req.log.error({ err }, "Failed to update order status");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Admin: rewrite items of a counter order (add/remove/qty) and recalculate totals.
+router.patch("/orders/:id/items", requireCompanyAuth, async (req, res) => {
+  try {
+    const id = Number(req.params["id"]);
+    const body = req.body as {
+      items?: Array<{
+        productId?: number;
+        productName?: string;
+        productPrice?: number;
+        quantity: number;
+        addons?: Array<{ name: string; price: number }>;
+        notes?: string;
+      }>;
+    };
+
+    const [existing] = await db.select().from(ordersTable)
+      .where(and(eq(ordersTable.id, id), eq(ordersTable.companyId, req.companyId!)));
+    if (!existing) { res.status(404).json({ error: "Not found" }); return; }
+
+    const { publicNotes, meta } = parseOrderNotes(existing.notes);
+    const workflow = resolveWorkflow(existing.status, meta);
+    const decision = evaluateCounterOrderEdit({
+      source: meta.source ?? null,
+      paymentMethod: existing.paymentMethod,
+      paymentStatus: existing.paymentStatus,
+      workflow,
+      itemCount: body.items?.length ?? 0,
+    });
+    if (!decision.ok) {
+      res.status(400).json({ error: decision.error, code: decision.code });
+      return;
+    }
+
+    const rawItems = Array.isArray(body.items) ? body.items : [];
+    const productIds = [...new Set(rawItems.map((i) => i.productId).filter((pid): pid is number => typeof pid === "number"))];
+    const dbProducts = productIds.length
+      ? await db.select().from(productsTable).where(and(
+        eq(productsTable.companyId, req.companyId!),
+        inArray(productsTable.id, productIds),
+      ))
+      : [];
+    const productMap = new Map(dbProducts.map((p) => [p.id, p]));
+
+    const validatedItems: Array<{
+      productId: number | null;
+      productName: string;
+      productPrice: number;
+      quantity: number;
+      addons: Array<{ name: string; price: number }>;
+      notes: string;
+      subtotal: number;
+    }> = [];
+
+    for (const i of rawItems) {
+      if (!i.quantity || i.quantity <= 0) {
+        res.status(400).json({ error: "Invalid item quantity" }); return;
+      }
+      let productPrice = Number(i.productPrice) || 0;
+      let productName = String(i.productName || "").trim();
+      let validatedAddons: Array<{ name: string; price: number }> = Array.isArray(i.addons)
+        ? i.addons.map((a) => ({ name: String(a.name || ""), price: Number(a.price) || 0 })).filter((a) => a.name)
+        : [];
+
+      if (typeof i.productId === "number") {
+        const product = productMap.get(i.productId);
+        if (product) {
+          productPrice = parseFloat(product.price);
+          productName = product.name;
+          const dbAddons = (product.addons ?? []) as Array<{ name: string; price: number }>;
+          validatedAddons = (i.addons ?? [])
+            .map((sel) => dbAddons.find((a) => a.name === sel.name))
+            .filter((a): a is { name: string; price: number } => !!a);
+        }
+      }
+      if (!productName) {
+        res.status(400).json({ error: "Produto inválido." }); return;
+      }
+      const addonsTotal = validatedAddons.reduce((acc, a) => acc + a.price, 0);
+      validatedItems.push({
+        productId: typeof i.productId === "number" ? i.productId : null,
+        productName,
+        productPrice,
+        quantity: i.quantity,
+        addons: validatedAddons,
+        notes: i.notes ?? "",
+        subtotal: (productPrice + addonsTotal) * i.quantity,
+      });
+    }
+
+    const subtotal = roundMoney(validatedItems.reduce((acc, i) => acc + i.subtotal, 0));
+    const deliveryFee = parseFloat(String(existing.deliveryFee)) || 0;
+
+    let couponDiscount = 0;
+    if (existing.couponCode) {
+      const [coupon] = await db
+        .select()
+        .from(couponsTable)
+        .where(and(
+          eq(couponsTable.companyId, req.companyId!),
+          sql`LOWER(code) = LOWER(${existing.couponCode})`,
+        ));
+      if (
+        coupon && coupon.active &&
+        (!coupon.expiresAt || new Date(coupon.expiresAt) >= new Date()) &&
+        subtotal >= parseFloat(coupon.minOrderValue)
+      ) {
+        couponDiscount = calcDiscount(coupon.discountType, parseFloat(coupon.discountValue), subtotal);
+      }
+    }
+
+    const freeProductId = meta.fidelityFreeProductId;
+    const freeStillInOrder = typeof freeProductId === "number"
+      && validatedItems.some((i) => i.productId === freeProductId);
+    const fidelityDiscount = freeStillInOrder
+      ? (typeof meta.fidelityDiscountAmount === "number" ? meta.fidelityDiscountAmount : 0)
+      : 0;
+    const cashbackUsedAmount = typeof meta.cashbackUsedAmount === "number" ? meta.cashbackUsedAmount : 0;
+
+    const totals = recalculateCounterOrderTotals({
+      subtotal,
+      deliveryFee,
+      couponDiscount,
+      fidelityDiscount,
+      cashbackUsedAmount,
+    });
+
+    const nextMeta: OrderMeta = {
+      ...meta,
+      itemsUpdatedAt: new Date().toISOString(),
+    };
+    if (cashbackUsedAmount > 0) nextMeta.cashbackUsedAmount = totals.cashbackApplied;
+    if (typeof meta.fidelityDiscountAmount === "number") {
+      nextMeta.fidelityDiscountAmount = fidelityDiscount;
+    }
+
+    await db.transaction(async (tx) => {
+      await tx.delete(orderItemsTable).where(eq(orderItemsTable.orderId, existing.id));
+      await tx.insert(orderItemsTable).values(
+        validatedItems.map((i) => ({
+          orderId: existing.id,
+          productId: i.productId,
+          productName: i.productName,
+          productPrice: String(i.productPrice.toFixed(2)),
+          quantity: i.quantity,
+          addons: i.addons,
+          notes: i.notes,
+          subtotal: String(i.subtotal.toFixed(2)),
+        })),
+      );
+      await tx.update(ordersTable)
+        .set({
+          subtotal: String(subtotal.toFixed(2)),
+          discountAmount: String(totals.discountAmount.toFixed(2)),
+          total: String(totals.total.toFixed(2)),
+          notes: serializeOrderNotes(publicNotes, nextMeta),
+          updatedAt: new Date(),
+        })
+        .where(and(eq(ordersTable.id, existing.id), eq(ordersTable.companyId, req.companyId!)));
+    });
+
+    const fullOrder = await getOrderWithItems(existing.id);
+    broadcastSSE(req.companyId!, "order_updated", fullOrder);
+    notifyLinkedCustomerApp(
+      {
+        companyId: req.companyId!,
+        phone: existing.phone,
+        syncToCustomerApp: !!nextMeta.syncToCustomerApp,
+      },
+      "order_updated",
+      customerActivePayload(fullOrder),
+    );
+    res.json(fullOrder);
+  } catch (err) {
+    req.log.error({ err }, "Failed to edit counter order items");
     res.status(500).json({ error: "Internal server error" });
   }
 });
@@ -1518,6 +1819,17 @@ router.patch("/orders/:id/payment-status", requireCompanyAuth, async (req, res) 
         items: (await getOrderWithItems(order.id))?.items ?? [],
       });
     }
+    notifyLinkedCustomerApp(
+      { companyId: req.companyId!, phone: order.phone, syncToCustomerApp: !!nextMeta.syncToCustomerApp },
+      "order_status",
+      {
+        trackingId: order.trackingId,
+        workflow: enriched.workflow,
+        status: order.status,
+        paymentStatus,
+        customerNotifyMessage,
+      },
+    );
 
     res.json({
       ...enriched,

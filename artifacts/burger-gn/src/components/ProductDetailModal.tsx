@@ -10,13 +10,15 @@ interface ProductDetailModalProps {
   onClose: () => void;
   onAdd: (product: Product, addons: Addon[], notes: string, quantity: number) => void;
   clubeLoggedIn?: boolean;
+  /** Optional overlay stacking (admin edit modal sits at z-90). */
+  overlayClassName?: string;
 }
 
 function safeList<T>(value: T[] | null | undefined): T[] {
   return Array.isArray(value) ? value : [];
 }
 
-export function ProductDetailModal({ product, onClose, onAdd, clubeLoggedIn = false }: ProductDetailModalProps) {
+export function ProductDetailModal({ product, onClose, onAdd, clubeLoggedIn = false, overlayClassName }: ProductDetailModalProps) {
   const [quantity, setQuantity] = useState(1);
   const [selected, setSelected] = useState<Addon[]>([]);
   const [notes, setNotes] = useState('');
@@ -88,7 +90,7 @@ export function ProductDetailModal({ product, onClose, onAdd, clubeLoggedIn = fa
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={{ duration: 0.18 }}
-          className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/80"
+          className={`fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/80 ${overlayClassName || ''}`}
           onClick={onClose}
           role="dialog"
           aria-modal="true"

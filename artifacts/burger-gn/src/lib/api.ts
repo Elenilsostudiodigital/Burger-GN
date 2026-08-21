@@ -814,7 +814,7 @@ export type PaymentMethod = "pix" | "cash" | "card";
 export type PixMode = "online" | "manual";
 export type CardType = "credit" | "debit";
 
-export interface OrderItem { id: number; orderId: number; productName: string; productPrice: string; quantity: number; addons: Addon[]; notes: string; subtotal: string; }
+export interface OrderItem { id: number; orderId: number; productId?: number | null; productName: string; productPrice: string; quantity: number; addons: Addon[]; notes: string; subtotal: string; }
 export type PaymentStatus = "pending" | "paid" | "failed";
 export interface StatusHistoryEntry { stage: WorkflowStage | "cancelled"; label: string; at: string; }
 export interface Order {
@@ -860,6 +860,10 @@ export interface Order {
   fidelityRewardId?: string | null;
   /** Set when created from the attendant Novo Pedido panel. */
   source?: "online" | "attendant" | null;
+  /** Attendant order linked to a registered customer's app. */
+  syncToCustomerApp?: boolean;
+  /** ISO — last attendant rewrite of items/totals. */
+  itemsUpdatedAt?: string | null;
 }
 
 export interface OrderReview {
@@ -897,6 +901,8 @@ export interface CreateOrderPayload {
   useCashback?: boolean;
   /** Attendant panel — only applied when admin session cookie is present. */
   source?: "online" | "attendant";
+  /** True when Novo Pedido looked up an already-cadastrado Clube client. */
+  linkToCustomerApp?: boolean;
   items: Array<{ productId?: number; productName: string; productPrice: number; quantity: number; addons?: Addon[]; notes?: string }>;
 }
 export interface PixPaymentResult { paymentId: string; qrCode: string; qrCodeBase64: string; pixKey?: string; }
@@ -908,9 +914,19 @@ export const createOrder = (d: CreateOrderPayload) => api.post("/orders", d) as 
   pixPayment: PixPaymentResult | null; pixConfigured?: boolean; pixUnavailableReason?: string | null;
   pixMode?: PixMode | null;
   cardCheckoutUrl: string | null; paymentStatus?: PaymentStatus; workflow?: WorkflowStage;
+  syncToCustomerApp?: boolean;
 }>;
 export const getOrders = () => api.get("/orders") as Promise<Order[]>;
 export const trackOrder = (trackingId: string) => api.get(`/orders/track/${trackingId}`) as Promise<Order>;
+export const getCustomerActiveOrder = (phone: string) =>
+  api.get(`/orders/customer-active?phone=${encodeURIComponent(phone.replace(/\D/g, ""))}&_=${Date.now()}`) as Promise<{
+    found: boolean;
+    order: Order | null;
+  }>;
+export const updateOrderItems = (
+  id: number,
+  items: CreateOrderPayload["items"],
+) => api.patch(`/orders/${id}/items`, { items }) as Promise<Order>;
 
 export interface PrepDayStats {
   date: string;

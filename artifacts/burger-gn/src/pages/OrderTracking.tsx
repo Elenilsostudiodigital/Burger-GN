@@ -13,6 +13,7 @@ import {
   getMyOrder, getVisibleMyOrder, archiveMyOrder,
   applyServerOrderToMyOrder, purgeCustomerOrderTracking, goToCardapio,
   hideMyOrderUnlessActive, markDeliveredPromptStarted, DELIVERY_CONFIRM_TIMEOUT_MS,
+  MY_ORDER_REFRESH_EVENT,
 } from '../lib/myOrder';
 import { notifyOrderStatusChange } from '../lib/pushNotifications';
 import { buildPostDeliverySurveyMessage, sendPostDeliverySurveyWhenReady } from '../lib/whatsappFuture';
@@ -187,7 +188,13 @@ function OrderTimelineView({ trackingId }: { trackingId: string }) {
     };
     fetchOrder();
     const interval = setInterval(fetchOrder, 8000);
-    return () => { alive = false; clearInterval(interval); };
+    const onRefresh = () => { void fetchOrder(); };
+    window.addEventListener(MY_ORDER_REFRESH_EVENT, onRefresh);
+    return () => {
+      alive = false;
+      clearInterval(interval);
+      window.removeEventListener(MY_ORDER_REFRESH_EVENT, onRefresh);
+    };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [trackingId]);
 

@@ -16,6 +16,7 @@ import Confirmation from "./pages/Confirmation";
 import OrderTracking, { MyOrderPage } from "./pages/OrderTracking";
 import ClubeCliente from "./pages/ClubeCliente";
 import { MyOrderFab } from "./components/MyOrderFab";
+import { useCustomerOrderSync } from "./hooks/useCustomerOrderSync";
 import { AdminPanelScroll } from "./components/AdminPanelScroll";
 import { AdminNotificationEngine } from "./components/AdminNotificationEngine";
 import AdminLogin from "./pages/admin/Login";
@@ -99,6 +100,7 @@ function AdminSecurityRoute() {
 }
 
 function Router() {
+  useCustomerOrderSync();
   return (
     <>
       <MenuPresenceTracker />
