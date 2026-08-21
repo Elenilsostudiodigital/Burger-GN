@@ -8,6 +8,7 @@ import { useAdmin } from '../../context/AdminContext';
 import {
   getOrders, updateOrderWorkflow, updateOrderPaymentStatus, getPrepStats,
   openCustomerWhatsapp, buildCustomerNotifyMessage, WHATSAPP_EXTERNAL_ENABLED,
+  openWhatsappCompose, buildPreparingUpdateWhatsappMessage,
   REJECT_REASON_SUGGESTIONS, RECEIPT_REJECT_SUGGESTIONS,
   Order, WorkflowStage, PrepDayStats,
   ORDER_TYPE_LABELS, PAYMENT_STATUS_LABELS, WORKFLOW_LABELS,
@@ -421,6 +422,28 @@ function OrderCard({ order, highlight, dragging, onAccept, onRefuse, onAdvance, 
             className="w-full h-11 rounded-xl font-black text-sm uppercase tracking-wide bg-violet-600 hover:bg-violet-500 text-white flex items-center justify-center gap-2 disabled:opacity-50"
           >
             <CheckCircle2 size={16} /> Finalizar Pedido
+          </button>
+        </div>
+      )}
+
+      {!isPending && column !== 'cancelled' && !isDelivered && column === 'preparing' && (
+        <div className="px-3 pt-2">
+          <button
+            type="button"
+            disabled={updating || !order.trackingId || !order.phone}
+            onClick={() => {
+              const message = buildPreparingUpdateWhatsappMessage(
+                order.customerName,
+                order.trackingId,
+              );
+              const opened = openWhatsappCompose(order.phone, message);
+              if (!opened) {
+                window.alert('Número de WhatsApp do pedido inválido.');
+              }
+            }}
+            className="w-full h-11 rounded-xl bg-[#25D366] hover:bg-[#20bd5a] text-white font-black text-xs uppercase tracking-wide flex items-center justify-center gap-2 disabled:opacity-50"
+          >
+            📲 Enviar atualização ao cliente
           </button>
         </div>
       )}

@@ -22,7 +22,7 @@ Estes módulos já foram aprovados manualmente.
 Aqui ficam apenas os módulos ainda em evolução.  
 Atualizar esta lista conforme o andamento do projeto.
 
-- 🔄 Pedidos
+- 🔄 Pedidos — WhatsApp Em preparo (v1.5.3)
 - 🔄 Clientes
 - 🔄 Mercado Pago
 - 🔄 Segurança
