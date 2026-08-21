@@ -153,6 +153,10 @@ router.get("/products/popular", resolvePublicCompany, async (req, res) => {
 router.post("/orders", resolvePublicCompany, async (req, res) => {
   try {
     const companyId = req.companyId!;
+    if (req.companyBlocked) {
+      res.status(403).json({ error: "Esta loja está temporariamente indisponível" });
+      return;
+    }
     const body = req.body as {
       customerName: string; phone: string;
       address?: string; addressNumber?: string; addressComplement?: string;

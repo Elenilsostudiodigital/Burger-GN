@@ -5,6 +5,16 @@ Toda nova implementação aprovada pelo proprietário gera uma nova versão.
 
 ---
 
+## Burger GN v1.5.7
+
+- Fix cardápio público 403
+  - `resolvePublicCompany` não bloqueia mais leitura do catálogo quando a loja está `blocked`
+  - Pedidos online continuam recusando loja bloqueada
+  - Service worker não cacheia respostas 401/403/5xx (evita “403 Proibido” grudado)
+  - Cache-Control sem store prolongado em `/`, `/cardapio`, `/clube`
+
+---
+
 ## Burger GN v1.5.6
 
 - Impressão automática silenciosa (sem janela do navegador)
