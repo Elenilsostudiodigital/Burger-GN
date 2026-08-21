@@ -5,6 +5,17 @@ Toda nova implementação aprovada pelo proprietário gera uma nova versão.
 
 ---
 
+## Burger GN v1.5.5
+
+- Módulo Impressoras (Configurações)
+  - Aba Configurações → Impressoras
+  - Detectar/atualizar lista, USB, Bluetooth (quando o SO/navegador permitir)
+  - Status: Conectada / Desconectada / Offline / Erro
+  - Testar impressora (comprovante BURGER GN)
+  - Impressão automática ao aceitar (opcional), 2ª via, nº em destaque, QR do acompanhamento
+
+---
+
 ## Burger GN v1.5.4
 
 - Mensagens Automáticas (Configurações)
