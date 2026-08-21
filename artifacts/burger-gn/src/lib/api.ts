@@ -1382,6 +1382,30 @@ export const getAdminMessageTemplates = () =>
     variables: string[];
   }>;
 
+export type PrinterSettingsConfig = {
+  printers: Array<{
+    id: string;
+    name: string;
+    connection: "system" | "usb" | "bluetooth";
+    status: "connected" | "disconnected" | "offline" | "error";
+    vendorId?: number;
+    productId?: number;
+    bluetoothId?: string;
+    lastSeenAt?: string | null;
+  }>;
+  defaultPrinterId: string | null;
+  autoPrintOnAccept: boolean;
+  printSecondCopy: boolean;
+  highlightOrderNumber: boolean;
+  printTrackingQr: boolean;
+};
+
+export const getAdminPrinterSettings = () =>
+  api.get("/admin/printer-settings") as Promise<{ config: PrinterSettingsConfig }>;
+
+export const updateAdminPrinterSettings = (config: PrinterSettingsConfig) =>
+  api.put("/admin/printer-settings", { config }) as Promise<{ config: PrinterSettingsConfig }>;
+
 export const getAdminMessageTemplate = (key: MessageTemplateKey | string) =>
   api.get(`/admin/message-templates/${key}`) as Promise<MessageTemplateItem>;
 

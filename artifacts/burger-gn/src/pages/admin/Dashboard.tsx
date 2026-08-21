@@ -10,6 +10,7 @@ import {
   openCustomerWhatsapp, buildCustomerNotifyMessage, WHATSAPP_EXTERNAL_ENABLED,
   openWhatsappCompose, buildPreparingUpdateWhatsappMessage,
   getAdminMessageTemplate, buildOrderTemplateVars, interpolateMessageTemplate,
+  getAdminPrinterSettings,
   REJECT_REASON_SUGGESTIONS, RECEIPT_REJECT_SUGGESTIONS,
   Order, WorkflowStage, PrepDayStats,
   ORDER_TYPE_LABELS, PAYMENT_STATUS_LABELS, WORKFLOW_LABELS,
@@ -26,6 +27,7 @@ import { PrepCountdown, prepCardBorderClass } from '../../components/PrepCountdo
 import { AreaAnalysisRequestCard } from '../../components/AreaAnalysisRequestCard';
 import { PedidosPresenceBar } from '../../components/PedidosPresenceBar';
 import { EditOrderItemsModal } from '../../components/EditOrderItemsModal';
+import { buildReceiptHTML, printOrderReceipt } from '../../lib/printReceipt';
 import {
   computePrepRemainingSeconds,
   formatPrepDuration,
@@ -141,37 +143,6 @@ function notifyCustomer(
   if (WHATSAPP_EXTERNAL_ENABLED) {
     openCustomerWhatsapp(order.phone, message);
   }
-}
-
-function buildReceiptHTML(order: Order): string {
-  const items = order.items.map(i =>
-    `<tr><td>${i.quantity}x ${i.productName}</td><td style="text-align:right">${fmt(i.subtotal)}</td></tr>`
-  ).join('');
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Pedido #${order.orderNumber}</title>
-  <style>
-    body { font-family: monospace; font-size: 12px; max-width: 300px; margin: 0 auto; padding: 10px; }
-    h1 { text-align: center; font-size: 14px; border-bottom: 1px dashed #000; padding-bottom: 6px; }
-    table { width: 100%; border-collapse: collapse; margin: 8px 0; }
-    td { padding: 2px 0; }
-    .total { font-weight: bold; border-top: 1px dashed #000; padding-top: 4px; }
-  </style></head><body>
-  <h1>THE BURGER GN<br>Pedido #${order.orderNumber}</h1>
-  <p><b>Cliente:</b> ${order.customerName}<br>
-  <b>Tel:</b> ${order.phone}<br>
-  <b>Tipo:</b> ${ORDER_TYPE_LABELS[order.orderType]}<br>
-  ${order.orderType === 'delivery' ? `<b>End.:</b> ${order.address}, ${order.neighborhood}<br>` : ''}
-  <b>Pagamento:</b> ${formatPaymentMethod(order)}
-  ${order.changeFor ? ` (troco p/ ${fmt(order.changeFor)})` : ''}</p>
-  <table>${items}</table>
-  <table class="total">
-    <tr><td>Subtotal</td><td style="text-align:right">${fmt(order.subtotal)}</td></tr>
-    <tr><td>Entrega</td><td style="text-align:right">${parseFloat(order.deliveryFee) > 0 ? fmt(order.deliveryFee) : 'Grátis'}</td></tr>
-    ${parseFloat(order.discountAmount) > 0 ? `<tr><td>Desconto</td><td style="text-align:right">-${fmt(order.discountAmount)}</td></tr>` : ''}
-    <tr><td><b>TOTAL</b></td><td style="text-align:right"><b>${fmt(order.total)}</b></td></tr>
-  </table>
-  ${order.notes ? `<p><b>Obs.:</b> ${order.notes}</p>` : ''}
-  <script>window.onload=()=>{window.print();window.close();}</script>
-  </body></html>`;
 }
 
 function OrderCard({ order, highlight, dragging, onAccept, onRefuse, onAdvance, onBack, onConfirmPayment, onRefuseReceipt, onFinalize, onEdit }: {
@@ -765,6 +736,19 @@ export default function AdminDashboard() {
       applyUpdated(order.id, updated);
       notifyCustomer(order, 'preparing', null, updated.customerNotifyMessage);
       void fetchPrepStats();
+      // Auto-print only when enabled in Configurações → Impressoras (default off).
+      try {
+        const { config } = await getAdminPrinterSettings();
+        if (config.autoPrintOnAccept && config.defaultPrinterId) {
+          const printed = printOrderReceipt(updated.items?.length ? updated : order, config);
+          if (!printed) {
+            setNotification('Pedido aceito — permita pop-ups para impressão automática.');
+            setTimeout(() => setNotification(null), 4000);
+          }
+        }
+      } catch {
+        /* printer settings optional — never block accept */
+      }
     } catch (err) {
       setNotification(err instanceof Error ? err.message : 'Não foi possível aceitar o pedido.');
       setTimeout(() => setNotification(null), 4000);

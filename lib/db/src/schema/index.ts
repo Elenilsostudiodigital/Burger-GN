@@ -10,5 +10,6 @@ export * from "./delivery_areas";
 export * from "./km_delivery";
 export * from "./settings";
 export * from "./message_templates";
+export * from "./printer_settings";
 export * from "./business_hours";
 export * from "./clube";
