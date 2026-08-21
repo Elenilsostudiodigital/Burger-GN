@@ -814,7 +814,17 @@ export type PaymentMethod = "pix" | "cash" | "card";
 export type PixMode = "online" | "manual";
 export type CardType = "credit" | "debit";
 
-export interface OrderItem { id: number; orderId: number; productName: string; productPrice: string; quantity: number; addons: Addon[]; notes: string; subtotal: string; }
+export interface OrderItem {
+  id: number;
+  orderId: number;
+  productId?: number | null;
+  productName: string;
+  productPrice: string;
+  quantity: number;
+  addons: Addon[];
+  notes: string;
+  subtotal: string;
+}
 export type PaymentStatus = "pending" | "paid" | "failed";
 export interface StatusHistoryEntry { stage: WorkflowStage | "cancelled"; label: string; at: string; }
 export interface Order {
@@ -928,6 +938,23 @@ export const updateOrderWorkflow = (
   opts?: { rejectReason?: string },
 ) =>
   api.patch(`/orders/${id}/status`, { workflow, rejectReason: opts?.rejectReason }) as Promise<Order>;
+
+/** Replace items of an existing order (admin edit — keeps number, timer, workflow). */
+export const updateOrderItems = (
+  id: number,
+  d: {
+    items: Array<{
+      productId?: number;
+      productName: string;
+      productPrice: number;
+      quantity: number;
+      addons?: Addon[];
+      notes?: string;
+    }>;
+    notes?: string;
+  },
+) => api.put(`/orders/${id}/items`, d) as Promise<Order>;
+
 export const uploadOrderReceipt = (trackingId: string, receiptDataUrl: string) =>
   api.post(`/orders/track/${trackingId}/receipt`, { receiptDataUrl }) as Promise<Order>;
 export const submitOrderReview = (

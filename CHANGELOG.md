@@ -5,6 +5,17 @@ Toda nova implementação aprovada pelo proprietário gera uma nova versão.
 
 ---
 
+## Burger GN v1.5.2
+
+- Edição de pedidos aceitos (painel da hamburgueria)
+  - Botão “Editar” no card do pedido (Em preparo / Pronto / Saiu)
+  - Modal reutiliza o seletor do cardápio (`ProductDetailModal`)
+  - Adicionar/remover itens, alterar quantidades e observações
+  - Recalcula subtotal/total; mantém número do pedido e tempo de preparo
+  - Histórico registra “Pedido editado”; painel e acompanhamento do cliente atualizam
+
+---
+
 ## Burger GN v1.5.1 (em validação)
 
 - Limpar carrinho (cliente)

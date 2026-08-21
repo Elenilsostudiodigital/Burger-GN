@@ -1002,6 +1002,192 @@ router.get("/orders/track/:trackingId", async (req, res) => {
   }
 });
 
+/**
+ * Edit items of an existing accepted order (admin).
+ * Does NOT create a new order, does NOT reset workflow/prep timer/order number.
+ */
+router.put("/orders/:id/items", requireCompanyAuth, async (req, res) => {
+  try {
+    const companyId = req.companyId!;
+    const id = Number(req.params["id"]);
+    const body = req.body as {
+      items?: Array<{
+        productId?: number;
+        productName: string;
+        productPrice: number;
+        quantity: number;
+        addons?: Array<{ name: string; price: number }>;
+        notes?: string;
+      }>;
+      notes?: string;
+    };
+
+    if (!Array.isArray(body.items) || body.items.length === 0) {
+      res.status(400).json({ error: "Informe ao menos um item." });
+      return;
+    }
+    if (body.items.some((i) => !i.quantity || i.quantity <= 0)) {
+      res.status(400).json({ error: "Quantidade inválida." });
+      return;
+    }
+
+    const [existing] = await db
+      .select()
+      .from(ordersTable)
+      .where(and(eq(ordersTable.id, id), eq(ordersTable.companyId, companyId)));
+    if (!existing) {
+      res.status(404).json({ error: "Pedido não encontrado" });
+      return;
+    }
+
+    const { publicNotes, meta } = parseOrderNotes(existing.notes);
+    const workflow = resolveWorkflow(existing.status, meta);
+
+    if (
+      existing.status === "cancelled"
+      || workflow === "cancelled"
+      || workflow === "finalized"
+      || workflow === "done"
+      || workflow === "awaiting_payment"
+    ) {
+      res.status(400).json({
+        error: "Este pedido não pode ser editado no status atual.",
+      });
+      return;
+    }
+
+    // Accepted kitchen orders only (not pending "new" / awaiting payment).
+    const editable =
+      workflow === "preparing"
+      || workflow === "ready"
+      || workflow === "out"
+      || workflow === "accepted";
+    if (!editable) {
+      res.status(400).json({ error: "Pedido não elegível para edição." });
+      return;
+    }
+
+    const productIds = [
+      ...new Set(
+        body.items
+          .map((i) => i.productId)
+          .filter((pid): pid is number => typeof pid === "number"),
+      ),
+    ];
+    const dbProducts = productIds.length
+      ? await db
+          .select()
+          .from(productsTable)
+          .where(and(eq(productsTable.companyId, companyId), inArray(productsTable.id, productIds)))
+      : [];
+    const productMap = new Map(dbProducts.map((p) => [p.id, p]));
+
+    const validatedItems: Array<{
+      productId: number | null;
+      productName: string;
+      productPrice: number;
+      quantity: number;
+      addons: Array<{ name: string; price: number }>;
+      notes: string;
+      subtotal: number;
+    }> = [];
+
+    for (const i of body.items) {
+      let productPrice = Number(i.productPrice) || 0;
+      let validatedAddons: Array<{ name: string; price: number }> = [];
+      let productName = String(i.productName || "").trim();
+
+      if (typeof i.productId === "number") {
+        const product = productMap.get(i.productId);
+        if (!product) {
+          res.status(400).json({ error: `Produto "${productName || i.productId}" inválido.` });
+          return;
+        }
+        // Keep kitchen edits even if product later marked sold-out.
+        productPrice = parseFloat(product.price);
+        productName = product.name;
+        const dbAddons = (product.addons ?? []) as Array<{ name: string; price: number }>;
+        validatedAddons = (i.addons ?? [])
+          .map((sel) => dbAddons.find((a) => a.name === sel.name))
+          .filter((a): a is { name: string; price: number } => !!a);
+      } else {
+        validatedAddons = (i.addons ?? []).map((a) => ({
+          name: String(a.name || "").slice(0, 120),
+          price: Number(a.price) || 0,
+        }));
+      }
+
+      if (!productName) {
+        res.status(400).json({ error: "Nome do produto obrigatório." });
+        return;
+      }
+
+      const addonsTotal = validatedAddons.reduce((acc, a) => acc + a.price, 0);
+      const lineSubtotal = (productPrice + addonsTotal) * i.quantity;
+      validatedItems.push({
+        productId: typeof i.productId === "number" ? i.productId : null,
+        productName,
+        productPrice,
+        quantity: i.quantity,
+        addons: validatedAddons,
+        notes: String(i.notes ?? "").slice(0, 500),
+        subtotal: lineSubtotal,
+      });
+    }
+
+    const subtotal = validatedItems.reduce((acc, i) => acc + i.subtotal, 0);
+    const deliveryFee = parseFloat(String(existing.deliveryFee)) || 0;
+    const discountAmount = parseFloat(String(existing.discountAmount)) || 0;
+    const total = Math.max(0, Math.round((subtotal + deliveryFee - discountAmount) * 100) / 100);
+
+    // Preserve prep timer, payment, rewards — only append edit history.
+    const editAt = new Date().toISOString();
+    const historyStage: WorkflowStage =
+      workflow === "accepted" ? "preparing" : (workflow as WorkflowStage);
+    const history = [...(meta.history ?? [])];
+    history.push({
+      stage: historyStage,
+      label: "Pedido editado",
+      at: editAt,
+    });
+    const nextMeta: OrderMeta = { ...meta, history };
+
+    const nextPublicNotes =
+      body.notes !== undefined ? String(body.notes).slice(0, 2000) : publicNotes;
+
+    await db.transaction(async (tx) => {
+      await tx.delete(orderItemsTable).where(eq(orderItemsTable.orderId, id));
+      await tx.insert(orderItemsTable).values(
+        validatedItems.map((i) => ({
+          orderId: id,
+          productId: i.productId,
+          productName: i.productName,
+          productPrice: String(i.productPrice.toFixed(2)),
+          quantity: i.quantity,
+          addons: i.addons,
+          notes: i.notes,
+          subtotal: String(i.subtotal.toFixed(2)),
+        })),
+      );
+      await tx
+        .update(ordersTable)
+        .set({
+          subtotal: String(subtotal.toFixed(2)),
+          total: String(total.toFixed(2)),
+          notes: serializeOrderNotes(nextPublicNotes, nextMeta),
+        })
+        .where(and(eq(ordersTable.id, id), eq(ordersTable.companyId, companyId)));
+    });
+
+    const fullOrder = await getOrderWithItems(id);
+    broadcastSSE(companyId, "order_updated", fullOrder);
+    res.json(fullOrder);
+  } catch (err) {
+    req.log.error({ err }, "Failed to edit order items");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 // Update order status / workflow (admin)
 router.patch("/orders/:id/status", requireCompanyAuth, async (req, res) => {
   try {
