@@ -1237,18 +1237,57 @@ export function buildCustomerNotifyMessage(
 }
 
 /**
- * TEMP (dev/test): all external WhatsApp communication is OFF.
+ * TEMP (dev/test): automatic external WhatsApp on status changes is OFF.
  * Structure kept for future official WhatsApp Business API reactivation.
  * Flip to `true` only when the API integration is ready.
+ * Manual “Enviar atualização ao cliente” uses openWhatsappCompose (always on).
  */
 export const WHATSAPP_EXTERNAL_ENABLED = false;
 
 /** Opens WhatsApp (wa.me). No-op while WHATSAPP_EXTERNAL_ENABLED is false. */
 export function openCustomerWhatsapp(phone: string, message: string) {
   if (!WHATSAPP_EXTERNAL_ENABLED) return;
+  openWhatsappCompose(phone, message);
+}
+
+/**
+ * Attendant-confirmed WhatsApp compose (wa.me).
+ * Opens the chat pre-filled — does NOT send automatically.
+ */
+export function openWhatsappCompose(phone: string, message: string): string | null {
   const number = normalizePhoneForWhatsapp(phone);
-  if (!number || number === "5500000000000" || number.replace(/\D/g, "").replace(/^55/, "").length < 10) return;
-  window.open(`https://wa.me/${number}?text=${encodeURIComponent(message)}`, "_blank");
+  if (!number || number === "5500000000000" || number.replace(/\D/g, "").replace(/^55/, "").length < 10) {
+    return null;
+  }
+  const url = `https://wa.me/${number}?text=${encodeURIComponent(message)}`;
+  if (typeof window !== "undefined") {
+    window.open(url, "_blank");
+  }
+  return url;
+}
+
+/** Public tracking URL for a specific order. */
+export function buildOrderTrackingUrl(trackingId: string, origin?: string): string {
+  const base =
+    (origin && origin.replace(/\/$/, ""))
+    || (typeof window !== "undefined" ? window.location.origin : "https://burger-gn.vercel.app");
+  return `${base}/pedido/${trackingId}`;
+}
+
+/** Message for “Em preparo” update — attendant confirms send in WhatsApp. */
+export function buildPreparingUpdateWhatsappMessage(
+  customerName: string,
+  trackingId: string,
+  origin?: string,
+): string {
+  const cliente = (customerName || "cliente").trim().split(/\s+/)[0] || "cliente";
+  const link = buildOrderTrackingUrl(trackingId, origin);
+  return (
+    `Olá ${cliente} 👋\n` +
+    `Seu pedido já entrou em preparo.\n` +
+    `Acompanhe em tempo real pelo link abaixo:\n` +
+    link
+  );
 }
 
 /** Short in-app labels for Meu Pedido status banners. */

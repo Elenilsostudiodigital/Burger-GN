@@ -5,6 +5,15 @@ Toda nova implementação aprovada pelo proprietário gera uma nova versão.
 
 ---
 
+## Burger GN v1.5.3
+
+- Comunicação WhatsApp no andamento do pedido (Em preparo)
+  - Botão “📲 Enviar atualização ao cliente” no card Em preparo
+  - Abre o WhatsApp com o número do pedido e mensagem pré-preenchida (sem envio automático)
+  - Inclui link direto do acompanhamento `/pedido/:trackingId`
+
+---
+
 ## Burger GN v1.5.2
 
 - Edição de pedidos aceitos (painel da hamburgueria)
