@@ -18,11 +18,12 @@ import {
   LayoutDashboard, UtensilsCrossed, LogOut, Bell, BellOff,
   Printer, Clock, MessageCircle, History,
   XCircle, Tag, MapPin, Navigation, Settings, Route, Upload, TrendingUp,
-  ChevronLeft, ChevronRight, GripVertical, X, Crown, Filter, ImageIcon, CheckCircle2, Check, Ban, Star, Users, Plus, PackageCheck, Megaphone,
+  ChevronLeft, ChevronRight, GripVertical, X, Crown, Filter, ImageIcon, CheckCircle2, Check, Ban, Star, Users, Plus, PackageCheck, Megaphone, Pencil,
 } from 'lucide-react';
 import { PrepCountdown, prepCardBorderClass } from '../../components/PrepCountdown';
 import { AreaAnalysisRequestCard } from '../../components/AreaAnalysisRequestCard';
 import { PedidosPresenceBar } from '../../components/PedidosPresenceBar';
+import { EditOrderItemsModal } from '../../components/EditOrderItemsModal';
 import {
   computePrepRemainingSeconds,
   formatPrepDuration,
@@ -171,7 +172,7 @@ function buildReceiptHTML(order: Order): string {
   </body></html>`;
 }
 
-function OrderCard({ order, highlight, dragging, onAccept, onRefuse, onAdvance, onBack, onConfirmPayment, onRefuseReceipt, onFinalize }: {
+function OrderCard({ order, highlight, dragging, onAccept, onRefuse, onAdvance, onBack, onConfirmPayment, onRefuseReceipt, onFinalize, onEdit }: {
   order: Order; highlight: boolean; dragging?: boolean;
   onAccept: (order: Order) => void;
   onRefuse: (order: Order) => void;
@@ -180,6 +181,7 @@ function OrderCard({ order, highlight, dragging, onAccept, onRefuse, onAdvance, 
   onConfirmPayment: (order: Order) => void;
   onRefuseReceipt: (order: Order) => void;
   onFinalize: (order: Order) => void;
+  onEdit: (order: Order) => void;
 }) {
   const [updating, setUpdating] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
@@ -195,6 +197,10 @@ function OrderCard({ order, highlight, dragging, onAccept, onRefuse, onAdvance, 
   const isDelivered = column === 'done';
   const dragDisabled = column === 'cancelled' || isDelivered || awaitingPay || (column === 'new' && !canAcceptOrder(order));
   const showPrepTimer = !!order.prepStartedAt && (column === 'preparing' || column === 'ready' || !!order.prepFinishedAt);
+  const canEditItems =
+    !awaitingPay
+    && !isPending
+    && (column === 'preparing' || column === 'ready' || column === 'out');
 
   useEffect(() => {
     if (!order.prepStartedAt || order.prepFinishedAt || column !== 'preparing') return;
@@ -441,6 +447,17 @@ function OrderCard({ order, highlight, dragging, onAccept, onRefuse, onAdvance, 
             title="Histórico">
             <History size={15} />
           </button>
+          {canEditItems && (
+            <button
+              type="button"
+              onClick={() => onEdit(order)}
+              disabled={updating}
+              className="px-2.5 py-2 rounded-lg text-amber-400 bg-amber-500/10 hover:bg-amber-500/20 font-bold text-[10px] uppercase tracking-wide flex items-center gap-1"
+              title="Editar itens"
+            >
+              <Pencil size={14} /> Editar
+            </button>
+          )}
           <button onClick={() => onRefuse(order)} disabled={updating}
             className="p-2 text-red-500/70 hover:text-red-400 bg-red-950/30 rounded-lg" title="Recusar">
             <Ban size={15} />
@@ -521,7 +538,7 @@ function OrderCard({ order, highlight, dragging, onAccept, onRefuse, onAdvance, 
   );
 }
 
-function Column({ col, orders, newOrderIds, onAccept, onRefuse, onAdvance, onBack, onConfirmPayment, onRefuseReceipt, onFinalize }: {
+function Column({ col, orders, newOrderIds, onAccept, onRefuse, onAdvance, onBack, onConfirmPayment, onRefuseReceipt, onFinalize, onEdit }: {
   col: ColumnDef; orders: Order[]; newOrderIds: Set<number>;
   onAccept: (order: Order) => void;
   onRefuse: (order: Order) => void;
@@ -530,6 +547,7 @@ function Column({ col, orders, newOrderIds, onAccept, onRefuse, onAdvance, onBac
   onConfirmPayment: (order: Order) => void;
   onRefuseReceipt: (order: Order) => void;
   onFinalize: (order: Order) => void;
+  onEdit: (order: Order) => void;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: col.key });
   return (
@@ -554,7 +572,8 @@ function Column({ col, orders, newOrderIds, onAccept, onRefuse, onAdvance, onBac
         ) : orders.map(order => (
           <OrderCard key={order.id} order={order} highlight={newOrderIds.has(order.id)}
             onAccept={onAccept} onRefuse={onRefuse} onAdvance={onAdvance} onBack={onBack}
-            onConfirmPayment={onConfirmPayment} onRefuseReceipt={onRefuseReceipt} onFinalize={onFinalize} />
+            onConfirmPayment={onConfirmPayment} onRefuseReceipt={onRefuseReceipt} onFinalize={onFinalize}
+            onEdit={onEdit} />
         ))}
       </div>
     </div>
@@ -591,6 +610,7 @@ export default function AdminDashboard() {
     durationSeconds: number;
   } | null>(null);
   const [streetRequests, setStreetRequests] = useState<DeliveryStreetRequest[]>([]);
+  const [editingOrder, setEditingOrder] = useState<Order | null>(null);
   const soundEnabledRef = useRef(soundEnabled);
 
   useEffect(() => { soundEnabledRef.current = soundEnabled; }, [soundEnabled]);
@@ -1057,7 +1077,8 @@ export default function AdminDashboard() {
               {visibleColumns.map(col => (
                 <Column key={col.key} col={col} orders={ordersByColumn[col.key]} newOrderIds={newOrderIds}
                   onAccept={handleAccept} onRefuse={openRefuse} onAdvance={handleAdvance} onBack={handleBack}
-                  onConfirmPayment={handleConfirmPayment} onRefuseReceipt={openRefuseReceipt} onFinalize={handleFinalize} />
+                  onConfirmPayment={handleConfirmPayment} onRefuseReceipt={openRefuseReceipt} onFinalize={handleFinalize}
+                  onEdit={setEditingOrder} />
               ))}
             </div>
             <DragOverlay>
@@ -1065,7 +1086,8 @@ export default function AdminDashboard() {
                 <div className="w-[300px] rotate-2">
                   <OrderCard order={activeDragOrder} highlight={false} dragging
                     onAccept={handleAccept} onRefuse={openRefuse} onAdvance={handleAdvance} onBack={handleBack}
-                    onConfirmPayment={handleConfirmPayment} onRefuseReceipt={openRefuseReceipt} onFinalize={handleFinalize} />
+                    onConfirmPayment={handleConfirmPayment} onRefuseReceipt={openRefuseReceipt} onFinalize={handleFinalize}
+                    onEdit={setEditingOrder} />
                 </div>
               )}
             </DragOverlay>
@@ -1191,12 +1213,26 @@ export default function AdminDashboard() {
                 <div key={order.id} className="mb-3">
                   <OrderCard order={order} highlight={false}
                     onAccept={handleAccept} onRefuse={openRefuse} onAdvance={handleAdvance} onBack={handleBack}
-                    onConfirmPayment={handleConfirmPayment} onRefuseReceipt={openRefuseReceipt} onFinalize={handleFinalize} />
+                    onConfirmPayment={handleConfirmPayment} onRefuseReceipt={openRefuseReceipt} onFinalize={handleFinalize}
+                    onEdit={setEditingOrder} />
                 </div>
               ))}
             </div>
           </div>
         )}
+
+      {editingOrder && (
+        <EditOrderItemsModal
+          order={editingOrder}
+          onClose={() => setEditingOrder(null)}
+          onSaved={(updated) => {
+            applyUpdated(updated.id, updated);
+            setEditingOrder(null);
+            setNotification(`Pedido #${updated.orderNumber} atualizado`);
+            setTimeout(() => setNotification(null), 3000);
+          }}
+        />
+      )}
 
       <nav className="sticky bottom-0 left-0 right-0 bg-zinc-950/95 backdrop-blur border-t border-zinc-800 z-40">
         <div className="admin-shell-wide flex overflow-x-auto no-scrollbar">
