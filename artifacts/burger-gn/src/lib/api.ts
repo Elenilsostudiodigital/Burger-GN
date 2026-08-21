@@ -1274,14 +1274,100 @@ export function buildOrderTrackingUrl(trackingId: string, origin?: string): stri
   return `${base}/pedido/${trackingId}`;
 }
 
-/** Message for “Em preparo” update — attendant confirms send in WhatsApp. */
+export type MessageTemplateKey =
+  | "pedido_recebido"
+  | "pedido_confirmado"
+  | "em_preparo"
+  | "pedido_pronto"
+  | "pedido_retirado"
+  | "pedido_cancelado";
+
+export interface MessageTemplateItem {
+  key: MessageTemplateKey;
+  name: string;
+  body: string;
+  defaultBody: string;
+  updatedAt: string | null;
+  isCustom: boolean;
+}
+
+export type MessageTemplateVars = Partial<{
+  cliente: string;
+  pedido: string;
+  valor: string;
+  status: string;
+  link: string;
+  loja: string;
+  telefone: string;
+  horario: string;
+}>;
+
+export function interpolateMessageTemplate(
+  template: string,
+  vars: MessageTemplateVars,
+): string {
+  return String(template || "").replace(/\{\{(\w+)\}\}/g, (_m, key: string) => {
+    const v = vars[key as keyof MessageTemplateVars];
+    return v != null && v !== "" ? String(v) : "";
+  });
+}
+
+export function buildOrderTemplateVars(
+  order: Pick<
+    Order,
+    | "customerName"
+    | "orderNumber"
+    | "total"
+    | "trackingId"
+    | "phone"
+    | "workflow"
+    | "status"
+    | "prepTimeMin"
+    | "prepTimeMax"
+  >,
+  opts?: { origin?: string; loja?: string; telefoneLoja?: string; statusLabel?: string },
+): MessageTemplateVars {
+  const cliente = (order.customerName || "cliente").trim().split(/\s+/)[0] || "cliente";
+  const totalNum = parseFloat(String(order.total)) || 0;
+  const valor = `R$ ${totalNum.toFixed(2).replace(".", ",")}`;
+  const status =
+    opts?.statusLabel
+    || (order.workflow ? String(WORKFLOW_LABELS[order.workflow as WorkflowStage] || order.workflow) : order.status);
+  const min = order.prepTimeMin ?? 35;
+  const max = order.prepTimeMax ?? 45;
+  return {
+    cliente,
+    pedido: String(order.orderNumber),
+    valor,
+    status,
+    link: buildOrderTrackingUrl(order.trackingId, opts?.origin),
+    loja: opts?.loja || "The Burger GN",
+    telefone: opts?.telefoneLoja || order.phone || "",
+    horario: `${min}–${max} min`,
+  };
+}
+
+/** Message for “Em preparo” update — prefers DB template body when provided. */
 export function buildPreparingUpdateWhatsappMessage(
   customerName: string,
   trackingId: string,
   origin?: string,
+  templateBody?: string,
 ): string {
   const cliente = (customerName || "cliente").trim().split(/\s+/)[0] || "cliente";
   const link = buildOrderTrackingUrl(trackingId, origin);
+  if (templateBody && templateBody.trim()) {
+    return interpolateMessageTemplate(templateBody, {
+      cliente,
+      pedido: "",
+      valor: "",
+      status: "Em Preparo",
+      link,
+      loja: "The Burger GN",
+      telefone: "",
+      horario: "",
+    });
+  }
   return (
     `Olá ${cliente} 👋\n` +
     `Seu pedido já entrou em preparo.\n` +
@@ -1289,6 +1375,32 @@ export function buildPreparingUpdateWhatsappMessage(
     link
   );
 }
+
+export const getAdminMessageTemplates = () =>
+  api.get("/admin/message-templates") as Promise<{
+    templates: MessageTemplateItem[];
+    variables: string[];
+  }>;
+
+export const getAdminMessageTemplate = (key: MessageTemplateKey | string) =>
+  api.get(`/admin/message-templates/${key}`) as Promise<MessageTemplateItem>;
+
+export const updateAdminMessageTemplate = (key: MessageTemplateKey | string, body: string) =>
+  api.put(`/admin/message-templates/${key}`, { body }) as Promise<MessageTemplateItem>;
+
+export const restoreAdminMessageTemplate = (key: MessageTemplateKey | string) =>
+  api.post(`/admin/message-templates/${key}/restore`, {}) as Promise<MessageTemplateItem>;
+
+export const previewAdminMessageTemplate = (
+  key: MessageTemplateKey | string,
+  d?: { body?: string; vars?: MessageTemplateVars },
+) =>
+  api.post(`/admin/message-templates/${key}/preview`, d || {}) as Promise<{
+    key: string;
+    name: string;
+    preview: string;
+    vars: MessageTemplateVars;
+  }>;
 
 /** Short in-app labels for Meu Pedido status banners. */
 export function customerInAppStatusMessage(

@@ -10,7 +10,7 @@ import { useAdmin } from '../../context/AdminContext';
 import {
   MapPin, Settings, LogOut, Plus, Pencil, Trash2, Check, X, ToggleLeft, ToggleRight,
   Loader2, CreditCard, Link as LinkIcon, ShieldAlert, ShieldCheck,
-  MessageCircle, Clock, User, Shield, Bell,
+  MessageCircle, Clock, User, Shield, Bell, MessageSquareText,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -19,6 +19,7 @@ import { BusinessHoursTab } from './BusinessHoursTab';
 import { ProfileTab } from './ProfileTab';
 import { SecurityTab } from './SecurityTab';
 import { NotificationsTab } from './NotificationsTab';
+import { MessageTemplatesTab } from './MessageTemplatesTab';
 import { AdminBottomNav } from '../../components/AdminBottomNav';
 import { AdminTab, AdminTabBar } from '../../components/AdminTabs';
 
@@ -29,6 +30,7 @@ type Tab =
   | 'preparo'
   | 'pagamento'
   | 'whatsapp'
+  | 'mensagens'
   | 'notificacoes'
   | 'links'
   | 'ruas';
@@ -41,6 +43,8 @@ const TAB_FROM_QUERY: Record<string, Tab> = {
   pagamento: 'pagamento',
   pagamentos: 'pagamento',
   whatsapp: 'whatsapp',
+  mensagens: 'mensagens',
+  'mensagens-automaticas': 'mensagens',
   notificacoes: 'notificacoes',
   links: 'links',
   ruas: 'ruas',
@@ -549,6 +553,7 @@ export default function SettingsHub() {
     { id: 'preparo', label: 'Preparo', icon: <Clock size={16} /> },
     { id: 'pagamento', label: 'Pagamentos', icon: <CreditCard size={16} /> },
     { id: 'whatsapp', label: 'WhatsApp', icon: <MessageCircle size={16} /> },
+    { id: 'mensagens', label: 'Mensagens Automáticas', icon: <MessageSquareText size={16} /> },
     { id: 'notificacoes', label: 'Notificações e Sons', icon: <Bell size={16} /> },
     { id: 'links', label: 'Links', icon: <LinkIcon size={16} /> },
     { id: 'ruas', label: 'Ruas', icon: <MapPin size={16} /> },
@@ -591,8 +596,9 @@ export default function SettingsHub() {
               : tab === 'preparo' ? <PrepTimeTab />
                 : tab === 'pagamento' ? <PaymentTab />
                   : tab === 'whatsapp' ? <WhatsappTab />
-                    : tab === 'notificacoes' ? <NotificationsTab />
-                      : tab === 'links' ? <LinksTab /> : (
+                    : tab === 'mensagens' ? <MessageTemplatesTab />
+                      : tab === 'notificacoes' ? <NotificationsTab />
+                        : tab === 'links' ? <LinksTab /> : (
           <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-5 space-y-3">
             <h3 className="text-white font-black uppercase text-sm">Ruas de Entrega</h3>
             <p className="text-zinc-400 text-sm leading-relaxed">

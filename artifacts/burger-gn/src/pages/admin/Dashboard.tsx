@@ -9,6 +9,7 @@ import {
   getOrders, updateOrderWorkflow, updateOrderPaymentStatus, getPrepStats,
   openCustomerWhatsapp, buildCustomerNotifyMessage, WHATSAPP_EXTERNAL_ENABLED,
   openWhatsappCompose, buildPreparingUpdateWhatsappMessage,
+  getAdminMessageTemplate, buildOrderTemplateVars, interpolateMessageTemplate,
   REJECT_REASON_SUGGESTIONS, RECEIPT_REJECT_SUGGESTIONS,
   Order, WorkflowStage, PrepDayStats,
   ORDER_TYPE_LABELS, PAYMENT_STATUS_LABELS, WORKFLOW_LABELS,
@@ -431,14 +432,24 @@ function OrderCard({ order, highlight, dragging, onAccept, onRefuse, onAdvance, 
           <button
             type="button"
             disabled={updating || !order.trackingId || !order.phone}
-            onClick={() => {
-              const message = buildPreparingUpdateWhatsappMessage(
-                order.customerName,
-                order.trackingId,
-              );
-              const opened = openWhatsappCompose(order.phone, message);
-              if (!opened) {
-                window.alert('Número de WhatsApp do pedido inválido.');
+            onClick={async () => {
+              try {
+                const tpl = await getAdminMessageTemplate('em_preparo');
+                const vars = buildOrderTemplateVars(order, { statusLabel: 'Em Preparo' });
+                const message = interpolateMessageTemplate(tpl.body, vars);
+                const opened = openWhatsappCompose(order.phone, message);
+                if (!opened) {
+                  window.alert('Número de WhatsApp do pedido inválido.');
+                }
+              } catch {
+                const fallback = buildPreparingUpdateWhatsappMessage(
+                  order.customerName,
+                  order.trackingId,
+                );
+                const opened = openWhatsappCompose(order.phone, fallback);
+                if (!opened) {
+                  window.alert('Número de WhatsApp do pedido inválido.');
+                }
               }
             }}
             className="w-full h-11 rounded-xl bg-[#25D366] hover:bg-[#20bd5a] text-white font-black text-xs uppercase tracking-wide flex items-center justify-center gap-2 disabled:opacity-50"

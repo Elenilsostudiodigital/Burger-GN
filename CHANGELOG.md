@@ -5,6 +5,17 @@ Toda nova implementação aprovada pelo proprietário gera uma nova versão.
 
 ---
 
+## Burger GN v1.5.4
+
+- Mensagens Automáticas (Configurações)
+  - Nova aba: Configurações → Mensagens Automáticas
+  - 6 mensagens editáveis no banco (Recebido, Confirmado, Em Preparo, Pronto, Retirado, Cancelado)
+  - Variáveis: {{cliente}} {{pedido}} {{valor}} {{status}} {{link}} {{loja}} {{telefone}} {{horario}}
+  - Visualizar / Restaurar padrão / Salvar por mensagem
+  - Botão WhatsApp “Enviar atualização ao cliente” usa a mensagem Em Preparo do banco
+
+---
+
 ## Burger GN v1.5.3
 
 - Comunicação WhatsApp no andamento do pedido (Em preparo)
