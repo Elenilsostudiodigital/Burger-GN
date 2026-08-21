@@ -8,6 +8,10 @@ import { eq } from "drizzle-orm";
  * when omitted, requests fall back to the default storefront (root Burger GN URLs).
  * Sets `req.companyId` so downstream handlers can share the same field as
  * `requireCompanyAuth` (admin) routes.
+ *
+ * IMPORTANT: Catalog routes (/, /cardapio, /clube and their APIs) must never
+ * return HTTP 403 just because the company is marked blocked. Blocking only
+ * applies to placing new online orders (see POST /orders).
  */
 export async function resolvePublicCompany(req: Request, res: Response, next: NextFunction) {
   try {
@@ -21,13 +25,10 @@ export async function resolvePublicCompany(req: Request, res: Response, next: Ne
       res.status(404).json({ error: "Loja não encontrada" });
       return;
     }
-    if (company.status === "blocked") {
-      res.status(403).json({ error: "Esta loja está temporariamente indisponível" });
-      return;
-    }
 
     req.companyId = company.id;
     req.companySlug = company.slug;
+    req.companyBlocked = company.status === "blocked";
     next();
   } catch (err) {
     req.log.error({ err }, "Failed to resolve public company");

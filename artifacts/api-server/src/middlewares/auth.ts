@@ -12,6 +12,8 @@ declare global {
       companyId?: number;
       companyUserId?: number;
       companySlug?: string;
+      /** True when company.status is blocked — catalog stays public; orders must refuse. */
+      companyBlocked?: boolean;
     }
   }
 }

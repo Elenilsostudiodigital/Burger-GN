@@ -1,7 +1,8 @@
 /* Burger GN PWA — network-safe service worker.
  * Never intercepts /api (incl. SSE). Does not alter app business logic.
+ * Never caches error responses (401/403/5xx) — avoids sticky "403 Proibido" pages.
  */
-const CACHE_VERSION = "burger-gn-pwa-v2";
+const CACHE_VERSION = "burger-gn-pwa-v3-public";
 const PRECACHE_URLS = [
   "/",
   "/index.html",
@@ -41,6 +42,10 @@ function isNavigationRequest(request) {
   return request.mode === "navigate" || request.destination === "document";
 }
 
+function isCacheableOk(response) {
+  return !!response && response.ok && response.status >= 200 && response.status < 300;
+}
+
 self.addEventListener("fetch", (event) => {
   const { request } = event;
   if (request.method !== "GET") return;
@@ -63,22 +68,30 @@ self.addEventListener("fetch", (event) => {
     event.respondWith(
       fetch(request)
         .then((response) => {
-          const copy = response.clone();
-          caches.open(CACHE_VERSION).then((cache) => cache.put("/index.html", copy)).catch(() => {});
+          // Never persist auth/forbidden/error HTML into the app shell cache.
+          if (isCacheableOk(response)) {
+            const copy = response.clone();
+            caches.open(CACHE_VERSION).then((cache) => cache.put("/index.html", copy)).catch(() => {});
+          }
           return response;
         })
-        .catch(() => caches.match("/index.html").then((r) => r || caches.match("/"))),
+        .catch(() =>
+          caches.match("/index.html").then((r) => r || caches.match("/")),
+        ),
     );
     return;
   }
 
-  // Static assets: cache-first, then network
+  // Static assets: cache-first, then network (only cache successful responses)
   event.respondWith(
     caches.match(request).then((cached) => {
       if (cached) return cached;
       return fetch(request)
         .then((response) => {
-          if (response.ok && (url.pathname.startsWith("/assets/") || url.pathname.startsWith("/icons/"))) {
+          if (
+            isCacheableOk(response) &&
+            (url.pathname.startsWith("/assets/") || url.pathname.startsWith("/icons/"))
+          ) {
             const copy = response.clone();
             caches.open(CACHE_VERSION).then((cache) => cache.put(request, copy)).catch(() => {});
           }
