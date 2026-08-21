@@ -281,6 +281,12 @@ const fabSrc = src("artifacts/burger-gn/src/components/MyOrderFab.tsx");
 ok("FAB reconcilia pedido salvo mesmo com aba oculta", /getMyOrder\(/.test(fabSrc) && /applyServerOrderToMyOrder/.test(fabSrc));
 ok("FAB some em 404", /purgeCustomerOrderTracking/.test(fabSrc));
 
+const appSrc = src("artifacts/burger-gn/src/App.tsx");
+ok("App sincroniza pedido do balcão na conta do cliente", /useCustomerOrderSync/.test(appSrc));
+
+const newOrderSrc = src("artifacts/burger-gn/src/pages/admin/NewOrder.tsx");
+ok("Novo Pedido marca cliente cadastrado para o app", /linkToCustomerApp/.test(newOrderSrc));
+
 const trackSrc = src("artifacts/burger-gn/src/pages/OrderTracking.tsx");
 ok("tracking redireciona ao finalizar", /orderState === 'inactive'/.test(trackSrc));
 ok("tracking Voltar ao cardápio", /Voltar ao cardápio/.test(trackSrc));

@@ -81,6 +81,13 @@ export interface OrderMeta {
   prepTimeMax?: number;
   /** Origin channel: customer app vs attendant panel. */
   source?: "online" | "attendant";
+  /**
+   * Attendant order for a customer already cadastrado — surfaces in the app
+   * ("Meu Pedido") for that WhatsApp. Walk-in / newly created CRM rows stay false.
+   */
+  syncToCustomerApp?: boolean;
+  /** ISO — last attendant item/total rewrite (customer live refresh). */
+  itemsUpdatedAt?: string;
 }
 
 export const WORKFLOW_LABELS: Record<WorkflowStage | "cancelled", string> = {
@@ -167,6 +174,8 @@ export function serializeOrderNotes(publicNotes: string, meta: OrderMeta): strin
   if (typeof meta.prepTimeMin === "number") cleanMeta.prepTimeMin = meta.prepTimeMin;
   if (typeof meta.prepTimeMax === "number") cleanMeta.prepTimeMax = meta.prepTimeMax;
   if (meta.source === "online" || meta.source === "attendant") cleanMeta.source = meta.source;
+  if (meta.syncToCustomerApp) cleanMeta.syncToCustomerApp = true;
+  if (meta.itemsUpdatedAt) cleanMeta.itemsUpdatedAt = meta.itemsUpdatedAt;
 
   const hasMeta = Object.keys(cleanMeta).length > 0;
   const body = (publicNotes || "").trim();
