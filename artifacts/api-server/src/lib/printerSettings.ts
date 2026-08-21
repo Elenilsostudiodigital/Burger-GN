@@ -18,32 +18,32 @@ export interface PrinterSettingsConfig {
   printers: PrinterDeviceConfig[];
   defaultPrinterId: string | null;
   autoPrintOnAccept: boolean;
-  printSecondCopy: boolean;
+  /** Number of copies (1–4). Replaces legacy printSecondCopy. */
+  copies: number;
+  /** @deprecated migrated to copies */
+  printSecondCopy?: boolean;
   highlightOrderNumber: boolean;
   printTrackingQr: boolean;
 }
 
-export const SYSTEM_PRINTER_ID = "system-browser";
-
 export const DEFAULT_PRINTER_SETTINGS: PrinterSettingsConfig = {
-  printers: [
-    {
-      id: SYSTEM_PRINTER_ID,
-      name: "Impressora do sistema (navegador)",
-      connection: "system",
-      status: "connected",
-      lastSeenAt: null,
-    },
-  ],
+  printers: [],
   defaultPrinterId: null,
   autoPrintOnAccept: false,
-  printSecondCopy: false,
+  copies: 1,
   highlightOrderNumber: true,
   printTrackingQr: true,
 };
 
 function asBool(v: unknown, fallback: boolean): boolean {
   return typeof v === "boolean" ? v : fallback;
+}
+
+function asCopies(v: unknown, legacySecond?: unknown): number {
+  const n = Number(v);
+  if (Number.isFinite(n) && n >= 1 && n <= 4) return Math.floor(n);
+  if (legacySecond === true) return 2;
+  return 1;
 }
 
 function asStatus(v: unknown): PrinterStatus {
@@ -71,6 +71,8 @@ export function normalizePrinterSettings(raw: unknown): PrinterSettingsConfig {
     const id = String(row.id || "").trim();
     const name = String(row.name || "").trim();
     if (!id || !name || seen.has(id)) continue;
+    // Drop legacy browser-only printer entry
+    if (id === "system-browser") continue;
     seen.add(id);
     printers.push({
       id,
@@ -84,14 +86,11 @@ export function normalizePrinterSettings(raw: unknown): PrinterSettingsConfig {
     });
   }
 
-  if (!printers.some((p) => p.id === SYSTEM_PRINTER_ID)) {
-    printers.unshift({ ...DEFAULT_PRINTER_SETTINGS.printers[0]! });
-  }
-
   let defaultPrinterId =
     typeof src.defaultPrinterId === "string" && src.defaultPrinterId
       ? src.defaultPrinterId
       : null;
+  if (defaultPrinterId === "system-browser") defaultPrinterId = null;
   if (defaultPrinterId && !printers.some((p) => p.id === defaultPrinterId)) {
     defaultPrinterId = null;
   }
@@ -100,7 +99,7 @@ export function normalizePrinterSettings(raw: unknown): PrinterSettingsConfig {
     printers,
     defaultPrinterId,
     autoPrintOnAccept: asBool(src.autoPrintOnAccept, false),
-    printSecondCopy: asBool(src.printSecondCopy, false),
+    copies: asCopies(src.copies, src.printSecondCopy),
     highlightOrderNumber: asBool(src.highlightOrderNumber, true),
     printTrackingQr: asBool(src.printTrackingQr, true),
   };

@@ -1395,7 +1395,7 @@ export type PrinterSettingsConfig = {
   }>;
   defaultPrinterId: string | null;
   autoPrintOnAccept: boolean;
-  printSecondCopy: boolean;
+  copies: number;
   highlightOrderNumber: boolean;
   printTrackingQr: boolean;
 };

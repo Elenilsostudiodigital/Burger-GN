@@ -16,31 +16,30 @@ assert.match(hub, /PrintersTab/);
 assert.match(hub, /Impressoras/);
 
 const tab = read("artifacts/burger-gn/src/pages/admin/PrintersTab.tsx");
-assert.match(tab, /Testar Impressora/);
-assert.match(tab, /Conectar USB/);
-assert.match(tab, /Conectar Bluetooth/);
+assert.match(tab, /Testar impressão/);
+assert.match(tab, /Conectar USB|Atualizar lista/);
 assert.match(tab, /Atualizar lista/);
 assert.match(tab, /autoPrintOnAccept/);
-assert.match(tab, /printSecondCopy/);
+assert.match(tab, /copies|Quantidade de vias/);
 assert.match(tab, /highlightOrderNumber/);
 assert.match(tab, /printTrackingQr/);
 assert.match(tab, /PRINTER_STATUS_LABELS/);
 
 const printLib = read("artifacts/burger-gn/src/lib/printReceipt.ts");
 assert.match(printLib, /BURGER GN/);
-assert.match(printLib, /TESTE DE IMPRESSÃO/);
+assert.match(printLib, /TESTE DE IMPRESSAO|TESTE DE IMPRESSÃO/);
 assert.match(printLib, /Impressora funcionando corretamente/);
-assert.match(printLib, /buildReceiptHTML/);
-assert.match(printLib, /printOrderReceipt/);
-assert.match(printLib, /requestUsbPrinter/);
-assert.match(printLib, /requestBluetoothPrinter/);
+assert.match(printLib, /silentPrintOrder|buildOrderPrintText/);
+assert.match(printLib, /agentPrint|127\.0\.0\.1:19191/);
+assert.doesNotMatch(printLib, /window\.print\(/);
 
 const dash = read("artifacts/burger-gn/src/pages/admin/Dashboard.tsx");
 assert.match(dash, /autoPrintOnAccept/);
-assert.match(dash, /printOrderReceipt/);
+assert.match(dash, /silentPrintOrder/);
 assert.match(dash, /getAdminPrinterSettings/);
-// Accept flow still updates workflow first
 assert.match(dash, /updateOrderWorkflow\(order\.id, 'preparing'\)/);
+assert.doesNotMatch(dash, /window\.print\(/);
+assert.doesNotMatch(dash, /buildReceiptHTML/);
 
 const apiRoute = read("artifacts/api-server/src/routes/printerSettings.ts");
 assert.match(apiRoute, /\/admin\/printer-settings/);

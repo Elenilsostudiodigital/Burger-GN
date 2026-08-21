@@ -27,7 +27,7 @@ import { PrepCountdown, prepCardBorderClass } from '../../components/PrepCountdo
 import { AreaAnalysisRequestCard } from '../../components/AreaAnalysisRequestCard';
 import { PedidosPresenceBar } from '../../components/PedidosPresenceBar';
 import { EditOrderItemsModal } from '../../components/EditOrderItemsModal';
-import { buildReceiptHTML, printOrderReceipt } from '../../lib/printReceipt';
+import { silentPrintOrder } from '../../lib/printReceipt';
 import {
   computePrepRemainingSeconds,
   formatPrepDuration,
@@ -439,12 +439,23 @@ function OrderCard({ order, highlight, dragging, onAccept, onRefuse, onAdvance, 
               <MessageCircle size={15} />
             </button>
           )}
-          <button onClick={() => {
-            const win = window.open('', '_blank', 'width=350,height=600');
-            if (!win) return;
-            win.document.write(buildReceiptHTML(order));
-            win.document.close();
-          }} className="p-2 text-zinc-500 hover:text-white bg-zinc-800 rounded-lg" title="Imprimir">
+          <button
+            type="button"
+            onClick={async () => {
+              try {
+                const { config } = await getAdminPrinterSettings();
+                const result = await silentPrintOrder(order, {
+                  ...config,
+                  copies: Math.max(1, Math.min(4, Number(config.copies) || 1)),
+                } as Parameters<typeof silentPrintOrder>[1]);
+                if (!result.ok) window.alert(result.message);
+              } catch {
+                window.alert('Falha ao imprimir. Verifique o agente local.');
+              }
+            }}
+            className="p-2 text-zinc-500 hover:text-white bg-zinc-800 rounded-lg"
+            title="Imprimir"
+          >
             <Printer size={15} />
           </button>
           <button onClick={() => setShowHistory(v => !v)}
@@ -493,12 +504,23 @@ function OrderCard({ order, highlight, dragging, onAccept, onRefuse, onAdvance, 
               <MessageCircle size={15} />
             </button>
           )}
-          <button onClick={() => {
-            const win = window.open('', '_blank', 'width=350,height=600');
-            if (!win) return;
-            win.document.write(buildReceiptHTML(order));
-            win.document.close();
-          }} className="p-2 text-zinc-500 hover:text-white bg-zinc-800 rounded-lg" title="Imprimir">
+          <button
+            type="button"
+            onClick={async () => {
+              try {
+                const { config } = await getAdminPrinterSettings();
+                const result = await silentPrintOrder(order, {
+                  ...config,
+                  copies: Math.max(1, Math.min(4, Number(config.copies) || 1)),
+                } as Parameters<typeof silentPrintOrder>[1]);
+                if (!result.ok) window.alert(result.message);
+              } catch {
+                window.alert('Falha ao imprimir. Verifique o agente local.');
+              }
+            }}
+            className="p-2 text-zinc-500 hover:text-white bg-zinc-800 rounded-lg"
+            title="Imprimir"
+          >
             <Printer size={15} />
           </button>
           <button onClick={() => setShowHistory(v => !v)}
@@ -736,14 +758,22 @@ export default function AdminDashboard() {
       applyUpdated(order.id, updated);
       notifyCustomer(order, 'preparing', null, updated.customerNotifyMessage);
       void fetchPrepStats();
-      // Auto-print only when enabled in Configurações → Impressoras (default off).
+      // Silent auto-print via local agent (no browser dialog). Default off until configured.
       try {
         const { config } = await getAdminPrinterSettings();
-        if (config.autoPrintOnAccept && config.defaultPrinterId) {
-          const printed = printOrderReceipt(updated.items?.length ? updated : order, config);
-          if (!printed) {
-            setNotification('Pedido aceito — permita pop-ups para impressão automática.');
-            setTimeout(() => setNotification(null), 4000);
+        if (config.autoPrintOnAccept) {
+          if (!config.defaultPrinterId) {
+            setNotification('Pedido aceito — configure uma impressora padrão em Configurações → Impressoras.');
+            setTimeout(() => setNotification(null), 5000);
+          } else {
+            const result = await silentPrintOrder(
+              updated.items?.length ? { ...order, ...updated } : order,
+              config as Parameters<typeof silentPrintOrder>[1],
+            );
+            if (!result.ok) {
+              setNotification(result.message);
+              setTimeout(() => setNotification(null), 5000);
+            }
           }
         }
       } catch {
