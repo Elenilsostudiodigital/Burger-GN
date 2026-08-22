@@ -72,9 +72,19 @@ export function AreaAnalysisRequestCard({
     }
   };
 
+  const addressLine = [
+    request.streetName,
+    request.addressNumber ? `Nº ${request.addressNumber}` : "",
+    request.neighborhood,
+    request.city || "Lauro de Freitas",
+    request.cep ? `CEP ${request.cep}` : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
   const createdAt = request.createdAt
-    ? new Date(request.createdAt).toLocaleString('pt-BR')
-    : '—';
+    ? new Date(request.createdAt).toLocaleString("pt-BR")
+    : "—";
 
   return (
     <article className="rounded-2xl border border-red-500/40 bg-red-950/20 p-4 space-y-3">
@@ -85,12 +95,12 @@ export function AreaAnalysisRequestCard({
           </p>
           <p className="text-white font-bold text-sm mt-1 truncate">{request.streetName}</p>
           <p className="text-zinc-400 text-xs mt-0.5">
-            {request.addressNumber ? `Nº ${request.addressNumber} · ` : ''}
-            {request.neighborhood || '—'} · {request.city || 'Lauro de Freitas'}
-            {request.cep ? ` · CEP ${request.cep}` : ''}
+            {request.addressNumber ? `Nº ${request.addressNumber} · ` : ""}
+            {request.neighborhood || "—"} · {request.city || "Lauro de Freitas"}
+            {request.cep ? ` · CEP ${request.cep}` : ""}
           </p>
           <p className="text-zinc-300 text-xs mt-1">
-            Cliente: {request.customerName || '—'} · {request.phone || '—'}
+            Cliente: {request.customerName || "—"} · {request.phone || "—"}
           </p>
           <p className="text-zinc-500 text-[10px] mt-0.5">{createdAt}</p>
         </div>
@@ -106,22 +116,9 @@ export function AreaAnalysisRequestCard({
         <StreetMapPreview
           lat={lat}
           lng={lng}
+          address={addressLine}
           message="Sem coordenadas para exibir o mapa."
         />
-        <a
-          href={lat != null && lng != null
-            ? `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}#map=17/${lat}/${lng}`
-            : undefined}
-          target="_blank"
-          rel="noreferrer"
-          className={`mt-2 inline-flex h-10 w-full items-center justify-center rounded-xl border border-zinc-700 text-xs font-black uppercase ${
-            lat != null && lng != null
-              ? 'text-amber-400 hover:bg-zinc-900'
-              : 'pointer-events-none opacity-40 text-zinc-500'
-          }`}
-        >
-          Ver no mapa
-        </a>
       </div>
 
       <div className="grid grid-cols-2 gap-2">
