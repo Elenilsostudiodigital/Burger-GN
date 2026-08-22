@@ -33,6 +33,12 @@ import {
   formatPrepDuration,
   getPrepVisualState,
 } from '../../lib/prepTimer';
+import {
+  canFinalizeFromReady,
+  getNextBoardColumn,
+  getPrevBoardColumn,
+  isOutStageAllowed,
+} from '../../lib/orderWorkflow';
 
 /** Board columns — pending orders never auto-advance. */
 type ColumnKey = 'new' | 'preparing' | 'ready' | 'out' | 'done';
@@ -161,9 +167,11 @@ function OrderCard({ order, highlight, dragging, onAccept, onRefuse, onAdvance, 
   const [showReceipt, setShowReceipt] = useState(false);
   const [tick, setTick] = useState(() => Date.now());
   const column = getBoardColumn(order);
-  const colIndex = column === 'cancelled' ? -1 : COLUMN_ORDER.indexOf(column);
-  const prevStatus = colIndex > 0 ? COLUMN_ORDER[colIndex - 1] : null;
-  const nextStatus = colIndex >= 0 && colIndex < COLUMN_ORDER.length - 1 ? COLUMN_ORDER[colIndex + 1] : null;
+  const prevStatus = getPrevBoardColumn(order.orderType, column);
+  const nextStatus = canFinalizeFromReady(order.orderType, column)
+    ? null
+    : getNextBoardColumn(order.orderType, column);
+  const showFinalizeFromReady = canFinalizeFromReady(order.orderType, column);
   const lastChange = order.history?.length ? order.history[order.history.length - 1] : null;
   const awaitingPay = needsPaymentConference(order);
   const isPending = column === 'new' && !awaitingPay && canAcceptOrder(order);
@@ -385,7 +393,7 @@ function OrderCard({ order, highlight, dragging, onAccept, onRefuse, onAdvance, 
         </div>
       )}
 
-      {!isPending && column !== 'cancelled' && isDelivered && (
+      {!isPending && column !== 'cancelled' && (isDelivered || showFinalizeFromReady) && (
         <div className="p-3 pt-2">
           <button
             type="button"
@@ -925,6 +933,8 @@ export default function AdminDashboard() {
     }
     // Cannot drag back into Novos Pedidos
     if (to === 'new') return;
+    // Pickup / local never enter "Saiu para Entrega"
+    if (to === 'out' && !isOutStageAllowed(order.orderType)) return;
     handleAdvance(order, to);
   };
 

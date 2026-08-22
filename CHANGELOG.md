@@ -5,6 +5,14 @@ Toda nova implementação aprovada pelo proprietário gera uma nova versão.
 
 ---
 
+## Burger GN v1.5.8
+
+- Fluxo de pedidos por tipo
+  - Entrega: Pronto → Saiu para Entrega → Entregue → Finalizar
+  - Retirada / Local: Pronto → Finalizar Pedido (sem “Saiu para Entrega”)
+
+---
+
 ## Burger GN v1.5.7
 
 - Fix cardápio público 403

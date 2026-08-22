@@ -1231,10 +1231,30 @@ router.patch("/orders/:id/status", requireCompanyAuth, async (req, res) => {
       return;
     }
 
-    // Finalize only from Entregue (done), or idempotent re-finalize.
-    if (requestedWorkflow === "finalized" && currentWorkflow !== "done" && currentWorkflow !== "finalized") {
+    // Finalize from Entregue (done), or from Pronto for pickup/local (no delivery stage).
+    // Idempotent re-finalize always allowed.
+    if (requestedWorkflow === "finalized" && currentWorkflow !== "finalized") {
+      const isPickupOrLocal =
+        existing.orderType === "pickup" || existing.orderType === "local";
+      const allowedFromDone = currentWorkflow === "done";
+      const allowedFromReadySkipDelivery = isPickupOrLocal && currentWorkflow === "ready";
+      if (!allowedFromDone && !allowedFromReadySkipDelivery) {
+        res.status(400).json({
+          error: isPickupOrLocal
+            ? "Só é possível finalizar pedidos Pronto ou Entregue."
+            : "Só é possível finalizar pedidos com status Entregue.",
+        });
+        return;
+      }
+    }
+
+    // "Saiu para Entrega" is only valid for delivery orders.
+    if (
+      requestedWorkflow === "out"
+      && existing.orderType !== "delivery"
+    ) {
       res.status(400).json({
-        error: "Só é possível finalizar pedidos com status Entregue.",
+        error: "A etapa Saiu para Entrega só existe para pedidos de entrega.",
       });
       return;
     }
