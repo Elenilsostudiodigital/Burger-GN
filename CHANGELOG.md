@@ -5,6 +5,15 @@ Toda nova implementação aprovada pelo proprietário gera uma nova versão.
 
 ---
 
+## Burger GN v1.5.10
+
+- Mapa da solicitação de região
+  - Substitui staticmap.openstreetmap.de (fora do ar) por Leaflet embutido
+  - Marcador na coordenada enviada; alternância Mapa / Satélite
+  - Exibe endereço, latitude e longitude
+
+---
+
 ## Burger GN v1.5.9
 
 - Fix 403 após ~20–30 min de uso

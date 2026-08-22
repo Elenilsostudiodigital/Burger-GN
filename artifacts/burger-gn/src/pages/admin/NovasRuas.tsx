@@ -206,7 +206,6 @@ export default function AdminNovasRuas() {
                   <h2 className="text-amber-500 text-xs font-bold uppercase tracking-wider flex items-center gap-1.5">
                     <MapPin size={14} /> Localização
                   </h2>
-                  {/* Static map only — never mount/unmount an OSM iframe here */}
                   <StreetMapPreview
                     lat={
                       detail.request.lat != null && Number.isFinite(Number(detail.request.lat))
@@ -218,6 +217,13 @@ export default function AdminNovasRuas() {
                         ? Number(detail.request.lng)
                         : null
                     }
+                    address={[
+                      detail.request.streetName,
+                      detail.request.addressNumber ? `Nº ${detail.request.addressNumber}` : "",
+                      detail.request.neighborhood,
+                      detail.request.city,
+                      detail.request.cep ? `CEP ${detail.request.cep}` : "",
+                    ].filter(Boolean).join(" · ")}
                     message="Sem coordenadas para exibir o mapa."
                   />
                   <div className="space-y-1 text-sm">

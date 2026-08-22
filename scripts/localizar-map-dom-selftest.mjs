@@ -1,5 +1,5 @@
 /**
- * Contract: StreetMapPreview must keep a fixed React child tree (no iframe).
+ * Contract: StreetMapPreview uses Leaflet in a stable host (no iframe / no dead static OSM).
  * Usage: node scripts/localizar-map-dom-selftest.mjs
  */
 import fs from "node:fs";
@@ -12,7 +12,6 @@ const preview = fs.readFileSync(previewPath, "utf8");
 const page = fs.readFileSync(pagePath, "utf8");
 const app = fs.readFileSync(appPath, "utf8");
 
-// Strip block/line comments before DOM-API checks so docstrings don't false-fail.
 const codeOnly = preview
   .replace(/\/\*[\s\S]*?\*\//g, "")
   .replace(/^\s*\/\/.*$/gm, "");
@@ -30,12 +29,27 @@ const checks = [
     ok: page.includes("from '../../components/StreetMapPreview'"),
   },
   {
-    name: "no iframe in StreetMapPreview (static img map only)",
-    ok: !codeOnly.includes("<iframe") && codeOnly.includes("<img"),
+    name: "no iframe in StreetMapPreview",
+    ok: !codeOnly.includes("<iframe"),
   },
   {
     name: "no iframe in RuasEntrega page",
     ok: !pageCode.includes("<iframe"),
+  },
+  {
+    name: "dead staticmap.openstreetmap.de removed",
+    ok: !preview.includes("staticmap.openstreetmap.de"),
+  },
+  {
+    name: "Leaflet map host via L.map + marker",
+    ok:
+      !!codeOnly.match(/from\s+['"]leaflet['"]/) &&
+      codeOnly.includes("L.map") &&
+      codeOnly.includes("L.marker"),
+  },
+  {
+    name: "map / satellite toggle present",
+    ok: codeOnly.includes('"map"') && codeOnly.includes('"satellite"'),
   },
   {
     name: "placeholder/loading use CSS visibility, not conditional null siblings",
@@ -45,25 +59,11 @@ const checks = [
       !codeOnly.match(/loading\s*\?\s*[\s\S]{0,80}:\s*null/),
   },
   {
-    name: "no Leaflet / react-leaflet imports or MapContainer/L.map",
-    ok:
-      !codeOnly.match(/from\s+['"]react-leaflet['"]/) &&
-      !codeOnly.match(/from\s+['"]leaflet['"]/) &&
-      !codeOnly.includes("MapContainer") &&
-      !codeOnly.includes("L.map") &&
-      !page.match(/from\s+['"]react-leaflet['"]/),
-  },
-  {
-    name: "no direct DOM APIs in code (appendChild/removeChild/innerHTML/insertBefore)",
+    name: "no direct DOM APIs appendChild/removeChild/insertBefore in component code",
     ok:
       !codeOnly.includes("appendChild") &&
       !codeOnly.includes("removeChild") &&
-      !codeOnly.includes("innerHTML") &&
       !codeOnly.includes("insertBefore"),
-  },
-  {
-    name: "no useEffect/useMemo/useRef remounting map instance",
-    ok: !codeOnly.includes("useEffect") && !codeOnly.includes("useMemo") && !codeOnly.includes("useRef"),
   },
   {
     name: "page does not clear coords at start of locate",
