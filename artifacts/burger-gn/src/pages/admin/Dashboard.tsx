@@ -39,6 +39,7 @@ import {
   getPrevBoardColumn,
   isOutStageAllowed,
 } from '../../lib/orderWorkflow';
+import { acquireAdminOrderStream, releaseAdminOrderStream } from '../../lib/adminOrderStream';
 
 /** Board columns — pending orders never auto-advance. */
 type ColumnKey = 'new' | 'preparing' | 'ready' | 'out' | 'done';
@@ -680,10 +681,10 @@ export default function AdminDashboard() {
 
   useEffect(() => {
     fetchOrders();
-    const es = new EventSource('/api/orders/stream', { withCredentials: true });
+    const es = acquireAdminOrderStream();
 
-    es.addEventListener('new_order', (e) => {
-      const order = JSON.parse(e.data) as Order;
+    const onNewOrder = (e: Event) => {
+      const order = JSON.parse((e as MessageEvent).data) as Order;
       if (soundEnabledRef.current) playBeep();
       setOrders(prev => [order, ...prev.filter(o => o.id !== order.id)]);
       setNewOrderIds(prev => new Set([...prev, order.id]));
@@ -695,9 +696,9 @@ export default function AdminDashboard() {
       setNotification(label);
       setTimeout(() => setNotification(null), 6000);
       setTimeout(() => setNewOrderIds(prev => { const s = new Set(prev); s.delete(order.id); return s; }), 30000);
-    });
+    };
 
-    es.addEventListener('order_status', (e) => {
+    const onOrderStatus = (e: Event) => {
       fetchOrders();
       try {
         const data = JSON.parse((e as MessageEvent).data) as {
@@ -712,18 +713,21 @@ export default function AdminDashboard() {
         else if (wf === 'done') setNotification('🔔 Pedido entregue');
         if (wf) setTimeout(() => setNotification(null), 5000);
       } catch { /* ignore */ }
-    });
-    es.addEventListener('order_receipt', () => {
+    };
+
+    const onOrderReceipt = () => {
       fetchOrders();
       setNotification('🔔 Novo comprovante enviado');
       setTimeout(() => setNotification(null), 5000);
-    });
-    es.addEventListener('order_payment', () => {
+    };
+
+    const onOrderPayment = () => {
       fetchOrders();
       setNotification('🔔 Status de pagamento atualizado');
       setTimeout(() => setNotification(null), 4000);
-    });
-    es.addEventListener('street_request', (e) => {
+    };
+
+    const onStreetRequest = (e: Event) => {
       try {
         const data = JSON.parse((e as MessageEvent).data) as DeliveryStreetRequest;
         if (soundEnabledRef.current) playBeep();
@@ -733,8 +737,9 @@ export default function AdminDashboard() {
       } catch {
         void fetchStreetRequests();
       }
-    });
-    es.addEventListener('street_request_resolved', (e) => {
+    };
+
+    const onStreetResolved = (e: Event) => {
       try {
         const data = JSON.parse((e as MessageEvent).data) as { id?: number };
         if (typeof data.id === 'number') {
@@ -745,9 +750,24 @@ export default function AdminDashboard() {
       } catch {
         void fetchStreetRequests();
       }
-    });
+    };
 
-    return () => es.close();
+    es.addEventListener('new_order', onNewOrder);
+    es.addEventListener('order_status', onOrderStatus);
+    es.addEventListener('order_receipt', onOrderReceipt);
+    es.addEventListener('order_payment', onOrderPayment);
+    es.addEventListener('street_request', onStreetRequest);
+    es.addEventListener('street_request_resolved', onStreetResolved);
+
+    return () => {
+      es.removeEventListener('new_order', onNewOrder);
+      es.removeEventListener('order_status', onOrderStatus);
+      es.removeEventListener('order_receipt', onOrderReceipt);
+      es.removeEventListener('order_payment', onOrderPayment);
+      es.removeEventListener('street_request', onStreetRequest);
+      es.removeEventListener('street_request_resolved', onStreetResolved);
+      releaseAdminOrderStream(es);
+    };
   }, [fetchOrders, fetchStreetRequests]);
 
   const applyUpdated = (id: number, updated: Order) => {
