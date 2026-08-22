@@ -114,16 +114,34 @@ async function getOrderWithItems(orderId: number) {
 // SSE stream for admin real-time notifications
 router.get("/orders/stream", requireCompanyAuth, (req, res) => {
   res.setHeader("Content-Type", "text/event-stream");
-  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Cache-Control", "no-cache, no-store");
   res.setHeader("Connection", "keep-alive");
   res.setHeader("X-Accel-Buffering", "no");
   res.flushHeaders();
   res.write("event: connected\ndata: {}\n\n");
   addSSEClient(res, req.companyId!);
+
   const heartbeat = setInterval(() => {
     try { res.write(": heartbeat\n\n"); } catch { clearInterval(heartbeat); }
   }, 25000);
-  req.on("close", () => { clearInterval(heartbeat); removeSSEClient(res); });
+
+  // Close cleanly before Vercel maxDuration kills the invocation.
+  // EventSource will reconnect once — avoids error/reconnect storms that trip WAF 403.
+  const gracefulMs = Math.max(15_000, Math.min(50_000, Number(process.env["SSE_GRACEFUL_MS"] || 45_000)));
+  const gracefulTimer = setTimeout(() => {
+    clearInterval(heartbeat);
+    removeSSEClient(res);
+    try {
+      res.write("event: reconnect\ndata: {}\n\n");
+      res.end();
+    } catch { /* already closed */ }
+  }, gracefulMs);
+
+  req.on("close", () => {
+    clearInterval(heartbeat);
+    clearTimeout(gracefulTimer);
+    removeSSEClient(res);
+  });
 });
 
 // Popular products (no schema change — aggregates existing order_items)

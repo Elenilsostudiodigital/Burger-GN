@@ -5,6 +5,7 @@ import {
   TrendingUp, Star, Upload, Navigation, Users, BarChart3, PackageCheck, Megaphone,
 } from 'lucide-react';
 import { getAdminStreetRequests } from '../lib/api';
+import { acquireAdminOrderStream, releaseAdminOrderStream } from '../lib/adminOrderStream';
 
 const ITEMS = [
   { href: '/admin', icon: BarChart3, label: 'Início' },
@@ -38,13 +39,15 @@ export function AdminBottomNav({ active }: { active: string }) {
     };
     load();
     const interval = setInterval(load, 15000);
-    const es = new EventSource('/api/orders/stream', { withCredentials: true });
+    const es = acquireAdminOrderStream();
     es.addEventListener('street_request', load);
     es.addEventListener('street_request_resolved', load);
     return () => {
       cancelled = true;
       clearInterval(interval);
-      es.close();
+      es.removeEventListener('street_request', load);
+      es.removeEventListener('street_request_resolved', load);
+      releaseAdminOrderStream(es);
     };
   }, []);
 

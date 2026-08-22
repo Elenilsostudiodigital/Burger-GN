@@ -5,6 +5,16 @@ Toda nova implementação aprovada pelo proprietário gera uma nova versão.
 
 ---
 
+## Burger GN v1.5.9
+
+- Fix 403 após ~20–30 min de uso
+  - Uma única conexão SSE compartilhada no admin (evita tempestade de reconnect que dispara WAF/IP block da Vercel)
+  - SSE encerra de forma limpa antes do maxDuration
+  - Service worker não cacheia HTML de navegação
+  - HTML público com CDN-Cache-Control: no-store
+
+---
+
 ## Burger GN v1.5.8
 
 - Fluxo de pedidos por tipo

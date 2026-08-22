@@ -1,11 +1,10 @@
 /* Burger GN PWA — network-safe service worker.
- * Never intercepts /api (incl. SSE). Does not alter app business logic.
- * Never caches error responses (401/403/5xx) — avoids sticky "403 Proibido" pages.
+ * Never intercepts /api (incl. SSE).
+ * Navigations are network-only (never cache HTML) to avoid sticky 403 pages
+ * if the edge briefly returns Forbidden (WAF / mitigation).
  */
-const CACHE_VERSION = "burger-gn-pwa-v3-public";
+const CACHE_VERSION = "burger-gn-pwa-v4-nocache-html";
 const PRECACHE_URLS = [
-  "/",
-  "/index.html",
   "/manifest.webmanifest",
   "/favicon.svg",
   "/icons/icon-192.png",
@@ -57,32 +56,17 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // Same-origin only
   if (url.origin !== self.location.origin) return;
-
-  // Never touch API / EventSource / uploads
   if (isApiRequest(url)) return;
   if (request.headers.get("accept")?.includes("text/event-stream")) return;
 
+  // HTML navigations: always network. Never cache (prevents sticky 403 HTML).
   if (isNavigationRequest(request)) {
-    event.respondWith(
-      fetch(request)
-        .then((response) => {
-          // Never persist auth/forbidden/error HTML into the app shell cache.
-          if (isCacheableOk(response)) {
-            const copy = response.clone();
-            caches.open(CACHE_VERSION).then((cache) => cache.put("/index.html", copy)).catch(() => {});
-          }
-          return response;
-        })
-        .catch(() =>
-          caches.match("/index.html").then((r) => r || caches.match("/")),
-        ),
-    );
+    event.respondWith(fetch(request));
     return;
   }
 
-  // Static assets: cache-first, then network (only cache successful responses)
+  // Static assets: cache-first, only successful responses
   event.respondWith(
     caches.match(request).then((cached) => {
       if (cached) return cached;

@@ -10,6 +10,7 @@ import {
 } from '../../lib/api';
 import { AdminBottomNav } from '../../components/AdminBottomNav';
 import { StreetMapPreview } from '../../components/StreetMapPreview';
+import { acquireAdminOrderStream, releaseAdminOrderStream } from '../../lib/adminOrderStream';
 import { ArrowLeft, Loader2, MapPin, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -46,10 +47,15 @@ export default function AdminNovasRuas() {
 
   useEffect(() => {
     void refresh();
-    const es = new EventSource('/api/orders/stream', { withCredentials: true });
-    es.addEventListener('street_request', () => { void refresh(); });
-    es.addEventListener('street_request_resolved', () => { void refresh(); });
-    return () => es.close();
+    const es = acquireAdminOrderStream();
+    const onStreet = () => { void refresh(); };
+    es.addEventListener('street_request', onStreet);
+    es.addEventListener('street_request_resolved', onStreet);
+    return () => {
+      es.removeEventListener('street_request', onStreet);
+      es.removeEventListener('street_request_resolved', onStreet);
+      releaseAdminOrderStream(es);
+    };
   }, []);
 
   const openAnalyze = async (id: number) => {

@@ -14,6 +14,7 @@ import {
   effectiveVolume,
 } from '../lib/adminNotifications';
 import { computePrepRemainingSeconds } from '../lib/prepTimer';
+import { acquireAdminOrderStream, releaseAdminOrderStream } from '../lib/adminOrderStream';
 
 /**
  * Runs on every protected admin page.
@@ -128,9 +129,9 @@ export function AdminNotificationEngine() {
   };
 
   useEffect(() => {
-    const es = new EventSource('/api/orders/stream', { withCredentials: true });
+    const es = acquireAdminOrderStream();
 
-    es.addEventListener('new_order', (e) => {
+    const onNewOrder = (e: Event) => {
       try {
         const order = JSON.parse((e as MessageEvent).data) as Order;
         void fire(
@@ -141,9 +142,9 @@ export function AdminNotificationEngine() {
         );
         startRepeat(order.id, order.orderNumber, 'newOrder');
       } catch { /* ignore */ }
-    });
+    };
 
-    es.addEventListener('order_status', (e) => {
+    const onOrderStatus = (e: Event) => {
       try {
         const data = JSON.parse((e as MessageEvent).data) as {
           id?: number;
@@ -178,10 +179,15 @@ export function AdminNotificationEngine() {
           data.id ? `order-${key}-${data.id}` : undefined,
         );
       } catch { /* ignore */ }
-    });
+    };
+
+    es.addEventListener('new_order', onNewOrder);
+    es.addEventListener('order_status', onOrderStatus);
 
     return () => {
-      es.close();
+      es.removeEventListener('new_order', onNewOrder);
+      es.removeEventListener('order_status', onOrderStatus);
+      releaseAdminOrderStream(es);
       clearAllRepeats();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
