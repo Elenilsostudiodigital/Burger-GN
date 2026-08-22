@@ -108,30 +108,36 @@ async function json(method, url, body, cookie) {
 }
 
 async function createAndPrep(cookie, orderType, product) {
-  const create = await json(
-    "POST",
-    `${BASE}/api/orders`,
-    {
-      customerName: `Fluxo ${orderType}`,
-      phone: PHONE,
-      orderType,
-      paymentMethod: "cash",
-      source: "attendant",
-      items: [{
-        productId: product.id,
-        productName: product.name,
-        productPrice: parseFloat(product.price) || 1,
-        quantity: 1,
-        addons: [],
-        notes: "",
-      }],
-    },
-    cookie,
+  const payload = {
+    customerName: `Fluxo ${orderType}`,
+    phone: PHONE,
+    orderType,
+    paymentMethod: "cash",
+    source: "attendant",
+    items: [{
+      productId: product.id,
+      productName: product.name,
+      productPrice: parseFloat(product.price) || 1,
+      quantity: 1,
+      addons: [],
+      notes: "",
+    }],
+  };
+  if (orderType === "delivery") {
+    payload.address = "Rua Teste Fluxo";
+    payload.addressNumber = "100";
+    payload.neighborhood = "Itinga";
+    payload.customerLat = -12.88052027;
+    payload.customerLng = -38.35757007;
+  }
+  const create = await json("POST", `${BASE}/api/orders`, payload, cookie);
+  assert.ok(
+    create.status === 200 || create.status === 201,
+    `create ${orderType} ${create.status} ${JSON.stringify(create.data).slice(0, 200)}`,
   );
-  assert.ok(create.status === 200 || create.status === 201, `create ${orderType} ${create.status}`);
   const orderId = create.data.orderId;
   const prep = await json("PATCH", `${BASE}/api/orders/${orderId}/status`, { workflow: "preparing" }, cookie);
-  assert.equal(prep.status, 200, `prep ${orderType}`);
+  assert.equal(prep.status, 200, `prep ${orderType} ${JSON.stringify(prep.data).slice(0, 120)}`);
   const ready = await json("PATCH", `${BASE}/api/orders/${orderId}/status`, { workflow: "ready" }, cookie);
   assert.equal(ready.status, 200, `ready ${orderType}`);
   return orderId;
