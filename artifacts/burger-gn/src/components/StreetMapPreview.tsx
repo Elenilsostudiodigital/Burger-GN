@@ -20,11 +20,23 @@ type StreetMapPreviewProps = {
 
 type BaseLayer = "map" | "satellite";
 
+const ADDRESS_ZOOM = 16;
 const OSM_URL = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";
 const OSM_ATTR = '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>';
 const SAT_URL =
   "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
 const SAT_ATTR = "Tiles &copy; Esri";
+
+/** Leaflet must invalidateSize first, then setView — otherwise tiles stay clipped. */
+function fitCustomerView(map: L.Map, lat: number | null, lng: number | null) {
+  try {
+    map.invalidateSize({ animate: false });
+  } catch {
+    /* ignore */
+  }
+  if (lat == null || lng == null || !Number.isFinite(lat) || !Number.isFinite(lng)) return;
+  map.setView([lat, lng], ADDRESS_ZOOM, { animate: false });
+}
 
 function pinIcon(): L.DivIcon {
   return L.divIcon({
@@ -52,10 +64,13 @@ export function StreetMapPreview({
   const markerRef = useRef<L.Marker | null>(null);
   const osmLayerRef = useRef<L.TileLayer | null>(null);
   const satLayerRef = useRef<L.TileLayer | null>(null);
+  const coordsRef = useRef<{ lat: number; lng: number } | null>(null);
   const [base, setBase] = useState<BaseLayer>("map");
 
   const hasCoords =
     lat != null && lng != null && Number.isFinite(lat) && Number.isFinite(lng);
+  coordsRef.current =
+    hasCoords && lat != null && lng != null ? { lat, lng } : null;
   const coordText =
     hasCoords && lat != null && lng != null
       ? `${lat.toFixed(6)}, ${lng.toFixed(6)}`
@@ -65,10 +80,15 @@ export function StreetMapPreview({
   useEffect(() => {
     if (!hostRef.current || mapRef.current) return;
 
-    const map = L.map(hostRef.current, {
+    const host = hostRef.current;
+    const start = coordsRef.current;
+    const map = L.map(host, {
       zoomControl: true,
       attributionControl: true,
-    }).setView([-12.89444, -38.32722], 13);
+    }).setView(
+      start ? [start.lat, start.lng] : [-12.89444, -38.32722],
+      start ? ADDRESS_ZOOM : 13,
+    );
 
     const osm = L.tileLayer(OSM_URL, { maxZoom: 19, attribution: OSM_ATTR });
     const sat = L.tileLayer(SAT_URL, { maxZoom: 19, attribution: SAT_ATTR });
@@ -77,16 +97,29 @@ export function StreetMapPreview({
     satLayerRef.current = sat;
     mapRef.current = map;
 
-    const onResize = () => {
-      try {
-        map.invalidateSize();
-      } catch { /* ignore */ }
+    const syncSize = () => {
+      const c = coordsRef.current;
+      fitCustomerView(map, c?.lat ?? null, c?.lng ?? null);
     };
+
+    const onResize = () => syncSize();
     window.addEventListener("resize", onResize);
-    requestAnimationFrame(onResize);
+    const ro = new ResizeObserver(onResize);
+    ro.observe(host);
+
+    // Panel/card often finishes CSS layout after the first paint (grid / hidden→visible).
+    const raf = requestAnimationFrame(syncSize);
+    const t1 = window.setTimeout(syncSize, 80);
+    const t2 = window.setTimeout(syncSize, 250);
+    const t3 = window.setTimeout(syncSize, 500);
 
     return () => {
       window.removeEventListener("resize", onResize);
+      ro.disconnect();
+      cancelAnimationFrame(raf);
+      window.clearTimeout(t1);
+      window.clearTimeout(t2);
+      window.clearTimeout(t3);
       try {
         map.remove();
       } catch { /* ignore */ }
@@ -111,9 +144,8 @@ export function StreetMapPreview({
       if (!map.hasLayer(sat)) sat.addTo(map);
     }
     requestAnimationFrame(() => {
-      try {
-        map.invalidateSize();
-      } catch { /* ignore */ }
+      const c = coordsRef.current;
+      fitCustomerView(map, c?.lat ?? null, c?.lng ?? null);
     });
   }, [base]);
 
@@ -136,16 +168,25 @@ export function StreetMapPreview({
     } else {
       markerRef.current.setLatLng(pos);
     }
-    map.setView(pos, Math.max(map.getZoom(), 16));
-    requestAnimationFrame(() => {
-      try {
-        map.invalidateSize();
-      } catch { /* ignore */ }
-    });
+    fitCustomerView(map, lat, lng);
+    requestAnimationFrame(() => fitCustomerView(map, lat, lng));
+    const t = window.setTimeout(() => fitCustomerView(map, lat, lng), 200);
+    return () => window.clearTimeout(t);
   }, [hasCoords, lat, lng]);
 
   return (
     <div className="rounded-xl border border-zinc-800 bg-zinc-950 overflow-hidden">
+      <style>{`
+        .bgn-street-map-host.leaflet-container {
+          width: 100%;
+          height: 100%;
+          background: #09090b;
+        }
+        .bgn-street-map-host img.leaflet-tile {
+          max-width: none !important;
+          max-height: none !important;
+        }
+      `}</style>
       <div className="flex items-center gap-2 border-b border-zinc-800 px-2 py-1.5 bg-zinc-900/80">
         <button
           type="button"
@@ -171,11 +212,11 @@ export function StreetMapPreview({
         </button>
       </div>
 
-      <div className="relative h-[240px] bg-zinc-950">
+      <div className="relative h-[360px] md:h-[420px] bg-zinc-950">
         {/* Host always mounted — Leaflet owns children inside */}
         <div
           ref={hostRef}
-          className={`absolute inset-0 z-0 ${showMapShell(hasCoords, loading)}`}
+          className={`bgn-street-map-host absolute inset-0 z-0 h-full w-full ${showMapShell(hasCoords, loading)}`}
           aria-label={hasCoords ? "Mapa da localização" : "Mapa"}
         />
 
