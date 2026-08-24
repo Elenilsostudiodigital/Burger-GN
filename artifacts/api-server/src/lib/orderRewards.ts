@@ -22,6 +22,20 @@ import {
   resolveBenefitExpiresAt,
   roundMoney,
 } from "./clubBenefits";
+
+/** Minimum order total (R$) required to earn 1 fidelity stamp. 0 = no minimum. */
+export function parseStampMinOrder(raw: unknown): number {
+  const n = parseFloat(String(raw ?? "0").replace(",", "."));
+  if (!Number.isFinite(n) || n < 0) return 0;
+  return roundMoney(n);
+}
+
+/** True when the completed order total is eligible for 1 stamp. */
+export function orderMeetsStampMinimum(orderTotal: unknown, minOrder: unknown): boolean {
+  const total = parseFloat(String(orderTotal ?? "0").replace(",", "."));
+  const t = Number.isFinite(total) ? roundMoney(total) : 0;
+  return t >= parseStampMinOrder(minOrder);
+}
 import { syncClubeMemberOnOrder } from "./clubeClientSync";
 import type { OrderMeta } from "./orderMeta";
 
@@ -147,6 +161,10 @@ export async function applyOrderCompletionRewards(
       nextMeta.stampSkipped = true;
       nextMeta.stampSkipMessage = nextMeta.stampSkipMessage || STAMP_SKIPPED_MESSAGE;
       result.stampSkipped = true;
+    } else if (!orderMeetsStampMinimum(order.total, settings.stampMinOrder)) {
+      // Below configured minimum — do not award or lock the calendar day.
+      nextMeta.stampsAwarded = true;
+      result.stampsAwarded = false;
     } else if (!canAwardFidelityStamp(workingMeta, nowMs)) {
       // Already earned a purchase stamp today — cashback still applies below.
       workingMeta = appendClientLedger(workingMeta, {

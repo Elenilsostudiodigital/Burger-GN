@@ -93,9 +93,12 @@ function cashbackAdminPayload(settings: Awaited<ReturnType<typeof ensureSettings
 }
 
 function fidelityAdminPayload(settings: Awaited<ReturnType<typeof ensureSettings>>) {
+  const minRaw = (settings as { stampMinOrder?: unknown }).stampMinOrder;
+  const minN = parseFloat(String(minRaw ?? "0").replace(",", "."));
   return {
     fidelityEnabled: settings.fidelityEnabled ?? true,
     stampsRequired: settings.stampsRequired ?? 10,
+    stampMinOrder: Number.isFinite(minN) && minN >= 0 ? minN.toFixed(2) : "0.00",
     stampRewardTitle: settings.stampRewardTitle || "1 hambúrguer grátis",
     fidelityExpiryMode: parseExpiryMode(settings.fidelityExpiryMode),
     fidelityExpiryDays: settings.fidelityExpiryDays ?? null,
@@ -676,6 +679,7 @@ router.put("/admin/clube/fidelity", requireCompanyAuth, async (req, res) => {
     const body = req.body as Partial<{
       fidelityEnabled: boolean;
       stampsRequired: number;
+      stampMinOrder: string | number;
       stampRewardTitle: string;
       fidelityExpiryMode: string;
       fidelityExpiryDays: number | null;
@@ -687,6 +691,10 @@ router.put("/admin/clube/fidelity", requireCompanyAuth, async (req, res) => {
     if (body.stampsRequired !== undefined) {
       const n = Math.round(Number(body.stampsRequired));
       updateData["stampsRequired"] = Number.isFinite(n) ? Math.max(1, Math.min(100, n)) : 10;
+    }
+    if (body.stampMinOrder !== undefined) {
+      const n = parseFloat(String(body.stampMinOrder).replace(",", "."));
+      updateData["stampMinOrder"] = Number.isFinite(n) && n >= 0 ? n.toFixed(2) : "0.00";
     }
     if (body.stampRewardTitle !== undefined) {
       updateData["stampRewardTitle"] =

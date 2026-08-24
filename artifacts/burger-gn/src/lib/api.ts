@@ -1678,6 +1678,7 @@ export interface ClubeSettings {
 export interface ClubeFidelitySettings {
   fidelityEnabled: boolean;
   stampsRequired: number;
+  stampMinOrder?: string;
   stampRewardTitle: string;
   fidelityExpiryMode?: "none" | "days" | "date";
   fidelityExpiryDays?: number | null;

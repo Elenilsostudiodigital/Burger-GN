@@ -447,6 +447,22 @@ export default function ClubeBurger() {
                         />
                       </div>
                       <div className="space-y-1.5">
+                        <Label className="text-zinc-400 text-xs">Valor mínimo do pedido para ganhar 1 selo (R$)</Label>
+                        <Input
+                          inputMode="decimal"
+                          value={String(fidelity.stampMinOrder ?? '0,00').replace('.', ',')}
+                          onChange={e => setFidelity(f => f ? {
+                            ...f,
+                            stampMinOrder: e.target.value.replace(/[^\d.,]/g, ''),
+                          } : f)}
+                          placeholder="0,00"
+                          className="bg-zinc-950 border-zinc-800 text-white h-11 focus:border-amber-500"
+                        />
+                        <p className="text-zinc-500 text-xs">
+                          Pedidos abaixo deste valor não recebem selo de fidelidade.
+                        </p>
+                      </div>
+                      <div className="space-y-1.5">
                         <Label className="text-zinc-400 text-xs">Recompensa oferecida</Label>
                         <Input
                           value={fidelity.stampRewardTitle}
@@ -508,6 +524,9 @@ export default function ClubeBurger() {
                             const updated = await updateClubeFidelity({
                               fidelityEnabled: fidelity.fidelityEnabled,
                               stampsRequired: fidelity.stampsRequired,
+                              stampMinOrder: (
+                                parseFloat(String(fidelity.stampMinOrder || '0').replace(',', '.')) || 0
+                              ).toFixed(2),
                               stampRewardTitle: fidelity.stampRewardTitle,
                               fidelityExpiryMode: fidelity.fidelityExpiryMode || 'none',
                               fidelityExpiryDays: fidelity.fidelityExpiryDays ?? null,

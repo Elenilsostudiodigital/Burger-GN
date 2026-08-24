@@ -40,6 +40,18 @@ function roundMoney(n) {
   return Math.round(n * 100) / 100;
 }
 
+function parseStampMinOrder(raw) {
+  const n = parseFloat(String(raw ?? "0").replace(",", "."));
+  if (!Number.isFinite(n) || n < 0) return 0;
+  return roundMoney(n);
+}
+
+function orderMeetsStampMinimum(orderTotal, minOrder) {
+  const total = parseFloat(String(orderTotal ?? "0").replace(",", "."));
+  const t = Number.isFinite(total) ? roundMoney(total) : 0;
+  return t >= parseStampMinOrder(minOrder);
+}
+
 /**
  * Pure simulation mirroring applyOrderCompletionRewards award rules
  * (no DB). Admin base = starting points/cashbackBalance.
@@ -64,6 +76,8 @@ function simulateRewards(state, order, nowIso, settings) {
 
   if (needStamps) {
     if (hasLedgerForOrder({ ledger }, order.id, "selo_pedido")) {
+      orderMeta.stampsAwarded = true;
+    } else if (!orderMeetsStampMinimum(order.total, settings.stampMinOrder)) {
       orderMeta.stampsAwarded = true;
     } else if (hasLedgerForOrder({ ledger }, order.id, "selo_bloqueado") || orderMeta.stampSkipped) {
       orderMeta.stampsAwarded = true;
@@ -229,5 +243,48 @@ state = simulateRewards(
   settings,
 );
 assert(state.stampsAwarded && state.points === 1 && state.cashbackBalance === 6, "next day after zero: stamp from new base");
+
+// Minimum order total for 1 stamp (cashback still applies)
+assert(!orderMeetsStampMinimum(4.5, 22.7), "R$ 4,50 below min");
+assert(!orderMeetsStampMinimum(18.9, 22.7), "R$ 18,90 below min");
+assert(orderMeetsStampMinimum(22.7, 22.7), "R$ 22,70 equals min");
+assert(orderMeetsStampMinimum(30, 22.7), "R$ 30,00 above min");
+assert(orderMeetsStampMinimum(65, "22,70"), "R$ 65,00 above min (comma)");
+
+const minSettings = { ...settings, stampMinOrder: 22.7 };
+let minState = { points: 0, cashbackBalance: 0, ledger: [], orderMetaById: {} };
+const minDay = "2026-08-16T13:00:00.000Z";
+minState = simulateRewards(
+  minState,
+  { id: 10, status: "done", paymentMethod: "cash", total: 4.5 },
+  minDay,
+  minSettings,
+);
+assert(!minState.stampsAwarded && minState.points === 0, "below min: no stamp");
+assert(minState.cashbackAwarded && minState.cashbackBalance === 0.14, "below min: cashback still granted");
+
+minState = simulateRewards(
+  minState,
+  { id: 11, status: "done", paymentMethod: "cash", total: 18.9 },
+  "2026-08-16T15:00:00.000Z",
+  minSettings,
+);
+assert(!minState.stampsAwarded && minState.points === 0, "still below min later same day: no stamp");
+
+minState = simulateRewards(
+  minState,
+  { id: 12, status: "done", paymentMethod: "cash", total: 22.7 },
+  "2026-08-16T17:00:00.000Z",
+  minSettings,
+);
+assert(minState.stampsAwarded && minState.points === 1, "equals min: 1 stamp; day was not locked by cheap orders");
+
+minState = simulateRewards(
+  minState,
+  { id: 13, status: "done", paymentMethod: "cash", total: 65 },
+  "2026-08-16T19:00:00.000Z",
+  minSettings,
+);
+assert(minState.stampSkipped && minState.points === 1, "second qualifying same-day order: still only 1 stamp");
 
 console.log("order-rewards-selftest: OK");

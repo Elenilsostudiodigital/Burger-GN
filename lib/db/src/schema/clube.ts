@@ -54,6 +54,10 @@ export const clubeSettingsTable = pgTable(
     /** Programa de selos por pedido concluído. */
     fidelityEnabled: boolean("fidelity_enabled").notNull().default(true),
     stampsRequired: integer("stamps_required").notNull().default(10),
+    /** Pedido mínimo (R$) para conceder 1 selo. 0 = sem mínimo. */
+    stampMinOrder: numeric("stamp_min_order", { precision: 10, scale: 2 })
+      .notNull()
+      .default("0"),
     stampRewardTitle: text("stamp_reward_title")
       .notNull()
       .default("1 hambúrguer grátis"),

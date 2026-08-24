@@ -40,6 +40,8 @@ ALTER TABLE clube_settings
 ALTER TABLE clube_settings
   ADD COLUMN IF NOT EXISTS stamps_required INTEGER NOT NULL DEFAULT 10;
 ALTER TABLE clube_settings
+  ADD COLUMN IF NOT EXISTS stamp_min_order NUMERIC(10,2) NOT NULL DEFAULT 0;
+ALTER TABLE clube_settings
   ADD COLUMN IF NOT EXISTS stamp_reward_title TEXT NOT NULL DEFAULT '1 hambúrguer grátis';
 ALTER TABLE clube_settings
   ADD COLUMN IF NOT EXISTS cashback_enabled BOOLEAN NOT NULL DEFAULT true;
