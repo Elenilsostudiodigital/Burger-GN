@@ -2,6 +2,7 @@
  * Delivery area analysis request flow (customer button + admin card).
  * Run: node scripts/area-analysis-request-selftest.mjs
  */
+import fs from "node:fs";
 
 function assert(cond, msg) {
   if (!cond) throw new Error(msg);
@@ -68,4 +69,19 @@ let n = 0;
   n++;
 }
 
-console.log(`area-analysis-request-selftest: ${n}/4 ok`);
+{
+  const checkout = fs.readFileSync(new URL("../artifacts/burger-gn/src/pages/Checkout.tsx", import.meta.url), "utf8");
+  assert(checkout.includes("canRequestArea || areaRequestStatus === 'sent'"), "analysis panel gated on canRequestArea");
+  assert(checkout.includes("geocodeDeliveryAddress"), "checkout uses border-aware geocode");
+  assert(!checkout.includes("Lauro de Freitas, Bahia, Brasil"), "checkout no longer hardcodes only Lauro in geocode");
+  n++;
+}
+
+{
+  const checkRoute = fs.readFileSync(new URL("../artifacts/api-server/src/routes/delivery_streets.ts", import.meta.url), "utf8");
+  assert(checkRoute.includes("evaluateDeliveryCoverage"), "street check uses unified coverage");
+  assert(checkRoute.includes("inDeliveryArea"), "street check returns inDeliveryArea");
+  n++;
+}
+
+console.log(`area-analysis-request-selftest: ${n}/6 ok`);

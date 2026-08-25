@@ -699,3 +699,117 @@ export async function geocodeStreetLocation(parts: {
 
   return empty(ADDRESS_NOT_FOUND_MSG, true);
 }
+
+/**
+ * Checkout geocoding for the Lauro de Freitas / Itinga (Salvador) border.
+ * OSM lists several Itinga streets as Salvador, so forcing only
+ * "Lauro de Freitas" in the query returns zero results.
+ */
+const CHECKOUT_BBOX = {
+  minLng: -38.45,
+  maxLng: -38.22,
+  minLat: -12.96,
+  maxLat: -12.77,
+};
+
+function isInsideCheckoutBbox(lat: number, lng: number): boolean {
+  return (
+    lat >= CHECKOUT_BBOX.minLat &&
+    lat <= CHECKOUT_BBOX.maxLat &&
+    lng >= CHECKOUT_BBOX.minLng &&
+    lng <= CHECKOUT_BBOX.maxLng
+  );
+}
+
+function isBahiaMetroHit(addr: NominatimAddress | undefined, displayName: string): boolean {
+  const display = normalizePt(displayName);
+  const stateRaw = addr?.state || "";
+  const stateOk =
+    !stateRaw
+      ? display.includes("bahia")
+      : normalizePt(stateRaw) === "bahia" || normalizePt(stateRaw) === "ba";
+  const cityRaw = normalizePt(
+    addr?.city || addr?.town || addr?.municipality || addr?.village || addr?.county || "",
+  );
+  const cityOk =
+    cityRaw.includes("lauro de freitas") ||
+    cityRaw.includes("salvador") ||
+    display.includes("lauro de freitas") ||
+    display.includes("salvador") ||
+    display.includes("itinga");
+  return stateOk && cityOk;
+}
+
+export type CheckoutGeocodeHit = {
+  lat: number;
+  lng: number;
+  displayName: string;
+  streetName: string;
+  neighborhood: string;
+  city: string;
+};
+
+export async function geocodeCheckoutAddress(parts: {
+  street: string;
+  number?: string;
+  neighborhood?: string;
+  city?: string;
+}): Promise<CheckoutGeocodeHit | null> {
+  const street = String(parts.street || "").trim();
+  const number = String(parts.number || "").trim();
+  const neighborhood = String(parts.neighborhood || "").trim();
+  if (street.length < 3) return null;
+
+  const queries: string[] = [];
+  const push = (q: string) => {
+    const v = q.replace(/\s+/g, " ").trim();
+    if (v.length >= 8 && !queries.includes(v)) queries.push(v);
+  };
+  const cities = ["Lauro de Freitas", "Salvador"];
+  for (const city of cities) {
+    if (number && neighborhood) {
+      push(`${street}, ${number}, ${neighborhood}, ${city}, Bahia, Brasil`);
+    }
+    if (neighborhood) push(`${street}, ${neighborhood}, ${city}, Bahia, Brasil`);
+    push(`${street}, ${city}, Bahia, Brasil`);
+  }
+  if (neighborhood) push(`${street}, ${neighborhood}, Bahia, Brasil`);
+  push(`${street}, Itinga, Bahia, Brasil`);
+
+  for (let i = 0; i < Math.min(queries.length, 4); i++) {
+    if (i > 0) await sleep(200);
+    const q = queries[i]!;
+    let hits: NominatimHit[] = [];
+    try {
+      hits = await nominatimSearchLauro({ q }, 8);
+    } catch {
+      continue;
+    }
+    const ranked: CheckoutGeocodeHit[] = [];
+    for (const hit of hits) {
+      const lat = parseFloat(hit.lat);
+      const lng = parseFloat(hit.lon);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+      if (!isInsideCheckoutBbox(lat, lng)) continue;
+      const displayName = String(hit.display_name || "");
+      if (!isBahiaMetroHit(hit.address, displayName)) continue;
+      const road = extractRoad(hit.address);
+      if (road && !isExactStreetName(road, street) && !isSimilarStreetName(road, street)) continue;
+      if (!road && hit.class !== "highway" && hit.class !== "building" && hit.class !== "place") {
+        continue;
+      }
+      ranked.push({
+        lat,
+        lng,
+        displayName,
+        streetName: road || street,
+        neighborhood: extractNeighborhood(hit.address) || neighborhood,
+        city: String(hit.address?.city || hit.address?.town || hit.address?.municipality || ""),
+      });
+    }
+    const exact = ranked.filter((c) => isExactStreetName(c.streetName, street));
+    const pick = exact[0] || ranked[0];
+    if (pick) return pick;
+  }
+  return null;
+}

@@ -3,6 +3,11 @@ import { haversineKm } from "./deliveryStreets";
 
 export const OUTSIDE_AREA_MSG = "Não entregamos nesta região.";
 export const BLOCKED_AREA_DEFAULT_MSG = "Não entregamos nesta área.";
+export const AREA_ANALYSIS_MSG = "Esta região ainda não faz parte da nossa área de entrega.";
+export const APPROVED_REGION_MSG = "Esta região já está na área de entrega.";
+
+/** ~1.1 m at the equator — enough to treat drawn-border vertices as inside. */
+const EDGE_EPS = 1e-8;
 
 export type ResolveAreaStatus = "disabled" | "outside" | "blocked" | "allowed";
 
@@ -28,9 +33,45 @@ function isFiniteNumber(n: unknown): n is number {
   return typeof n === "number" && Number.isFinite(n);
 }
 
-/** Ray-casting point-in-ring (ring is closed or open; [lng, lat]). */
+function pointOnSegment(
+  lng: number,
+  lat: number,
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+): boolean {
+  const cross = (lng - x1) * (y2 - y1) - (lat - y1) * (x2 - x1);
+  const len = Math.hypot(x2 - x1, y2 - y1);
+  if (len < EDGE_EPS) {
+    return Math.hypot(lng - x1, lat - y1) <= EDGE_EPS;
+  }
+  if (Math.abs(cross) > EDGE_EPS * len) return false;
+  const dot = (lng - x1) * (x2 - x1) + (lat - y1) * (y2 - y1);
+  if (dot < -EDGE_EPS) return false;
+  return dot <= len * len + EDGE_EPS;
+}
+
+function pointOnRingEdge(lng: number, lat: number, ring: Ring): boolean {
+  if (!Array.isArray(ring) || ring.length < 2) return false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const pi = ring[i];
+    const pj = ring[j];
+    if (!pi || !pj || pi.length < 2 || pj.length < 2) continue;
+    const xi = Number(pi[0]);
+    const yi = Number(pi[1]);
+    const xj = Number(pj[0]);
+    const yj = Number(pj[1]);
+    if (![xi, yi, xj, yj].every(Number.isFinite)) continue;
+    if (pointOnSegment(lng, lat, xi, yi, xj, yj)) return true;
+  }
+  return false;
+}
+
+/** Ray-casting point-in-ring (ring is closed or open; [lng, lat]). Boundary counts as inside. */
 export function pointInRing(lng: number, lat: number, ring: Ring): boolean {
   if (!Array.isArray(ring) || ring.length < 3) return false;
+  if (pointOnRingEdge(lng, lat, ring)) return true;
   let inside = false;
   for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
     const pi = ring[i];
@@ -41,8 +82,9 @@ export function pointInRing(lng: number, lat: number, ring: Ring): boolean {
     const xj = Number(pj[0]);
     const yj = Number(pj[1]);
     if (![xi, yi, xj, yj].every(Number.isFinite)) continue;
-    const intersect =
-      yi > lat !== yj > lat && lng < ((xj - xi) * (lat - yi)) / (yj - yi + 0.0) + xi;
+    const dy = yj - yi;
+    if (Math.abs(dy) < EDGE_EPS) continue;
+    const intersect = yi > lat !== yj > lat && lng < ((xj - xi) * (lat - yi)) / dy + xi;
     if (intersect) inside = !inside;
   }
   return inside;
@@ -219,7 +261,10 @@ export function resolvePointInAreas(opts: {
   const enabled = areas.filter((a) => a.enabled);
   const containing: DeliveryArea[] = [];
   for (const area of enabled) {
-    if (!bboxContains(area.bbox, lng, lat)) continue;
+    // Always derive bbox from the live polygon so a stale stored bbox cannot
+    // skip a point that is actually inside the drawn area.
+    const bbox = computeBbox(area.polygon) ?? area.bbox;
+    if (!bboxContains(bbox, lng, lat)) continue;
     if (!pointInPolygon(lng, lat, area.polygon)) continue;
     containing.push(area);
   }
@@ -279,25 +324,8 @@ export function resolvePointInAreas(opts: {
     distanceKm = parseFloat(haversineKm(baseLat, baseLng, lat, lng).toFixed(2));
   }
 
-  const maxDist =
-    chosen.maxDistanceKm != null ? parseFloat(String(chosen.maxDistanceKm)) : null;
-  if (
-    maxDist != null &&
-    Number.isFinite(maxDist) &&
-    maxDist > 0 &&
-    distanceKm != null &&
-    distanceKm > maxDist
-  ) {
-    return {
-      status: "outside",
-      areasEnabled: true,
-      message: OUTSIDE_AREA_MSG,
-      area: serializeAreaHit(chosen),
-      fee: null,
-      distanceKm,
-    };
-  }
-
+  // Point inside the drawn green polygon is covered. maxDistanceKm must not
+  // convert an in-area location into "outside" (that hid Itinga addresses).
   const minFee = parseFloat(String(chosen.minFee ?? 0));
   const feePerKm = parseFloat(String(chosen.feePerKm ?? 0));
   const fee = calcAreaFee(minFee, feePerKm, distanceKm ?? 0);
@@ -309,5 +337,137 @@ export function resolvePointInAreas(opts: {
     area: serializeAreaHit(chosen),
     fee,
     distanceKm,
+  };
+}
+
+export type CoverageStreet = {
+  active: boolean;
+  fee: number | null;
+  distanceKm: number | null;
+  etaMinutes: number | null;
+};
+
+export type CoverageSource = "polygon" | "street" | "none";
+
+export type CoverageResult = ResolveAreaResult & {
+  source: CoverageSource;
+  canRequest: boolean;
+  inDeliveryArea: boolean;
+};
+
+/**
+ * Single coverage decision used by street-check, analysis requests and orders.
+ *
+ * When áreas de entrega are enabled:
+ * 1. Point inside a blocked (red) polygon → blocked (no analysis)
+ * 2. Inactive registered street → blocked
+ * 3. Point inside an active (green) polygon → allowed automatically
+ * 4. Approved active street → allowed (admin analysis already done)
+ * 5. Else → outside, customer may request analysis
+ */
+export function evaluateDeliveryCoverage(opts: {
+  areasEnabled: boolean;
+  areas: DeliveryArea[];
+  lat: number | null;
+  lng: number | null;
+  baseLat: number;
+  baseLng: number;
+  knownStreet: CoverageStreet | null;
+}): CoverageResult {
+  const { areasEnabled, areas, lat, lng, baseLat, baseLng, knownStreet } = opts;
+
+  if (!areasEnabled) {
+    return {
+      status: "disabled",
+      areasEnabled: false,
+      message: null,
+      area: null,
+      fee: null,
+      distanceKm: null,
+      source: "none",
+      canRequest: false,
+      inDeliveryArea: false,
+    };
+  }
+
+  const hasCoords = isFiniteNumber(lat) && isFiniteNumber(lng);
+  const polygon = hasCoords
+    ? resolvePointInAreas({
+        areasEnabled: true,
+        areas,
+        lat: lat as number,
+        lng: lng as number,
+        baseLat,
+        baseLng,
+      })
+    : null;
+
+  if (polygon?.status === "blocked") {
+    return {
+      ...polygon,
+      source: "polygon",
+      canRequest: false,
+      inDeliveryArea: false,
+    };
+  }
+
+  if (knownStreet && !knownStreet.active) {
+    return {
+      status: "blocked",
+      areasEnabled: true,
+      message:
+        "Esta rua está temporariamente fora da área de entrega. Escolha outro endereço ou retire na loja.",
+      area: polygon?.area ?? null,
+      fee: null,
+      distanceKm: knownStreet.distanceKm,
+      source: "street",
+      canRequest: false,
+      inDeliveryArea: false,
+    };
+  }
+
+  if (polygon?.status === "allowed") {
+    return {
+      ...polygon,
+      source: "polygon",
+      canRequest: false,
+      inDeliveryArea: true,
+    };
+  }
+
+  if (knownStreet?.active && knownStreet.fee != null && Number.isFinite(knownStreet.fee)) {
+    let distanceKm = knownStreet.distanceKm;
+    if (
+      distanceKm == null &&
+      hasCoords &&
+      isFiniteNumber(baseLat) &&
+      isFiniteNumber(baseLng) &&
+      !(baseLat === 0 && baseLng === 0)
+    ) {
+      distanceKm = parseFloat(haversineKm(baseLat, baseLng, lat as number, lng as number).toFixed(2));
+    }
+    return {
+      status: "allowed",
+      areasEnabled: true,
+      message: null,
+      area: polygon?.area ?? null,
+      fee: knownStreet.fee,
+      distanceKm,
+      source: "street",
+      canRequest: false,
+      inDeliveryArea: false,
+    };
+  }
+
+  return {
+    status: "outside",
+    areasEnabled: true,
+    message: AREA_ANALYSIS_MSG,
+    area: null,
+    fee: null,
+    distanceKm: polygon?.distanceKm ?? knownStreet?.distanceKm ?? null,
+    source: "none",
+    canRequest: true,
+    inDeliveryArea: false,
   };
 }

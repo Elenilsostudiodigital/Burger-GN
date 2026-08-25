@@ -8,7 +8,7 @@ import { addSSEClient, removeSSEClient, broadcastSSE } from "../lib/sse";
 import { calcDiscount } from "./coupons";
 import { haversineKm, findKmTier } from "./km_delivery";
 import { normalizeStreetKey } from "../lib/deliveryStreets";
-import { resolvePointInAreas } from "../lib/deliveryAreas";
+import { evaluateDeliveryCoverage } from "../lib/deliveryAreas";
 import {
   parseOrderNotes, serializeOrderNotes, appendHistory, resolveWorkflow, WORKFLOW_TO_STATUS,
   buildCustomerNotifyMessage, buildPostDeliverySurveyMessage,
@@ -305,45 +305,64 @@ router.post("/orders", resolvePublicCompany, async (req, res) => {
         .where(eq(kmDeliveryConfigTable.companyId, companyId))
         .limit(1);
       if (kmConfigForAreas?.areasEnabled) {
-        if (!body.customerLat || !body.customerLng) {
-          res.status(400).json({
-            error: "Informe sua localização para calcular a área de entrega.",
-          });
-          return;
-        }
+        const streetKey = normalizeStreetKey(body.address || "");
+        const [knownStreetAny] = streetKey
+          ? await db
+              .select()
+              .from(deliveryStreetsTable)
+              .where(
+                and(
+                  eq(deliveryStreetsTable.companyId, companyId),
+                  eq(deliveryStreetsTable.streetKey, streetKey),
+                ),
+              )
+              .limit(1)
+          : [];
         const areas = await db
           .select()
           .from(deliveryAreasTable)
           .where(eq(deliveryAreasTable.companyId, companyId));
-        const resolved = resolvePointInAreas({
+        const coverage = evaluateDeliveryCoverage({
           areasEnabled: true,
           areas,
-          lat: body.customerLat,
-          lng: body.customerLng,
+          lat: body.customerLat ?? null,
+          lng: body.customerLng ?? null,
           baseLat: parseFloat(String(kmConfigForAreas.baseLat ?? 0)),
           baseLng: parseFloat(String(kmConfigForAreas.baseLng ?? 0)),
+          knownStreet: knownStreetAny
+            ? {
+                active: knownStreetAny.active,
+                fee: parseFloat(String(knownStreetAny.fee)),
+                distanceKm:
+                  knownStreetAny.distanceKm != null
+                    ? parseFloat(String(knownStreetAny.distanceKm))
+                    : null,
+                etaMinutes: knownStreetAny.etaMinutes,
+              }
+            : null,
         });
-        if (resolved.status === "blocked") {
+        if (coverage.status === "blocked") {
           res.status(400).json({
-            error: resolved.message || "Não entregamos nesta área.",
+            error: coverage.message || "Não entregamos nesta área.",
             areaStatus: "blocked",
-            area: resolved.area,
+            area: coverage.area,
           });
           return;
         }
-        if (resolved.status === "outside" || resolved.fee == null) {
+        if (coverage.status === "allowed" && coverage.fee != null) {
+          deliveryFee = coverage.fee;
+          deliveryFeeResolved = true;
+          if (coverage.distanceKm != null) customerDistanceKm = coverage.distanceKm;
+        } else {
           res.status(400).json({
-            error: resolved.message || "Não entregamos nesta região.",
+            error: coverage.message || "Não entregamos nesta região.",
             areaStatus: "outside",
           });
           return;
         }
-        deliveryFee = resolved.fee;
-        deliveryFeeResolved = true;
-        if (resolved.distanceKm != null) customerDistanceKm = resolved.distanceKm;
       }
 
-      // Priority: approved street registry (learned streets) — exact key match.
+      // Street registry when map areas are not the coverage owner.
       const streetKey = normalizeStreetKey(body.address || "");
       if (!deliveryFeeResolved && streetKey) {
         const [knownStreetAny] = await db

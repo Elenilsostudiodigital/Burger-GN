@@ -7,6 +7,7 @@ import { db } from "@workspace/db";
 import {
   deliveryStreetsTable,
   deliveryStreetRequestsTable,
+  deliveryAreasTable,
   kmDeliveryConfigTable,
   kmDeliveryTiersTable,
 } from "@workspace/db";
@@ -22,7 +23,12 @@ import {
   normalizeStreetKey,
   suggestFeeFromDistance,
 } from "../lib/deliveryStreets";
-import { geocodeStreetLocation } from "../lib/geocodeStreets";
+import { geocodeStreetLocation, geocodeCheckoutAddress } from "../lib/geocodeStreets";
+import {
+  AREA_ANALYSIS_MSG,
+  APPROVED_REGION_MSG,
+  evaluateDeliveryCoverage,
+} from "../lib/deliveryAreas";
 
 const router = Router();
 
@@ -153,9 +159,8 @@ router.post("/delivery/streets/check", resolvePublicCompany, async (req, res) =>
 
     const neighborhood = String(body.neighborhood || "").trim();
     const city = String(body.city || "Lauro de Freitas").trim() || "Lauro de Freitas";
-    const cep = String(body.cep || "").replace(/\D/g, "").slice(0, 8);
-    const lat = typeof body.lat === "number" && Number.isFinite(body.lat) ? body.lat : null;
-    const lng = typeof body.lng === "number" && Number.isFinite(body.lng) ? body.lng : null;
+    let lat = typeof body.lat === "number" && Number.isFinite(body.lat) ? body.lat : null;
+    let lng = typeof body.lng === "number" && Number.isFinite(body.lng) ? body.lng : null;
 
     const [knownAny] = await db
       .select()
@@ -167,6 +172,133 @@ router.post("/delivery/streets/check", resolvePublicCompany, async (req, res) =>
         ),
       )
       .limit(1);
+
+    const { config, tiers } = await loadKmContext(companyId);
+    const areasEnabled = Boolean(config?.areasEnabled);
+
+    if (areasEnabled) {
+      if ((lat == null || lng == null) && streetName) {
+        try {
+          const geo = await geocodeCheckoutAddress({
+            street: streetName,
+            number: String(body.addressNumber || ""),
+            neighborhood,
+            city,
+          });
+          if (geo) {
+            lat = geo.lat;
+            lng = geo.lng;
+          }
+        } catch {
+          /* polygon check stays skipped if geocode is down */
+        }
+      }
+
+      const areas = await db
+        .select()
+        .from(deliveryAreasTable)
+        .where(eq(deliveryAreasTable.companyId, companyId));
+      const baseLat = config ? parseFloat(String(config.baseLat)) : 0;
+      const baseLng = config ? parseFloat(String(config.baseLng)) : 0;
+      const street = knownAny ? serializeStreet(knownAny) : null;
+      const coverage = evaluateDeliveryCoverage({
+        areasEnabled: true,
+        areas,
+        lat,
+        lng,
+        baseLat,
+        baseLng,
+        knownStreet: street
+          ? {
+              active: street.active,
+              fee: street.fee,
+              distanceKm: street.distanceKm,
+              etaMinutes: street.etaMinutes,
+            }
+          : null,
+      });
+
+      if (coverage.status === "blocked") {
+        const customerNotes = street ? buildCustomerStreetNotes(street) : "";
+        res.json({
+          known: !!street,
+          pending: false,
+          active: false,
+          inDeliveryArea: false,
+          canRequest: false,
+          street: street ?? undefined,
+          fee: null,
+          etaMinutes: street?.etaMinutes ?? null,
+          distanceKm: coverage.distanceKm,
+          notes: customerNotes,
+          maxDeliveryTime: street?.maxDeliveryTime ?? null,
+          message: coverage.message,
+          source: coverage.source,
+        });
+        return;
+      }
+
+      if (coverage.status === "allowed") {
+        const customerNotes = street ? buildCustomerStreetNotes(street) : "";
+        res.json({
+          known: !!street,
+          pending: false,
+          active: true,
+          inDeliveryArea: coverage.inDeliveryArea,
+          canRequest: false,
+          street: street ?? undefined,
+          fee: coverage.fee,
+          etaMinutes: street?.etaMinutes ?? null,
+          distanceKm: coverage.distanceKm,
+          notes: customerNotes,
+          maxDeliveryTime: street?.maxDeliveryTime ?? null,
+          message: null,
+          source: coverage.source,
+          area: coverage.area,
+        });
+        return;
+      }
+
+      const [existingPending] = await db
+        .select()
+        .from(deliveryStreetRequestsTable)
+        .where(
+          and(
+            eq(deliveryStreetRequestsTable.companyId, companyId),
+            eq(deliveryStreetRequestsTable.streetKey, streetKey),
+            eq(deliveryStreetRequestsTable.status, "pending"),
+          ),
+        )
+        .limit(1);
+
+      let distanceKm =
+        typeof body.distanceKm === "number" && Number.isFinite(body.distanceKm)
+          ? body.distanceKm
+          : coverage.distanceKm;
+      if (distanceKm == null && lat != null && lng != null && config) {
+        if (Number.isFinite(baseLat) && Number.isFinite(baseLng) && !(baseLat === 0 && baseLng === 0)) {
+          distanceKm = parseFloat(haversineKm(baseLat, baseLng, lat, lng).toFixed(2));
+        }
+      }
+      const suggestedFee = distanceKm != null ? suggestFeeFromDistance(distanceKm, tiers) : null;
+      const etaMinutes = distanceKm != null ? estimateEtaMinutes(distanceKm) : null;
+
+      res.json({
+        known: false,
+        pending: !!existingPending,
+        alreadyRequested: !!existingPending,
+        canRequest: true,
+        inDeliveryArea: false,
+        requestId: existingPending?.id ?? null,
+        fee: null,
+        etaMinutes,
+        distanceKm,
+        suggestedFee,
+        message: AREA_ANALYSIS_MSG,
+        source: "none",
+      });
+      return;
+    }
 
     if (knownAny) {
       const street = serializeStreet(knownAny);
@@ -202,7 +334,6 @@ router.post("/delivery/streets/check", resolvePublicCompany, async (req, res) =>
       return;
     }
 
-    const { config, tiers } = await loadKmContext(companyId);
     let distanceKm =
       typeof body.distanceKm === "number" && Number.isFinite(body.distanceKm)
         ? body.distanceKm
@@ -296,7 +427,7 @@ async function upsertPendingAnalysisRequest(
     )
     .limit(1);
   if (knownAny?.active) {
-    return { error: "Esta região já está na área de entrega.", status: 409 };
+    return { error: APPROVED_REGION_MSG, status: 409 };
   }
   if (knownAny && !knownAny.active) {
     return {
@@ -306,15 +437,55 @@ async function upsertPendingAnalysisRequest(
   }
 
   const { config, tiers } = await loadKmContext(companyId);
+  let resolvedLat = lat;
+  let resolvedLng = lng;
+  if (config?.areasEnabled && (resolvedLat == null || resolvedLng == null)) {
+    try {
+      const geo = await geocodeCheckoutAddress({
+        street: streetName,
+        number: String(body.addressNumber || ""),
+        neighborhood,
+        city,
+      });
+      if (geo) {
+        resolvedLat = geo.lat;
+        resolvedLng = geo.lng;
+      }
+    } catch {
+      /* continue without coords */
+    }
+  }
+  if (config?.areasEnabled) {
+    const areas = await db
+      .select()
+      .from(deliveryAreasTable)
+      .where(eq(deliveryAreasTable.companyId, companyId));
+    const coverage = evaluateDeliveryCoverage({
+      areasEnabled: true,
+      areas,
+      lat: resolvedLat,
+      lng: resolvedLng,
+      baseLat: parseFloat(String(config.baseLat ?? 0)),
+      baseLng: parseFloat(String(config.baseLng ?? 0)),
+      knownStreet: null,
+    });
+    if (coverage.inDeliveryArea || coverage.status === "allowed") {
+      return { error: APPROVED_REGION_MSG, status: 409 };
+    }
+    if (coverage.status === "blocked") {
+      return { error: coverage.message || "Não entregamos nesta área.", status: 400 };
+    }
+  }
+
   let distanceKm =
     typeof body.distanceKm === "number" && Number.isFinite(body.distanceKm)
       ? body.distanceKm
       : null;
-  if (distanceKm == null && lat != null && lng != null && config) {
+  if (distanceKm == null && resolvedLat != null && resolvedLng != null && config) {
     const baseLat = parseFloat(String(config.baseLat));
     const baseLng = parseFloat(String(config.baseLng));
     if (Number.isFinite(baseLat) && Number.isFinite(baseLng) && !(baseLat === 0 && baseLng === 0)) {
-      distanceKm = parseFloat(haversineKm(baseLat, baseLng, lat, lng).toFixed(2));
+      distanceKm = parseFloat(haversineKm(baseLat, baseLng, resolvedLat, resolvedLng).toFixed(2));
     }
   }
   const suggestedFee = distanceKm != null ? suggestFeeFromDistance(distanceKm, tiers) : null;
@@ -341,8 +512,8 @@ async function upsertPendingAnalysisRequest(
         neighborhood: neighborhood || existingPending.neighborhood,
         city,
         cep: cep || existingPending.cep,
-        lat: lat != null ? String(lat) : existingPending.lat,
-        lng: lng != null ? String(lng) : existingPending.lng,
+        lat: resolvedLat != null ? String(resolvedLat) : existingPending.lat,
+        lng: resolvedLng != null ? String(resolvedLng) : existingPending.lng,
         distanceKm: distanceKm != null ? String(distanceKm) : existingPending.distanceKm,
         etaMinutes: etaMinutes ?? existingPending.etaMinutes,
         suggestedFee: suggestedFee != null ? String(suggestedFee) : existingPending.suggestedFee,
@@ -365,8 +536,8 @@ async function upsertPendingAnalysisRequest(
       neighborhood,
       city,
       cep,
-      lat: lat != null ? String(lat) : null,
-      lng: lng != null ? String(lng) : null,
+      lat: resolvedLat != null ? String(resolvedLat) : null,
+      lng: resolvedLng != null ? String(resolvedLng) : null,
       distanceKm: distanceKm != null ? String(distanceKm) : null,
       etaMinutes,
       suggestedFee: suggestedFee != null ? String(suggestedFee) : null,

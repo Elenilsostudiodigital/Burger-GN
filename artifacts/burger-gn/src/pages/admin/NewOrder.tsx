@@ -9,8 +9,8 @@ import {
   PixPaymentResult, PaymentSettingsPublic, KmDeliveryConfig,
   getCategories, getProducts, getPaymentSettings, getKmDeliveryConfig,
   getPublicClubeMe, createClient, createOrder, trackOrder,
-  geocodeAddress, getDeliveryFee, checkDeliveryStreet, resolveDeliveryArea,
-  findKmTier, haversineKm, requestDeliveryAreaAnalysis,
+  getDeliveryFee, checkDeliveryStreet, resolveDeliveryArea,
+  findKmTier, haversineKm, requestDeliveryAreaAnalysis, geocodeDeliveryAddress,
 } from '../../lib/api';
 import { AdminTab, AdminTabBar } from '../../components/AdminTabs';
 
@@ -108,6 +108,7 @@ export default function AdminNewOrder() {
   const [feeLoading, setFeeLoading] = useState(false);
   const [streetMsg, setStreetMsg] = useState('');
   const [streetBlocked, setStreetBlocked] = useState(false);
+  const [canRequestArea, setCanRequestArea] = useState(false);
   const [areaRequestStatus, setAreaRequestStatus] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
   const [areaRequestMessage, setAreaRequestMessage] = useState('');
 
@@ -223,16 +224,23 @@ export default function AdminNewOrder() {
     try {
       if (kmConfig?.areasEnabled) {
         const area = await resolveDeliveryArea(lat, lng);
-        if (area.status === 'blocked' || area.status === 'outside' || area.fee == null) {
+        if (area.status === 'blocked') {
           setFeeFound(false);
           setDeliveryFee(0);
+          setCanRequestArea(false);
           setFeeMessage(area.message || 'Fora da área de entrega.');
           setDistanceKm(area.distanceKm ?? null);
           return;
         }
-        setDeliveryFee(area.fee);
-        setFeeFound(true);
-        setFeeMessage('');
+        if (area.status === 'allowed' && area.fee != null) {
+          setDeliveryFee(area.fee);
+          setFeeFound(true);
+          setCanRequestArea(false);
+          setFeeMessage('');
+          setDistanceKm(area.distanceKm ?? null);
+          return;
+        }
+        // outside: approved street check decides eligibility
         setDistanceKm(area.distanceKm ?? null);
         return;
       }
@@ -284,12 +292,14 @@ export default function AdminNewOrder() {
       setFeeLoading(true);
       try {
         if (needsCoordsFee) {
-          const full = `${endereco}, ${numero}, ${bairro}, ${CITY}, ${STATE}, Brasil`;
-          const g = await geocodeAddress(full);
+          const g = await geocodeDeliveryAddress({
+            street: endereco.trim(),
+            number: numero.trim(),
+            neighborhood: bairro.trim(),
+          });
           if (g) await applyCoords(g.lat, g.lng);
           else {
             setCoords(null);
-            setFeeFound(false);
             setFeeMessage('Não foi possível localizar o endereço. Confira rua, número e bairro.');
           }
         } else {
@@ -321,6 +331,7 @@ export default function AdminNewOrder() {
     if (!isDelivery || step !== 'tipo') return;
     if (!endereco.trim() || !numero.trim() || !bairro.trim()) {
       setStreetMsg('');
+      setCanRequestArea(false);
       return;
     }
     if (streetDebounce.current) clearTimeout(streetDebounce.current);
@@ -342,23 +353,36 @@ export default function AdminNewOrder() {
           setFeeFound(false);
           setDeliveryFee(0);
           setStreetBlocked(true);
+          setCanRequestArea(false);
           setStreetMsg(result.message || 'Rua temporariamente fora da área de entrega.');
           return;
         }
         setStreetBlocked(false);
+        if (result.inDeliveryArea && result.fee != null && Number.isFinite(result.fee)) {
+          setDeliveryFee(result.fee);
+          setFeeFound(true);
+          setFeeMessage('');
+          setStreetMsg('');
+          setCanRequestArea(false);
+          if (result.distanceKm != null) setDistanceKm(result.distanceKm);
+          return;
+        }
         if (result.known && result.fee != null && Number.isFinite(result.fee)) {
           setDeliveryFee(result.fee);
           setFeeFound(true);
           setFeeMessage('');
           setStreetMsg('');
+          setCanRequestArea(false);
           if (result.distanceKm != null) setDistanceKm(result.distanceKm);
           return;
         }
         if (result.canRequest || result.pending) {
           setFeeFound(false);
           setStreetMsg('');
+          setCanRequestArea(true);
         } else {
           setStreetMsg('');
+          setCanRequestArea(false);
         }
       } catch {
         /* non-blocking */
@@ -776,7 +800,7 @@ export default function AdminNewOrder() {
                   )}
                   {!feeLoading && feeMessage && <p className="text-amber-400">{feeMessage}</p>}
                   {!feeLoading && streetMsg && <p className="text-sky-400 whitespace-pre-line">{streetMsg}</p>}
-                  {isDelivery && feeFound === false && !streetBlocked && endereco.trim() && numero.trim() && bairro.trim() && (
+                  {isDelivery && feeFound === false && !streetBlocked && canRequestArea && endereco.trim() && numero.trim() && bairro.trim() && (
                     <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-3 space-y-2">
                       <p className="text-amber-100 text-sm">Esta região ainda não faz parte da nossa área de entrega.</p>
                       {areaRequestStatus === 'sent' ? (

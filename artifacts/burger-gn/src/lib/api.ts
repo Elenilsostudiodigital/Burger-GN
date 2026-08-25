@@ -212,6 +212,8 @@ export interface StreetCheckResult {
   pending: boolean;
   alreadyRequested?: boolean;
   canRequest?: boolean;
+  inDeliveryArea?: boolean;
+  source?: "polygon" | "street" | "none";
   active?: boolean;
   street?: DeliveryStreet;
   requestId?: number | null;
@@ -222,6 +224,14 @@ export interface StreetCheckResult {
   notes?: string;
   maxDeliveryTime?: string | null;
   message: string | null;
+  area?: {
+    id: number;
+    name: string;
+    color: string;
+    status: string;
+    blockReason: string;
+    notes: string;
+  } | null;
 }
 export interface StreetRequestDetail {
   request: DeliveryStreetRequest;
@@ -400,6 +410,77 @@ export async function geocodeAddress(address: string): Promise<{ lat: number; ln
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
     return { lat, lng };
   } catch { return null; }
+}
+
+const CHECKOUT_GEO_BBOX = { minLng: -38.45, maxLng: -38.22, minLat: -12.96, maxLat: -12.77 };
+
+function isCheckoutGeoHit(lat: number, lng: number, displayName: string): boolean {
+  if (
+    lat < CHECKOUT_GEO_BBOX.minLat ||
+    lat > CHECKOUT_GEO_BBOX.maxLat ||
+    lng < CHECKOUT_GEO_BBOX.minLng ||
+    lng > CHECKOUT_GEO_BBOX.maxLng
+  ) {
+    return false;
+  }
+  const display = displayName
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  return (
+    display.includes("bahia") &&
+    (display.includes("lauro de freitas") ||
+      display.includes("salvador") ||
+      display.includes("itinga"))
+  );
+}
+
+/**
+ * Checkout geocode that also tries Salvador/Itinga.
+ * OSM lists the Itinga border as Salvador; querying only "Lauro de Freitas"
+ * returns zero results for streets such as Rua Direta da Cachoeira.
+ */
+export async function geocodeDeliveryAddress(parts: {
+  street: string;
+  number?: string;
+  neighborhood?: string;
+}): Promise<{ lat: number; lng: number; displayName?: string } | null> {
+  const street = String(parts.street || "").trim();
+  const number = String(parts.number || "").trim();
+  const neighborhood = String(parts.neighborhood || "").trim();
+  if (street.length < 3) return null;
+
+  const queries: string[] = [];
+  const push = (q: string) => {
+    const v = q.replace(/\s+/g, " ").trim();
+    if (v.length >= 8 && !queries.includes(v)) queries.push(v);
+  };
+  for (const city of ["Lauro de Freitas", "Salvador"]) {
+    if (number && neighborhood) push(`${street}, ${number}, ${neighborhood}, ${city}, Bahia, Brasil`);
+    if (neighborhood) push(`${street}, ${neighborhood}, ${city}, Bahia, Brasil`);
+  }
+  if (neighborhood) push(`${street}, ${neighborhood}, Bahia, Brasil`);
+  push(`${street}, Itinga, Bahia, Brasil`);
+
+  for (const q of queries.slice(0, 4)) {
+    try {
+      const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=5&countrycodes=br&addressdetails=1`;
+      const res = await fetch(url, { headers: { "Accept-Language": "pt-BR", "User-Agent": "TheBurgerGN/1.0" } });
+      const data = await res.json() as Array<{ lat: string; lon: string; display_name?: string }>;
+      if (!Array.isArray(data)) continue;
+      for (const hit of data) {
+        const lat = parseFloat(hit.lat);
+        const lng = parseFloat(hit.lon);
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+        const displayName = String(hit.display_name || "");
+        if (!isCheckoutGeoHit(lat, lng, displayName)) continue;
+        return { lat, lng, displayName };
+      }
+    } catch {
+      continue;
+    }
+  }
+  return null;
 }
 
 /** Municipal bounding box for Lauro de Freitas/BA (slightly padded). Nominatim viewbox: left,top,right,bottom */

@@ -4,15 +4,16 @@
  */
 import path from "node:path";
 import { createRequire } from "node:module";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import fs from "node:fs";
+import os from "node:os";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, "..");
 const entry = path.join(root, "artifacts/api-server/src/lib/deliveryAreas.ts");
 const require = createRequire(import.meta.url);
 const esbuild = require(path.join(root, "artifacts/api-server/node_modules/esbuild"));
-const outfile = "/tmp/delivery-areas-resolve-selftest.mjs";
+const outfile = path.join(os.tmpdir(), "delivery-areas-resolve-selftest.mjs");
 
 await esbuild.build({
   entryPoints: [entry],
@@ -23,8 +24,15 @@ await esbuild.build({
   packages: "external",
 });
 
-const mod = await import(`file://${outfile}`);
-const { pointInPolygon, resolvePointInAreas, calcAreaFee, OUTSIDE_AREA_MSG } = mod;
+const mod = await import(pathToFileURL(outfile).href);
+const {
+  pointInPolygon,
+  resolvePointInAreas,
+  calcAreaFee,
+  OUTSIDE_AREA_MSG,
+  evaluateDeliveryCoverage,
+  AREA_ANALYSIS_MSG,
+} = mod;
 
 const green = {
   id: 1,
@@ -133,6 +141,90 @@ const flagOff = resolvePointInAreas({
   baseLng: -38.327,
 });
 if (flagOff.status !== "disabled") throw new Error("flag off fail");
+
+// Boundary counts as inside
+const westEdge = resolvePointInAreas({
+  areasEnabled: true,
+  areas: [green],
+  lat: -12.895,
+  lng: -38.33,
+  baseLat: -12.894,
+  baseLng: -38.327,
+});
+if (westEdge.status !== "allowed") throw new Error(`border fail: ${JSON.stringify(westEdge)}`);
+
+// Stale bbox must not hide a point that is inside the polygon
+const staleBbox = {
+  ...green,
+  bbox: [-38.325, -12.895, -38.324, -12.894], // too small, excludes real interior
+};
+const despiteStale = resolvePointInAreas({
+  areasEnabled: true,
+  areas: [staleBbox],
+  lat: -12.895,
+  lng: -38.328,
+  baseLat: -12.894,
+  baseLng: -38.327,
+});
+if (despiteStale.status !== "allowed") {
+  throw new Error(`stale bbox false-negative: ${JSON.stringify(despiteStale)}`);
+}
+
+// Inside polygon + unknown street → automatic, no analysis
+const insideUnknown = evaluateDeliveryCoverage({
+  areasEnabled: true,
+  areas: [green],
+  lat: -12.895,
+  lng: -38.325,
+  baseLat: -12.894,
+  baseLng: -38.327,
+  knownStreet: null,
+});
+if (insideUnknown.status !== "allowed" || insideUnknown.canRequest !== false || !insideUnknown.inDeliveryArea) {
+  throw new Error(`inside unknown should auto-allow: ${JSON.stringify(insideUnknown)}`);
+}
+
+// Outside polygon + approved street → allow after analysis
+const outsideApproved = evaluateDeliveryCoverage({
+  areasEnabled: true,
+  areas: [green],
+  lat: -12.95,
+  lng: -38.40,
+  baseLat: -12.894,
+  baseLng: -38.327,
+  knownStreet: { active: true, fee: 7, distanceKm: 4.2, etaMinutes: 15 },
+});
+if (outsideApproved.status !== "allowed" || outsideApproved.source !== "street" || outsideApproved.canRequest) {
+  throw new Error(`approved street outside polygon should allow: ${JSON.stringify(outsideApproved)}`);
+}
+
+// Outside + unknown → request analysis
+const outsideUnknown = evaluateDeliveryCoverage({
+  areasEnabled: true,
+  areas: [green],
+  lat: -12.95,
+  lng: -38.40,
+  baseLat: -12.894,
+  baseLng: -38.327,
+  knownStreet: null,
+});
+if (outsideUnknown.status !== "outside" || outsideUnknown.canRequest !== true || outsideUnknown.message !== AREA_ANALYSIS_MSG) {
+  throw new Error(`outside unknown should request analysis: ${JSON.stringify(outsideUnknown)}`);
+}
+
+// No coords + approved street → still allow (approval must stick)
+const noCoordsApproved = evaluateDeliveryCoverage({
+  areasEnabled: true,
+  areas: [green],
+  lat: null,
+  lng: null,
+  baseLat: -12.894,
+  baseLng: -38.327,
+  knownStreet: { active: true, fee: 5, distanceKm: 0.4, etaMinutes: 10 },
+});
+if (noCoordsApproved.status !== "allowed" || noCoordsApproved.source !== "street") {
+  throw new Error(`approved street without geocode should allow: ${JSON.stringify(noCoordsApproved)}`);
+}
 
 try { fs.unlinkSync(outfile); } catch { /* ignore */ }
 console.log("delivery-areas-resolve-selftest: PASS");

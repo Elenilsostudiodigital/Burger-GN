@@ -4,8 +4,9 @@ import { useCart } from '../context/CartContext';
 import { PageTransition } from '../components/PageTransition';
 import {
   createOrder, validateCoupon, getDeliveryZones, getDeliveryFee, getKmDeliveryConfig,
-  geocodeAddress, reverseGeocode, haversineKm, findKmTier, getPaymentSettings,
+  reverseGeocode, haversineKm, findKmTier, getPaymentSettings,
   checkDeliveryStreet, resolveDeliveryArea, requestDeliveryAreaAnalysis,
+  geocodeDeliveryAddress,
   ValidateCouponResult, DeliveryZone, KmDeliveryConfig, PaymentSettingsPublic,
 } from '../lib/api';
 import { goToCardapio, saveMyOrder } from '../lib/myOrder';
@@ -194,6 +195,7 @@ export default function Checkout() {
             if (result.status === "allowed" && result.fee != null) {
               setDeliveryFee(result.fee);
               setFeeFound(true);
+              setCanRequestArea(false);
               setFeeMessage(
                 result.area?.name
                   ? `Área: ${result.area.name}`
@@ -205,13 +207,12 @@ export default function Checkout() {
             if (result.status === "blocked") {
               setDeliveryFee(0);
               setFeeFound(false);
+              setCanRequestArea(false);
               setFeeMessage(result.message || "Não entregamos nesta área.");
               return;
             }
             if (result.status === "outside") {
-              setDeliveryFee(0);
-              setFeeFound(false);
-              setFeeMessage(result.message || "Não entregamos nesta região.");
+              // Approved streets can still cover this point — street check decides.
               return;
             }
             // areasEnabled false unexpectedly — fall through below not possible in then
@@ -317,18 +318,19 @@ export default function Checkout() {
     feeDebounce.current = setTimeout(async () => {
       setFeeLoading(true);
       try {
-        const fullAddr = `${form.endereco}, ${form.numero}, ${form.bairro}, Lauro de Freitas, Bahia, Brasil`;
-        const coords = await geocodeAddress(fullAddr);
+        const coords = await geocodeDeliveryAddress({
+          street: form.endereco.trim(),
+          number: form.numero.trim(),
+          neighborhood: form.bairro.trim(),
+        });
         if (coords) applyCoordinates(coords.lat, coords.lng);
         else {
           setCustomerCoords(null);
           setDistanceKm(null);
-          setFeeFound(false);
-          setFeeMessage('Não foi possível localizar este endereço automaticamente. Consulte a taxa com a loja.');
+          setFeeMessage('Não foi possível localizar este endereço automaticamente. Confira rua, número e bairro.');
         }
       } catch (err) {
         console.error('[BurgerGN] geocode effect failed:', err);
-        setFeeFound(false);
         setFeeMessage('Não foi possível localizar este endereço automaticamente. Consulte a taxa com a loja.');
       } finally {
         setFeeLoading(false);
@@ -385,6 +387,18 @@ export default function Checkout() {
 
         setStreetBlocked(false);
 
+        if (result.inDeliveryArea && result.fee != null && Number.isFinite(result.fee)) {
+          setStreetBlocked(false);
+          setDeliveryFee(result.fee);
+          setFeeFound(true);
+          setFeeMessage(result.area?.name ? `Área: ${result.area.name}` : '');
+          setStreetPendingMessage('');
+          setCanRequestArea(false);
+          setStreetEtaMinutes(result.etaMinutes ?? null);
+          if (result.distanceKm != null) setDistanceKm(result.distanceKm);
+          return;
+        }
+
         if (result.known && result.fee != null && Number.isFinite(result.fee)) {
           setDeliveryFee(result.fee);
           setFeeFound(true);
@@ -401,6 +415,7 @@ export default function Checkout() {
           setStreetPendingMessage('');
           setStreetEtaMinutes(result.etaMinutes ?? null);
           setFeeFound(false);
+          setDeliveryFee(0);
         } else {
           setCanRequestArea(false);
           setStreetPendingMessage('');
@@ -474,7 +489,8 @@ export default function Checkout() {
   const showAreaRequestPanel =
     isDelivery
     && !streetBlocked
-    && feeFound === false
+    && (canRequestArea || areaRequestStatus === 'sent')
+    && feeFound !== true
     && !!form.endereco.trim()
     && !!form.numero.trim()
     && !!form.bairro.trim()
