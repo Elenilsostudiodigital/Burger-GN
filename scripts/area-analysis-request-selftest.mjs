@@ -26,7 +26,7 @@ function shouldCreateOnCheck() {
 
 function customerPanelCopy() {
   return {
-    region: "Esta região ainda não faz parte da nossa área de entrega.",
+    region: "Não entregamos nesta região.",
     button: "📍 Solicitar análise da minha região",
     success: "Solicitação enviada com sucesso.",
   };
