@@ -126,7 +126,7 @@ let n = 0;
 {
   assert(checkout.includes("applyStreetOverlay"), "street registry is an overlay, not a second validator");
   assert(rulesSrc.includes("It must NEVER flip an allowed coordinate result"), "overlay rule documented");
-  assert(validateSrc.includes("Both checkout flows") || validateSrc.includes("Typed address and"), "validator header states shared use");
+  assert(validateSrc.includes("Official customer delivery coverage") || validateSrc.includes("Typed address, GPS, and map pin"), "validator header states official shared use");
   n++;
 }
 
@@ -225,6 +225,9 @@ let n = 0;
   assert(geoSrc.includes("isGenericCityCentroid"), "CEP city-centroid coords are not used for KM");
   assert(seedSrc.includes("Cleared legacy neighborhood"), "seed deletes leftover bairro zones when áreas are on");
   assert(checkout.includes("onPick"), "unmapped streets can be pinned on the map");
+  const ruleSrc = fs.readFileSync(path.join(root, ".cursor/rules/delivery-coverage.mdc"), "utf8");
+  assert(ruleSrc.includes("fonte oficial"), "delivery rule is recorded as the official source of truth");
+  assert(ruleSrc.includes("never insert DEFAULT_DELIVERY_ZONES") || ruleSrc.includes("must never insert"), "rule forbids neighborhood reseed");
   n++;
 }
 

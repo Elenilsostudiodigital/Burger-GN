@@ -115,6 +115,8 @@ export async function runSeed() {
       );
     }
 
+    // Official delivery rule: never re-insert neighborhood zones.
+    // If áreas are on, leftover bairros are removed so a deploy cannot restore them.
     const [kmCfg] = await db
       .select({ areasEnabled: kmDeliveryConfigTable.areasEnabled })
       .from(kmDeliveryConfigTable)

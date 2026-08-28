@@ -1,6 +1,8 @@
 /**
- * The only customer-facing delivery coverage function.
- * Typed address and "Usar minha localização" must both call this with lat/lng.
+ * Official customer delivery coverage (source of truth).
+ * Inside the green polygon → deliver; fee comes from KM tiers.
+ * Typed address, GPS, and map pin must all call this with lat/lng.
+ * New features must adapt to this rule; do not reintroduce neighborhood fees here.
  */
 import {
   findKmTier,

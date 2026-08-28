@@ -1,3 +1,8 @@
+/**
+ * Official server coverage: green polygon = in/out; KM tiers = fee.
+ * Neighborhood zone fees and area minFee/feePerKm must not replace this
+ * while delivery areas are enabled. New features adapt to this rule.
+ */
 import type { DeliveryArea, DeliveryAreaBBox, DeliveryAreaPolygon } from "@workspace/db";
 import { findKmTier, haversineKm } from "./deliveryStreets";
 

@@ -1,21 +1,17 @@
 ---
-description: Permanent delivery architecture — green polygon coverage, KM fee, no neighborhood seed
-globs: artifacts/burger-gn/src/pages/Checkout.tsx,artifacts/burger-gn/src/lib/api.ts,artifacts/burger-gn/src/lib/validateDeliveryCoverage.ts,artifacts/api-server/src/lib/seed.ts,artifacts/api-server/src/lib/deliveryAreas.ts,artifacts/api-server/src/lib/geocodeStreets.ts,artifacts/api-server/src/routes/orders.ts
+description: Official delivery source of truth — polygon coverage, KM fee; new work must adapt to this
 alwaysApply: true
 ---
 
-# Entrega: polígono + KM
+# Entrega (fonte oficial)
 
-Coverage is the green polygon. Fee is the KM tier table. Typed address, GPS, and map pin must all call `applyCoordinates` → `validateDeliveryCoverage(lat, lng)`.
+This is the official delivery architecture. Seeds, migrations, refactors, deploys, and new features must not replace it. If a new feature conflicts, the feature adapts to this rule.
 
-Do not:
-
-- Re-insert `DEFAULT_DELIVERY_ZONES` (or any neighborhood list) in `seed.ts`. If `areasEnabled`, delete leftover `delivery_zones` on boot.
-- Charge `minFee`/`feePerKm` from the area row when KM tiers exist.
-- Snap geocode to a namesake street in another neighborhood (e.g. Portão vs Itinga) or to Lauro city centroid.
-- Let the street registry or neighborhood fee overwrite an allowed polygon/KM result.
-- Replace a GPS point with a geocoded OSM name.
-
-Unmapped but real streets (OSM miss, Correios hit): GPS or map pin. Never invent coordinates.
+1. Coverage = point inside the green polygon. Outside = "Não entregamos nesta região."
+2. Fee = KM tier table from store to that point. Never area `minFee`/`feePerKm` when tiers exist. Never neighborhood zone fees while áreas or KM are on.
+3. Typed address, GPS, and map pin all call `applyCoordinates` → `validateDeliveryCoverage(lat, lng)`. Same point, same result.
+4. `seed.ts` must never insert `DEFAULT_DELIVERY_ZONES` or any bairro list. If `areasEnabled`, leftover `delivery_zones` are deleted on boot so they cannot return after deploy.
+5. Do not geocode to a namesake in another neighborhood (Portão vs Itinga) or to Lauro city centroid. Unmapped real streets: GPS or map pin, never invented coordinates.
+6. Street registry and old bairro fees cannot overwrite an allowed polygon/KM result.
 
 Keep `scripts/gps-delivery-coverage-selftest.mjs` and `scripts/delivery-areas-resolve-selftest.mjs` passing.
