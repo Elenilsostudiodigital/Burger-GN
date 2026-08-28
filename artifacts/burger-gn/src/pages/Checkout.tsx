@@ -4,11 +4,18 @@ import { useCart } from '../context/CartContext';
 import { PageTransition } from '../components/PageTransition';
 import {
   createOrder, validateCoupon, getDeliveryZones, getDeliveryFee, getKmDeliveryConfig,
-  reverseGeocode, haversineKm, findKmTier, getPaymentSettings,
-  checkDeliveryStreet, resolveDeliveryArea, requestDeliveryAreaAnalysis,
+  reverseGeocode, getPaymentSettings,
+  checkDeliveryStreet, requestDeliveryAreaAnalysis,
   geocodeDeliveryAddress,
   ValidateCouponResult, DeliveryZone, KmDeliveryConfig, PaymentSettingsPublic,
 } from '../lib/api';
+import {
+  validateDeliveryCoverage,
+  applyStreetOverlay,
+  DELIVER_IN_REGION_MSG,
+  DO_NOT_DELIVER_MSG,
+  type CoverageResult,
+} from '../lib/validateDeliveryCoverage';
 import { goToCardapio, saveMyOrder } from '../lib/myOrder';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import { StreetMapPreview } from '../components/StreetMapPreview';
@@ -94,6 +101,9 @@ export default function Checkout() {
   const [areaRequestMessage, setAreaRequestMessage] = useState('');
   const feeDebounce = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const streetDebounce = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const coverageRef = useRef<CoverageResult | null>(null);
+  const coordsRef = useRef<{ lat: number; lng: number } | null>(null);
+  const coverageSeq = useRef(0);
 
   const [kmConfig, setKmConfig] = useState<KmDeliveryConfig | null>(null);
   const kmEnabled = !!kmConfig?.enabled;
@@ -181,97 +191,63 @@ export default function Checkout() {
     if (cartItems.length === 0 && !submitting) goToCardapio(setLocation);
   }, [cartItems.length, submitting, setLocation]);
 
-  const applyCoordinates = useCallback((lat: number, lng: number) => {
+  const applyCoverageToState = useCallback((result: CoverageResult) => {
+    coverageRef.current = result;
+    if (result.status === 'pending' || result.status === 'neighborhood') return;
+    if (result.distanceKm != null) setDistanceKm(result.distanceKm);
+    if (result.allowed && result.fee != null && Number.isFinite(result.fee)) {
+      setDeliveryFee(result.fee);
+      setFeeFound(true);
+      setFeeMessage(result.message || DELIVER_IN_REGION_MSG);
+      setCanRequestArea(false);
+      return;
+    }
+    setDeliveryFee(0);
+    setFeeFound(false);
+    setFeeMessage(result.message || DO_NOT_DELIVER_MSG);
+  }, []);
+
+  /** Single entry point for GPS and typed address: both pass lat/lng here. */
+  const applyCoordinates = useCallback(async (lat: number, lng: number): Promise<CoverageResult> => {
+    const seq = ++coverageSeq.current;
     try {
-      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
-      setCustomerCoords({ lat, lng });
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+        const unavailable = {
+          status: 'unavailable' as const,
+          allowed: false,
+          fee: null,
+          distanceKm: null,
+          message: 'Não foi possível verificar a área de entrega.',
+          areaName: null,
+        };
+        if (seq === coverageSeq.current) applyCoverageToState(unavailable);
+        return unavailable;
+      }
+      const nextCoords = { lat, lng };
+      coordsRef.current = nextCoords;
+      setCustomerCoords(nextCoords);
       setGpsError('');
-
-      // Áreas de Entrega take priority when enabled
-      if (kmConfig?.areasEnabled) {
-        setFeeLoading(true);
-        void resolveDeliveryArea(lat, lng)
-          .then((result) => {
-            if (result.status === "allowed" && result.fee != null) {
-              setDeliveryFee(result.fee);
-              setFeeFound(true);
-              setCanRequestArea(false);
-              setFeeMessage(
-                result.area?.name
-                  ? `Área: ${result.area.name}`
-                  : "",
-              );
-              if (result.distanceKm != null) setDistanceKm(result.distanceKm);
-              return;
-            }
-            if (result.status === "blocked") {
-              setDeliveryFee(0);
-              setFeeFound(false);
-              setCanRequestArea(false);
-              setFeeMessage(result.message || "Não entregamos nesta área.");
-              return;
-            }
-            if (result.status === "outside") {
-              // Approved streets can still cover this point — street check decides.
-              return;
-            }
-            // areasEnabled false unexpectedly — fall through below not possible in then
-            setFeeFound(false);
-            setFeeMessage("Não foi possível verificar a área de entrega.");
-          })
-          .catch(() => {
-            setFeeFound(false);
-            setFeeMessage("Não foi possível verificar a área de entrega.");
-          })
-          .finally(() => setFeeLoading(false));
-        return;
-      }
-
-      if (!kmConfig?.enabled) {
-        // Neighborhood fee is resolved after reverse-geocode fills `bairro`.
-        return;
-      }
-
-      const baseLat = parseFloat(String(kmConfig.baseLat ?? '0'));
-      const baseLng = parseFloat(String(kmConfig.baseLng ?? '0'));
-      if (!Number.isFinite(baseLat) || !Number.isFinite(baseLng) || (baseLat === 0 && baseLng === 0)) {
-        setFeeFound(false);
-        setFeeMessage('Local da loja não configurado para cálculo por KM. Consulte a taxa com a loja.');
-        return;
-      }
-
-      const dist = haversineKm(baseLat, baseLng, lat, lng);
-      if (!Number.isFinite(dist)) {
-        setFeeFound(false);
-        setFeeMessage('Não foi possível calcular a distância. Consulte a taxa com a loja.');
-        return;
-      }
-
-      setDistanceKm(dist);
-      const maxDist = parseFloat(String(kmConfig.maxDistanceKm ?? '0'));
-      if (Number.isFinite(maxDist) && maxDist > 0 && dist > maxDist) {
-        setDeliveryFee(0);
-        setFeeFound(false);
-        setFeeMessage(`Distância de ${dist.toFixed(1)}km excede o raio de entrega (${maxDist}km). Consulte a taxa com a loja.`);
-        return;
-      }
-
-      const { fee, consult } = findKmTier(dist, kmConfig.tiers);
-      if (!consult && fee !== null && Number.isFinite(fee)) {
-        setDeliveryFee(fee);
-        setFeeFound(true);
-        setFeeMessage('');
-      } else {
-        setDeliveryFee(0);
-        setFeeFound(false);
-        setFeeMessage('Distância fora das faixas cadastradas. Consulte a taxa com a loja.');
-      }
+      setFeeLoading(true);
+      const result = await validateDeliveryCoverage(lat, lng, kmConfig);
+      if (seq !== coverageSeq.current) return result;
+      applyCoverageToState(result);
+      return result;
     } catch (err) {
       console.error('[BurgerGN] applyCoordinates failed:', err);
-      setFeeFound(false);
-      setFeeMessage('Não foi possível calcular a taxa de entrega. Consulte a taxa com a loja.');
+      const failed = {
+        status: 'unavailable' as const,
+        allowed: false,
+        fee: null,
+        distanceKm: null,
+        message: 'Não foi possível calcular a taxa de entrega. Consulte a taxa com a loja.',
+        areaName: null,
+      };
+      if (seq === coverageSeq.current) applyCoverageToState(failed);
+      return failed;
+    } finally {
+      if (seq === coverageSeq.current) setFeeLoading(false);
     }
-  }, [kmConfig]);
+  }, [kmConfig, applyCoverageToState]);
 
   // Neighborhood fee when KM coords are not driving the fee
   useEffect(() => {
@@ -293,11 +269,11 @@ export default function Checkout() {
         const result = await getDeliveryFee(form.bairro.trim());
         if (result.found && result.fee !== null) {
           setDeliveryFee(result.fee);
-          setFeeMessage('');
+          setFeeMessage(DELIVER_IN_REGION_MSG);
           setFeeFound(true);
         } else {
           setDeliveryFee(0);
-          setFeeMessage(result.message ?? 'Consulte a taxa de entrega com a loja.');
+          setFeeMessage(result.message ?? DO_NOT_DELIVER_MSG);
           setFeeFound(false);
         }
       } catch {
@@ -323,21 +299,36 @@ export default function Checkout() {
           number: form.numero.trim(),
           neighborhood: form.bairro.trim(),
         });
-        if (coords) applyCoordinates(coords.lat, coords.lng);
+        if (coords) await applyCoordinates(coords.lat, coords.lng);
         else {
+          coordsRef.current = null;
+          coverageRef.current = null;
           setCustomerCoords(null);
           setDistanceKm(null);
+          setFeeFound(false);
           setFeeMessage('Não foi possível localizar este endereço automaticamente. Confira rua, número e bairro.');
+          setFeeLoading(false);
         }
       } catch (err) {
         console.error('[BurgerGN] geocode effect failed:', err);
+        setFeeFound(false);
         setFeeMessage('Não foi possível localizar este endereço automaticamente. Consulte a taxa com a loja.');
-      } finally {
         setFeeLoading(false);
       }
     }, 900);
     return () => clearTimeout(feeDebounce.current);
   }, [form.endereco, form.numero, form.bairro, needsCoordsFee, isDelivery, step, applyCoordinates]);
+
+  // If GPS/manual obtained coords before km/áreas config loaded, re-run the same validator.
+  useEffect(() => {
+    if (!isDelivery || !needsCoordsFee) return;
+    if (step !== 'gps' && step !== 'manual' && step !== 'payment') return;
+    const c = coordsRef.current;
+    if (!c) return;
+    const current = coverageRef.current;
+    if (current && current.status !== 'pending') return;
+    void applyCoordinates(c.lat, c.lng);
+  }, [applyCoordinates, isDelivery, needsCoordsFee, step]);
 
   // Street registry check (learning module) — reuses lat/lng already calculated.
   useEffect(() => {
@@ -368,24 +359,45 @@ export default function Checkout() {
         });
 
         const notesText = String(result.notes || result.street?.notes || '').trim();
-        setStreetNotes(notesText);
+        const overlay = applyStreetOverlay(coverageRef.current, {
+          known: result.known,
+          active: result.active,
+          canRequest: result.canRequest,
+          pending: result.pending,
+          notes: notesText,
+          etaMinutes: result.etaMinutes ?? null,
+          message: result.message,
+        });
 
-        // Inactive registered street: do not accept delivery there.
-        if (result.known && result.active === false) {
-          setFeeFound(false);
-          setDeliveryFee(0);
-          setFeeMessage('');
-          setStreetBlocked(true);
-          setCanRequestArea(false);
-          setStreetPendingMessage(
-            result.message ||
-              '🔴 Esta rua está temporariamente fora da área de entrega. Escolha outro endereço ou retire na loja.',
-          );
-          setStreetEtaMinutes(result.etaMinutes ?? null);
+        setStreetNotes(overlay.streetNotes);
+        setStreetEtaMinutes(overlay.etaMinutes);
+        setStreetBlocked(overlay.streetBlocked);
+        setCanRequestArea(overlay.canRequestArea);
+
+        if (needsCoordsFee) {
+          if (overlay.streetBlocked) {
+            applyCoverageToState(overlay.coverage);
+            setStreetPendingMessage(
+              overlay.coverage.message ||
+                '🔴 Esta rua está temporariamente fora da área de entrega. Escolha outro endereço ou retire na loja.',
+            );
+            return;
+          }
+          setStreetPendingMessage('');
           return;
         }
 
-        setStreetBlocked(false);
+        // Neighborhood mode (no áreas/KM): street registry can still resolve a known fee.
+        if (overlay.streetBlocked) {
+          applyCoverageToState(overlay.coverage);
+          setStreetPendingMessage(
+            overlay.coverage.message ||
+              '🔴 Esta rua está temporariamente fora da área de entrega. Escolha outro endereço ou retire na loja.',
+          );
+          return;
+        }
+
+        setStreetPendingMessage('');
 
         if (result.inDeliveryArea && result.fee != null && Number.isFinite(result.fee)) {
           setStreetBlocked(false);
@@ -402,23 +414,14 @@ export default function Checkout() {
         if (result.known && result.fee != null && Number.isFinite(result.fee)) {
           setDeliveryFee(result.fee);
           setFeeFound(true);
-          setFeeMessage('');
-          setStreetPendingMessage('');
+          setFeeMessage(DELIVER_IN_REGION_MSG);
           setCanRequestArea(false);
-          setStreetEtaMinutes(result.etaMinutes ?? null);
           if (result.distanceKm != null) setDistanceKm(result.distanceKm);
           return;
         }
 
-        if (result.canRequest || result.pending) {
-          setCanRequestArea(true);
-          setStreetPendingMessage('');
-          setStreetEtaMinutes(result.etaMinutes ?? null);
-          setFeeFound(false);
-          setDeliveryFee(0);
-        } else {
-          setCanRequestArea(false);
-          setStreetPendingMessage('');
+        if (overlay.canRequestArea) {
+          setFeeFound(prev => (prev === true ? true : false));
         }
       } catch {
         /* never block checkout core on street-check failure */
@@ -426,10 +429,12 @@ export default function Checkout() {
     }, 700);
 
     return () => clearTimeout(streetDebounce.current);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [form.endereco, form.numero, form.bairro, form.nome, form.telefone, customerCoords, distanceKm, isDelivery, step]);
+  }, [form.endereco, form.numero, form.bairro, form.nome, form.telefone, customerCoords, distanceKm, isDelivery, step, needsCoordsFee, applyCoverageToState]);
 
   const resetDeliveryState = () => {
+    coordsRef.current = null;
+    coverageRef.current = null;
+    coverageSeq.current += 1;
     setCustomerCoords(null);
     setDistanceKm(null);
     setDeliveryFee(0);
@@ -567,11 +572,11 @@ export default function Checkout() {
       const result = await getDeliveryFee(bairro.trim());
       if (result.found && result.fee !== null) {
         setDeliveryFee(result.fee);
-        setFeeMessage('');
+        setFeeMessage(DELIVER_IN_REGION_MSG);
         setFeeFound(true);
       } else {
         setDeliveryFee(0);
-        setFeeMessage(result.message ?? 'Consulte a taxa de entrega com a loja.');
+        setFeeMessage(result.message ?? DO_NOT_DELIVER_MSG);
         setFeeFound(false);
       }
     } catch {
@@ -594,8 +599,8 @@ export default function Checkout() {
       async (pos) => {
         const lat = pos.coords.latitude;
         const lng = pos.coords.longitude;
-        applyCoordinates(lat, lng);
         try {
+          let coverage = await applyCoordinates(lat, lng);
           const resolved = await reverseGeocode(lat, lng);
           if (resolved) {
             setLocationLabel(resolved.displayName);
@@ -606,7 +611,28 @@ export default function Checkout() {
               numero: resolved.numero || prev.numero || 'S/N',
               bairro: nextBairro,
             }));
-            if (!kmConfig?.enabled) await resolveNeighborhoodFee(nextBairro);
+            if (coverage.status === 'neighborhood') {
+              if (nextBairro && nextBairro !== 'GPS' && nextBairro !== '__outro__') {
+                await resolveNeighborhoodFee(nextBairro);
+              } else {
+                setFeeFound(false);
+                setFeeMessage('Não foi possível identificar o bairro. Digite o endereço ou Consulte a taxa com a loja.');
+              }
+            } else if (
+              !coverage.allowed
+              && coverage.status !== 'pending'
+              && resolved.endereco
+              && resolved.numero
+              && resolved.bairro
+            ) {
+              // Same geocode query + same validator as typing this address.
+              const geo = await geocodeDeliveryAddress({
+                street: resolved.endereco,
+                number: resolved.numero,
+                neighborhood: resolved.bairro,
+              });
+              if (geo) coverage = await applyCoordinates(geo.lat, geo.lng);
+            }
           } else {
             setLocationLabel(`${lat.toFixed(5)}, ${lng.toFixed(5)}`);
             setForm(prev => ({
@@ -615,7 +641,7 @@ export default function Checkout() {
               numero: prev.numero || 'S/N',
               bairro: prev.bairro || 'GPS',
             }));
-            if (!kmConfig?.enabled) {
+            if (coverage.status === 'neighborhood') {
               setFeeFound(false);
               setFeeMessage('Não foi possível identificar o bairro. Digite o endereço ou Consulte a taxa com a loja.');
             }
@@ -636,7 +662,7 @@ export default function Checkout() {
         setGpsError('Não foi possível obter sua localização. Tente digitar o endereço.');
         setGpsLoading(false);
       },
-      { enableHighAccuracy: true, timeout: 12000 }
+      { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 },
     );
   };
 
@@ -901,7 +927,8 @@ export default function Checkout() {
             <div className="flex items-center gap-2 text-green-400">
               <CheckCircle2 size={16} />
               <span className="text-sm font-bold">
-                Taxa de entrega{distanceKm !== null ? ` · ${distanceKm.toFixed(1)} km` : ''}
+                {DELIVER_IN_REGION_MSG}
+                {distanceKm !== null ? ` · ${distanceKm.toFixed(1)} km` : ''}
                 {streetEtaMinutes != null ? ` · ~${streetEtaMinutes} min` : ''}
               </span>
             </div>
@@ -944,7 +971,7 @@ export default function Checkout() {
     <div className={showAreaRequestPanel ? 'mt-2' : 'hidden'}>
       <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 space-y-3">
         <p className="text-amber-100 text-sm leading-relaxed">
-          Esta região ainda não faz parte da nossa área de entrega.
+          {feeMessage || DO_NOT_DELIVER_MSG}
         </p>
         {areaRequestStatus === 'sent' ? (
           <p className="text-emerald-400 text-sm font-bold">{areaRequestMessage || 'Solicitação enviada com sucesso.'}</p>
