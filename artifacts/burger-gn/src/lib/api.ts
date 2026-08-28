@@ -46,11 +46,17 @@ export function findKmTier(
     return { fee: null, consult: true };
   }
   const sorted = [...tiers].sort((a, b) => parseFloat(String(a.fromKm)) - parseFloat(String(b.fromKm)));
-  for (const tier of sorted) {
+  for (let i = 0; i < sorted.length; i++) {
+    const tier = sorted[i]!;
     const from = parseFloat(String(tier.fromKm));
-    const to = tier.toKm !== null && tier.toKm !== undefined ? parseFloat(String(tier.toKm)) : Infinity;
+    const explicitTo = tier.toKm !== null && tier.toKm !== undefined ? parseFloat(String(tier.toKm)) : Infinity;
+    const nextFrom = i + 1 < sorted.length ? parseFloat(String(sorted[i + 1]!.fromKm)) : NaN;
     if (!Number.isFinite(from)) continue;
-    if (distanceKm >= from && distanceKm <= to) {
+    const inBand =
+      Number.isFinite(nextFrom) && nextFrom > from
+        ? distanceKm >= from && distanceKm < nextFrom
+        : distanceKm >= from && distanceKm <= explicitTo;
+    if (inBand) {
       return { fee: tier.fee !== null && tier.fee !== undefined ? parseFloat(String(tier.fee)) : null, consult: tier.fee === null };
     }
   }
@@ -413,6 +419,7 @@ export async function geocodeAddress(address: string): Promise<{ lat: number; ln
 }
 
 const CHECKOUT_GEO_BBOX = { minLng: -38.45, maxLng: -38.22, minLat: -12.96, maxLat: -12.77 };
+const LAURO_CITY_CENTER = { lat: -12.89444, lng: -38.32722 };
 
 function isCheckoutGeoHit(lat: number, lng: number, displayName: string): boolean {
   if (
@@ -435,52 +442,222 @@ function isCheckoutGeoHit(lat: number, lng: number, displayName: string): boolea
   );
 }
 
-/**
- * Checkout geocode that also tries Salvador/Itinga.
- * OSM lists the Itinga border as Salvador; querying only "Lauro de Freitas"
- * returns zero results for streets such as Rua Direta da Cachoeira.
- */
-export async function geocodeDeliveryAddress(parts: {
+function isGenericCityCentroid(lat: number, lng: number): boolean {
+  const dLat = (lat - LAURO_CITY_CENTER.lat) * 111.32;
+  const dLng = (lng - LAURO_CITY_CENTER.lng) * 111.32 * Math.cos((lat * Math.PI) / 180);
+  return Math.hypot(dLat, dLng) < 0.25;
+}
+
+function normalizeGeoText(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+}
+
+function streetQueryVariants(street: string): string[] {
+  const s = street.trim();
+  if (!s) return [];
+  if (/^(rua|r\.|avenida|av\.|travessa|tv\.|alameda|estrada|rodovia)\b/i.test(s)) return [s];
+  return [s, `Rua ${s}`];
+}
+
+export function hitMatchesNeighborhood(displayName: string, neighborhood: string): boolean {
+  const n = normalizeGeoText(neighborhood);
+  if (!n || n === "gps") return true;
+  return normalizeGeoText(displayName).includes(n);
+}
+
+export function buildDeliveryGeocodeQueries(parts: {
   street: string;
   number?: string;
   neighborhood?: string;
-}): Promise<{ lat: number; lng: number; displayName?: string } | null> {
-  const street = String(parts.street || "").trim();
+}): string[] {
+  const streets = streetQueryVariants(parts.street);
   const number = String(parts.number || "").trim();
   const neighborhood = String(parts.neighborhood || "").trim();
-  if (street.length < 3) return null;
-
   const queries: string[] = [];
   const push = (q: string) => {
     const v = q.replace(/\s+/g, " ").trim();
     if (v.length >= 8 && !queries.includes(v)) queries.push(v);
   };
-  for (const city of ["Lauro de Freitas", "Salvador"]) {
-    if (number && neighborhood) push(`${street}, ${number}, ${neighborhood}, ${city}, Bahia, Brasil`);
-    if (neighborhood) push(`${street}, ${neighborhood}, ${city}, Bahia, Brasil`);
+  for (const street of streets) {
+    for (const city of ["Lauro de Freitas", "Salvador"]) {
+      if (number && neighborhood) push(`${street}, ${number}, ${neighborhood}, ${city}, Bahia, Brasil`);
+      if (neighborhood) push(`${street}, ${neighborhood}, ${city}, Bahia, Brasil`);
+      if (!neighborhood) push(`${street}, ${city}, Bahia, Brasil`);
+    }
+    if (neighborhood) push(`${street}, ${neighborhood}, Bahia, Brasil`);
+    if (neighborhood && normalizeGeoText(neighborhood) !== "itinga") {
+      push(`${street}, Itinga, Bahia, Brasil`);
+    }
   }
-  if (neighborhood) push(`${street}, ${neighborhood}, Bahia, Brasil`);
-  push(`${street}, Itinga, Bahia, Brasil`);
+  return queries;
+}
 
-  for (const q of queries.slice(0, 4)) {
-    try {
-      const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=5&countrycodes=br&addressdetails=1`;
-      const res = await fetch(url, { headers: { "Accept-Language": "pt-BR", "User-Agent": "TheBurgerGN/1.0" } });
-      const data = await res.json() as Array<{ lat: string; lon: string; display_name?: string }>;
-      if (!Array.isArray(data)) continue;
-      for (const hit of data) {
-        const lat = parseFloat(hit.lat);
-        const lng = parseFloat(hit.lon);
-        if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
-        const displayName = String(hit.display_name || "");
-        if (!isCheckoutGeoHit(lat, lng, displayName)) continue;
-        return { lat, lng, displayName };
+async function geocodeViaPhoton(parts: {
+  street: string;
+  neighborhood?: string;
+  nearLat?: number;
+  nearLng?: number;
+}): Promise<{ lat: number; lng: number; displayName?: string } | null> {
+  const street = streetQueryVariants(parts.street)[0];
+  if (!street) return null;
+  const neighborhood = String(parts.neighborhood || "").trim();
+  const q = [street, neighborhood, "Bahia", "Brasil"].filter(Boolean).join(" ");
+  try {
+    const url = new URL("https://photon.komoot.io/api/");
+    url.searchParams.set("q", q);
+    url.searchParams.set("limit", "8");
+    if (Number.isFinite(parts.nearLat) && Number.isFinite(parts.nearLng)) {
+      url.searchParams.set("lat", String(parts.nearLat));
+      url.searchParams.set("lon", String(parts.nearLng));
+    }
+    const res = await fetch(url.toString(), { headers: { "Accept-Language": "pt-BR", "User-Agent": "TheBurgerGN/1.0" } });
+    const data = await res.json() as {
+      features?: Array<{
+        geometry?: { coordinates?: number[] };
+        properties?: { name?: string; street?: string; district?: string; city?: string; state?: string; country?: string };
+      }>;
+    };
+    for (const feat of data.features || []) {
+      const coords = feat.geometry?.coordinates;
+      const lng = Number(coords?.[0]);
+      const lat = Number(coords?.[1]);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+      if (isGenericCityCentroid(lat, lng)) continue;
+      const p = feat.properties || {};
+      const displayName = [p.name || p.street, p.district, p.city, p.state, p.country].filter(Boolean).join(", ");
+      if (!isCheckoutGeoHit(lat, lng, displayName)) continue;
+      if (neighborhood && !hitMatchesNeighborhood(displayName, neighborhood)) continue;
+      return { lat, lng, displayName };
+    }
+  } catch {
+    /* Photon is an extra index; Nominatim remains the primary lookup */
+  }
+  return null;
+}
+
+async function nominatimJsonSearch(q: string): Promise<Array<{ lat: string; lon: string; display_name?: string }>> {
+  const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=5&countrycodes=br&addressdetails=1`;
+  const res = await fetch(url, { headers: { "Accept-Language": "pt-BR", "User-Agent": "TheBurgerGN/1.0" } });
+  if (res.status === 429) {
+    await new Promise((r) => setTimeout(r, 1200));
+    const retry = await fetch(url, { headers: { "Accept-Language": "pt-BR", "User-Agent": "TheBurgerGN/1.0" } });
+    if (!retry.ok) return [];
+    const data = await retry.json();
+    return Array.isArray(data) ? data : [];
+  }
+  if (!res.ok) return [];
+  const data = await res.json();
+  return Array.isArray(data) ? data : [];
+}
+
+function pickNominatimHit(
+  hits: Array<{ lat: string; lon: string; display_name?: string }>,
+  neighborhood: string,
+): { lat: number; lng: number; displayName?: string } | null {
+  for (const hit of hits) {
+    const lat = parseFloat(hit.lat);
+    const lng = parseFloat(hit.lon);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+    if (isGenericCityCentroid(lat, lng)) continue;
+    const displayName = String(hit.display_name || "");
+    if (!isCheckoutGeoHit(lat, lng, displayName)) continue;
+    if (neighborhood && !hitMatchesNeighborhood(displayName, neighborhood)) continue;
+    return { lat, lng, displayName };
+  }
+  return null;
+}
+
+async function geocodeViaCorreios(parts: {
+  street: string;
+  neighborhood: string;
+}): Promise<{ lat: number; lng: number; displayName?: string } | null> {
+  const neighborhood = String(parts.neighborhood || "").trim();
+  if (!neighborhood) return null;
+  const terms = streetQueryVariants(parts.street).map((s) => s.replace(/^(rua|r\.)\s+/i, "").trim());
+  for (const city of ["Lauro de Freitas", "Salvador"]) {
+    for (const term of terms) {
+      if (term.length < 3) continue;
+      try {
+        const url = `https://viacep.com.br/ws/BA/${encodeURIComponent(city)}/${encodeURIComponent(term)}/json/`;
+        const res = await fetch(url);
+        const data = await res.json() as Array<{
+          cep?: string;
+          logradouro?: string;
+          bairro?: string;
+          localidade?: string;
+          erro?: boolean;
+        }> | { erro?: boolean };
+        const entries = Array.isArray(data) ? data : [];
+        for (const entry of entries) {
+          if (!entry || entry.erro || !entry.logradouro) continue;
+          const hay = [entry.logradouro, entry.bairro, entry.localidade, "Bahia"].filter(Boolean).join(", ");
+          if (!hitMatchesNeighborhood(hay, neighborhood)) continue;
+          const log = normalizeGeoText(entry.logradouro);
+          const want = normalizeGeoText(parts.street);
+          const wantCore = normalizeGeoText(term);
+          if (log !== want && log !== normalizeGeoText(`Rua ${term}`) && log.replace(/^(rua|r\.)\s+/, "") !== wantCore) {
+            continue;
+          }
+          const cep = String(entry.cep || "").replace(/\D/g, "").slice(0, 8);
+          if (cep.length !== 8) continue;
+          const br = await fetch(`https://brasilapi.com.br/api/cep/v2/${cep}`);
+          if (!br.ok) continue;
+          const json = await br.json() as { location?: { coordinates?: { latitude?: string; longitude?: string } } };
+          const lat = parseFloat(String(json?.location?.coordinates?.latitude ?? ""));
+          const lng = parseFloat(String(json?.location?.coordinates?.longitude ?? ""));
+          if (Number.isFinite(lat) && Number.isFinite(lng) && !isGenericCityCentroid(lat, lng) && isCheckoutGeoHit(lat, lng, hay)) {
+            return { lat, lng, displayName: hay };
+          }
+        }
+      } catch {
+        continue;
       }
+    }
+  }
+  return null;
+}
+
+/**
+ * Checkout geocode: Photon → Nominatim → Correios/BrasilAPI.
+ * Hits in a different district than the typed neighborhood are ignored
+ * (e.g. Portão vs Itinga). City-centroid CEP fallbacks are rejected so
+ * kilometrage is never calculated from the Lauro downtown pin.
+ */
+export async function geocodeDeliveryAddress(parts: {
+  street: string;
+  number?: string;
+  neighborhood?: string;
+  nearLat?: number;
+  nearLng?: number;
+}): Promise<{ lat: number; lng: number; displayName?: string } | null> {
+  const street = String(parts.street || "").trim();
+  const neighborhood = String(parts.neighborhood || "").trim();
+  if (street.length < 3) return null;
+
+  const photon = await geocodeViaPhoton({
+    street,
+    neighborhood,
+    nearLat: parts.nearLat,
+    nearLng: parts.nearLng,
+  });
+  if (photon) return photon;
+
+  const queries = buildDeliveryGeocodeQueries(parts).slice(0, 6);
+  for (let i = 0; i < queries.length; i++) {
+    if (i > 0) await new Promise((r) => setTimeout(r, 1100));
+    try {
+      const hit = pickNominatimHit(await nominatimJsonSearch(queries[i]!), neighborhood);
+      if (hit) return hit;
     } catch {
       continue;
     }
   }
-  return null;
+
+  return geocodeViaCorreios({ street, neighborhood });
 }
 
 /** Municipal bounding box for Lauro de Freitas/BA (slightly padded). Nominatim viewbox: left,top,right,bottom */

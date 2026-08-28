@@ -39,12 +39,24 @@ export function findKmTier(
   const sorted = [...tiers].sort(
     (a, b) => parseFloat(String(a.fromKm)) - parseFloat(String(b.fromKm)),
   );
-  for (const tier of sorted) {
+  for (let i = 0; i < sorted.length; i++) {
+    const tier = sorted[i]!;
     const from = parseFloat(String(tier.fromKm));
-    const to =
+    const explicitTo =
       tier.toKm !== null && tier.toKm !== undefined ? parseFloat(String(tier.toKm)) : Infinity;
+    const nextFrom =
+      i + 1 < sorted.length ? parseFloat(String(sorted[i + 1]!.fromKm)) : NaN;
+    // Close gaps like 0–2 then 2.1–4 so 2.05 km still belongs to a band.
+    const to =
+      Number.isFinite(nextFrom) && nextFrom > from
+        ? Math.max(Number.isFinite(explicitTo) ? explicitTo : 0, nextFrom)
+        : explicitTo;
     if (!Number.isFinite(from)) continue;
-    if (distanceKm >= from && distanceKm <= to) {
+    const inBand =
+      Number.isFinite(nextFrom) && nextFrom > from
+        ? distanceKm >= from && distanceKm < nextFrom
+        : distanceKm >= from && distanceKm <= to;
+    if (inBand) {
       return {
         fee:
           tier.fee !== null && tier.fee !== undefined ? parseFloat(String(tier.fee)) : null,

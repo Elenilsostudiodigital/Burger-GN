@@ -1,0 +1,21 @@
+---
+description: Permanent delivery architecture — green polygon coverage, KM fee, no neighborhood seed
+globs: artifacts/burger-gn/src/pages/Checkout.tsx,artifacts/burger-gn/src/lib/api.ts,artifacts/burger-gn/src/lib/validateDeliveryCoverage.ts,artifacts/api-server/src/lib/seed.ts,artifacts/api-server/src/lib/deliveryAreas.ts,artifacts/api-server/src/lib/geocodeStreets.ts,artifacts/api-server/src/routes/orders.ts
+alwaysApply: true
+---
+
+# Entrega: polígono + KM
+
+Coverage is the green polygon. Fee is the KM tier table. Typed address, GPS, and map pin must all call `applyCoordinates` → `validateDeliveryCoverage(lat, lng)`.
+
+Do not:
+
+- Re-insert `DEFAULT_DELIVERY_ZONES` (or any neighborhood list) in `seed.ts`. If `areasEnabled`, delete leftover `delivery_zones` on boot.
+- Charge `minFee`/`feePerKm` from the area row when KM tiers exist.
+- Snap geocode to a namesake street in another neighborhood (e.g. Portão vs Itinga) or to Lauro city centroid.
+- Let the street registry or neighborhood fee overwrite an allowed polygon/KM result.
+- Replace a GPS point with a geocoded OSM name.
+
+Unmapped but real streets (OSM miss, Correios hit): GPS or map pin. Never invent coordinates.
+
+Keep `scripts/gps-delivery-coverage-selftest.mjs` and `scripts/delivery-areas-resolve-selftest.mjs` passing.

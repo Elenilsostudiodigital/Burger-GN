@@ -226,5 +226,37 @@ if (noCoordsApproved.status !== "allowed" || noCoordsApproved.source !== "street
   throw new Error(`approved street without geocode should allow: ${JSON.stringify(noCoordsApproved)}`);
 }
 
+const kmTiers = [
+  { fromKm: "0", toKm: "2", fee: "5.00" },
+  { fromKm: "2.1", toKm: "4", fee: "8.00" },
+  { fromKm: "4.1", toKm: "6", fee: "10.00" },
+];
+const withKm = resolvePointInAreas({
+  areasEnabled: true,
+  areas: [green],
+  lat: -12.895,
+  lng: -38.325,
+  baseLat: -12.870,
+  baseLng: -38.325,
+  kmTiers,
+});
+if (withKm.status !== "allowed") throw new Error(`km inside should allow: ${JSON.stringify(withKm)}`);
+if (withKm.distanceKm == null || withKm.distanceKm < 2.1 || withKm.distanceKm >= 4.1) {
+  throw new Error(`expected ~2.8 km, got ${withKm.distanceKm}`);
+}
+if (withKm.fee !== 8) {
+  throw new Error(`2.8 km must use KM band R$ 8, got ${withKm.fee} (area minFee/feePerKm must not win)`);
+}
+
+const noTiers = resolvePointInAreas({
+  areasEnabled: true,
+  areas: [green],
+  lat: -12.895,
+  lng: -38.325,
+  baseLat: -12.870,
+  baseLng: -38.325,
+});
+if (noTiers.fee === 8) throw new Error("without KM tiers the area formula should still apply");
+
 try { fs.unlinkSync(outfile); } catch { /* ignore */ }
 console.log("delivery-areas-resolve-selftest: PASS");

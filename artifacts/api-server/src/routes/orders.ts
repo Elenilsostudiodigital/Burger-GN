@@ -322,6 +322,11 @@ router.post("/orders", resolvePublicCompany, async (req, res) => {
           .select()
           .from(deliveryAreasTable)
           .where(eq(deliveryAreasTable.companyId, companyId));
+        const kmTiers = await db
+          .select()
+          .from(kmDeliveryTiersTable)
+          .where(eq(kmDeliveryTiersTable.companyId, companyId))
+          .orderBy(asc(kmDeliveryTiersTable.displayOrder));
         const coverage = evaluateDeliveryCoverage({
           areasEnabled: true,
           areas,
@@ -329,6 +334,7 @@ router.post("/orders", resolvePublicCompany, async (req, res) => {
           lng: body.customerLng ?? null,
           baseLat: parseFloat(String(kmConfigForAreas.baseLat ?? 0)),
           baseLng: parseFloat(String(kmConfigForAreas.baseLng ?? 0)),
+          kmTiers,
           knownStreet: knownStreetAny
             ? {
                 active: knownStreetAny.active,
@@ -415,23 +421,30 @@ router.post("/orders", resolvePublicCompany, async (req, res) => {
         }
       }
 
-      // Neighborhood fallback — same conditions as before (only when KM did not measure distance).
+      // Neighborhood fallback only when neither áreas nor KM owns coverage.
       if (!deliveryFeeResolved && deliveryFee === 0 && !customerDistanceKm && body.neighborhood) {
-        const [zone] = await db
+        const [kmCfg] = await db
           .select()
-          .from(deliveryZonesTable)
-          .where(
-            and(
-              eq(deliveryZonesTable.companyId, companyId),
-              eq(deliveryZonesTable.active, true),
-              sql`LOWER(neighborhood) = LOWER(${body.neighborhood})`,
-            ),
-          );
-        if (zone) {
-          const fee = parseFloat(zone.fee);
-          if (Number.isFinite(fee)) {
-            deliveryFee = fee;
-            deliveryFeeResolved = true;
+          .from(kmDeliveryConfigTable)
+          .where(eq(kmDeliveryConfigTable.companyId, companyId))
+          .limit(1);
+        if (!kmCfg?.areasEnabled && !kmCfg?.enabled) {
+          const [zone] = await db
+            .select()
+            .from(deliveryZonesTable)
+            .where(
+              and(
+                eq(deliveryZonesTable.companyId, companyId),
+                eq(deliveryZonesTable.active, true),
+                sql`LOWER(neighborhood) = LOWER(${body.neighborhood})`,
+              ),
+            );
+          if (zone) {
+            const fee = parseFloat(zone.fee);
+            if (Number.isFinite(fee)) {
+              deliveryFee = fee;
+              deliveryFeeResolved = true;
+            }
           }
         }
       }

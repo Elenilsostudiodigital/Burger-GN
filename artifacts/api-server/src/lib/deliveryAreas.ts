@@ -1,5 +1,5 @@
 import type { DeliveryArea, DeliveryAreaBBox, DeliveryAreaPolygon } from "@workspace/db";
-import { haversineKm } from "./deliveryStreets";
+import { findKmTier, haversineKm } from "./deliveryStreets";
 
 export const OUTSIDE_AREA_MSG = "Não entregamos nesta região.";
 export const BLOCKED_AREA_DEFAULT_MSG = "Não entregamos nesta área.";
@@ -233,8 +233,9 @@ export function resolvePointInAreas(opts: {
   lng: number;
   baseLat: number;
   baseLng: number;
+  kmTiers?: Array<{ fromKm: string; toKm: string | null; fee: string | null }>;
 }): ResolveAreaResult {
-  const { areasEnabled, areas, lat, lng, baseLat, baseLng } = opts;
+  const { areasEnabled, areas, lat, lng, baseLat, baseLng, kmTiers } = opts;
 
   if (!areasEnabled) {
     return {
@@ -324,11 +325,25 @@ export function resolvePointInAreas(opts: {
     distanceKm = parseFloat(haversineKm(baseLat, baseLng, lat, lng).toFixed(2));
   }
 
-  // Point inside the drawn green polygon is covered. maxDistanceKm must not
-  // convert an in-area location into "outside" (that hid Itinga addresses).
+  // Point inside the drawn green polygon is covered. Fee is the KM table —
+  // never the old area minFee/feePerKm formula, which charged a flat minFee
+  // whenever feePerKm was 0 (e.g. 2.8 km shown, R$ 5 charged instead of R$ 8).
   const minFee = parseFloat(String(chosen.minFee ?? 0));
   const feePerKm = parseFloat(String(chosen.feePerKm ?? 0));
-  const fee = calcAreaFee(minFee, feePerKm, distanceKm ?? 0);
+  let fee: number | null = null;
+  if (Array.isArray(kmTiers) && kmTiers.length > 0 && distanceKm != null) {
+    const { fee: tierFee, consult } = findKmTier(distanceKm, kmTiers);
+    if (!consult && tierFee != null && Number.isFinite(tierFee)) {
+      fee = tierFee;
+    } else {
+      const paid = kmTiers
+        .map((t) => parseFloat(String(t.fee)))
+        .filter((n) => Number.isFinite(n));
+      fee = paid.length > 0 ? paid[paid.length - 1]! : calcAreaFee(minFee, feePerKm, distanceKm);
+    }
+  } else {
+    fee = calcAreaFee(minFee, feePerKm, distanceKm ?? 0);
+  }
 
   return {
     status: "allowed",
@@ -373,8 +388,9 @@ export function evaluateDeliveryCoverage(opts: {
   baseLat: number;
   baseLng: number;
   knownStreet: CoverageStreet | null;
+  kmTiers?: Array<{ fromKm: string; toKm: string | null; fee: string | null }>;
 }): CoverageResult {
-  const { areasEnabled, areas, lat, lng, baseLat, baseLng, knownStreet } = opts;
+  const { areasEnabled, areas, lat, lng, baseLat, baseLng, knownStreet, kmTiers } = opts;
 
   if (!areasEnabled) {
     return {
@@ -399,6 +415,7 @@ export function evaluateDeliveryCoverage(opts: {
         lng: lng as number,
         baseLat,
         baseLng,
+        kmTiers,
       })
     : null;
 

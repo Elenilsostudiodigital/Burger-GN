@@ -16,6 +16,11 @@ type StreetMapPreviewProps = {
   message?: string;
   /** Optional human-readable address shown under the map */
   address?: string;
+  /** Fallback center when there is no pin yet (store location). */
+  centerLat?: number | null;
+  centerLng?: number | null;
+  /** When set, tapping the map drops the delivery pin. */
+  onPick?: (lat: number, lng: number) => void;
 };
 
 type BaseLayer = "map" | "satellite";
@@ -58,6 +63,9 @@ export function StreetMapPreview({
   loading = false,
   message = "",
   address = "",
+  centerLat = null,
+  centerLng = null,
+  onPick,
 }: StreetMapPreviewProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
@@ -65,6 +73,8 @@ export function StreetMapPreview({
   const osmLayerRef = useRef<L.TileLayer | null>(null);
   const satLayerRef = useRef<L.TileLayer | null>(null);
   const coordsRef = useRef<{ lat: number; lng: number } | null>(null);
+  const onPickRef = useRef(onPick);
+  onPickRef.current = onPick;
   const [base, setBase] = useState<BaseLayer>("map");
 
   const hasCoords =
@@ -82,11 +92,15 @@ export function StreetMapPreview({
 
     const host = hostRef.current;
     const start = coordsRef.current;
+    const center =
+      centerLat != null && centerLng != null && Number.isFinite(centerLat) && Number.isFinite(centerLng)
+        ? { lat: centerLat, lng: centerLng }
+        : null;
     const map = L.map(host, {
       zoomControl: true,
       attributionControl: true,
     }).setView(
-      start ? [start.lat, start.lng] : [-12.89444, -38.32722],
+      start ? [start.lat, start.lng] : center ? [center.lat, center.lng] : [-12.89444, -38.32722],
       start ? ADDRESS_ZOOM : 13,
     );
 
@@ -97,9 +111,14 @@ export function StreetMapPreview({
     satLayerRef.current = sat;
     mapRef.current = map;
 
+    const onMapClick = (e: L.LeafletMouseEvent) => {
+      onPickRef.current?.(e.latlng.lat, e.latlng.lng);
+    };
+    map.on("click", onMapClick);
+
     const syncSize = () => {
       const c = coordsRef.current;
-      fitCustomerView(map, c?.lat ?? null, c?.lng ?? null);
+      fitCustomerView(map, c?.lat ?? center?.lat ?? null, c?.lng ?? center?.lng ?? null);
     };
 
     const onResize = () => syncSize();
@@ -159,6 +178,14 @@ export function StreetMapPreview({
         map.removeLayer(markerRef.current);
         markerRef.current = null;
       }
+      if (
+        centerLat != null &&
+        centerLng != null &&
+        Number.isFinite(centerLat) &&
+        Number.isFinite(centerLng)
+      ) {
+        map.setView([centerLat, centerLng], 13, { animate: false });
+      }
       return;
     }
 
@@ -172,7 +199,7 @@ export function StreetMapPreview({
     requestAnimationFrame(() => fitCustomerView(map, lat, lng));
     const t = window.setTimeout(() => fitCustomerView(map, lat, lng), 200);
     return () => window.clearTimeout(t);
-  }, [hasCoords, lat, lng]);
+  }, [hasCoords, lat, lng, centerLat, centerLng]);
 
   return (
     <div className="rounded-xl border border-zinc-800 bg-zinc-950 overflow-hidden">
@@ -216,15 +243,15 @@ export function StreetMapPreview({
         {/* Host always mounted — Leaflet owns children inside */}
         <div
           ref={hostRef}
-          className={`bgn-street-map-host absolute inset-0 z-0 h-full w-full ${showMapShell(hasCoords, loading)}`}
+          className={`bgn-street-map-host absolute inset-0 z-0 h-full w-full ${showMapShell(hasCoords, loading, !!onPick)} ${onPick ? "cursor-crosshair" : ""}`}
           aria-label={hasCoords ? "Mapa da localização" : "Mapa"}
         />
 
         <div
           className={`absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 px-4 text-center bg-zinc-950/90 ${
-            hasCoords && !loading ? "invisible pointer-events-none" : ""
+            (hasCoords || onPick) && !loading ? "invisible pointer-events-none" : ""
           }`}
-          aria-hidden={hasCoords && !loading}
+          aria-hidden={(hasCoords || !!onPick) && !loading}
         >
           <p className={`text-amber-500 text-sm font-bold ${loading ? "" : "invisible"}`}>
             Localizando endereço…
@@ -258,13 +285,17 @@ export function StreetMapPreview({
           {coordText}
         </p>
         <p className={`text-zinc-600 text-xs ${hasCoords ? "invisible" : ""}`}>
-          {message || "Nenhum ponto selecionado ainda."}
+          {onPick
+            ? "Toque no mapa no ponto da sua casa para calcular a taxa."
+            : message || "Nenhum ponto selecionado ainda."}
         </p>
       </div>
     </div>
   );
 }
 
-function showMapShell(hasCoords: boolean, loading: boolean): string {
-  return hasCoords && !loading ? "opacity-100" : "opacity-0";
+function showMapShell(hasCoords: boolean, loading: boolean, pickable: boolean): string {
+  if (loading) return "opacity-0";
+  if (hasCoords || pickable) return "opacity-100";
+  return "opacity-0";
 }

@@ -3,6 +3,7 @@ import { db } from "@workspace/db";
 import {
   deliveryAreasTable,
   kmDeliveryConfigTable,
+  kmDeliveryTiersTable,
   type DeliveryArea,
 } from "@workspace/db";
 import { eq, and, desc, asc } from "drizzle-orm";
@@ -91,6 +92,10 @@ router.post("/delivery/resolve-area", resolvePublicCompany, async (req, res) => 
       .from(deliveryAreasTable)
       .where(eq(deliveryAreasTable.companyId, req.companyId!));
     const base = await getBaseCoords(req.companyId!);
+    const kmTiers = await db
+      .select()
+      .from(kmDeliveryTiersTable)
+      .where(eq(kmDeliveryTiersTable.companyId, req.companyId!));
     const result = resolvePointInAreas({
       areasEnabled,
       areas,
@@ -98,6 +103,7 @@ router.post("/delivery/resolve-area", resolvePublicCompany, async (req, res) => 
       lng,
       baseLat: base.lat,
       baseLng: base.lng,
+      kmTiers,
     });
     res.json(result);
   } catch (err) {

@@ -26,11 +26,17 @@ export function findKmTier(
     return { fee: null, consult: true };
   }
   const sorted = [...tiers].sort((a, b) => parseFloat(String(a.fromKm)) - parseFloat(String(b.fromKm)));
-  for (const tier of sorted) {
+  for (let i = 0; i < sorted.length; i++) {
+    const tier = sorted[i]!;
     const from = parseFloat(String(tier.fromKm));
-    const to = tier.toKm !== null && tier.toKm !== undefined ? parseFloat(String(tier.toKm)) : Infinity;
+    const explicitTo = tier.toKm !== null && tier.toKm !== undefined ? parseFloat(String(tier.toKm)) : Infinity;
+    const nextFrom = i + 1 < sorted.length ? parseFloat(String(sorted[i + 1]!.fromKm)) : NaN;
     if (!Number.isFinite(from)) continue;
-    if (distanceKm >= from && distanceKm <= to) {
+    const inBand =
+      Number.isFinite(nextFrom) && nextFrom > from
+        ? distanceKm >= from && distanceKm < nextFrom
+        : distanceKm >= from && distanceKm <= explicitTo;
+    if (inBand) {
       return { fee: tier.fee !== null && tier.fee !== undefined ? parseFloat(String(tier.fee)) : null, consult: tier.fee === null };
     }
   }

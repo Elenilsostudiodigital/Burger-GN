@@ -208,6 +208,7 @@ router.post("/delivery/streets/check", resolvePublicCompany, async (req, res) =>
         lng,
         baseLat,
         baseLng,
+        kmTiers: tiers,
         knownStreet: street
           ? {
               active: street.active,
@@ -467,6 +468,7 @@ async function upsertPendingAnalysisRequest(
       lng: resolvedLng,
       baseLat: parseFloat(String(config.baseLat ?? 0)),
       baseLng: parseFloat(String(config.baseLng ?? 0)),
+      kmTiers: tiers,
       knownStreet: null,
     });
     if (coverage.inDeliveryArea || coverage.status === "allowed") {

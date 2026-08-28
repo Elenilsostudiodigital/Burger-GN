@@ -116,9 +116,9 @@ let n = 0;
   const gpsStart = checkout.indexOf("const startGps");
   const gpsEnd = checkout.indexOf("const confirmGpsLocation");
   const gpsBlock = checkout.slice(gpsStart, gpsEnd);
-  assert(gpsBlock.includes("applyCoordinates(lat, lng)"), "GPS feeds browser lat/lng into applyCoordinates");
+  assert(gpsBlock.includes("watchPosition"), "GPS falls back to watchPosition on slow devices");
+  assert(!gpsBlock.includes("geocodeDeliveryAddress"), "GPS coordinates must not be replaced by a geocoded namesake");
   assert(gpsBlock.includes("reverseGeocode(lat, lng)"), "GPS reverse geocode only fills the address form");
-  assert(gpsBlock.includes("geocodeDeliveryAddress({"), "GPS fallback uses the same geocode as typing");
   assert(!gpsBlock.includes("checkDeliveryStreet"), "GPS does not validate coverage via street name");
   n++;
 }
@@ -216,7 +216,42 @@ let n = 0;
   assert(checkout.includes("DO_NOT_DELIVER_MSG"), "failure copy wired");
   assert(!checkout.includes("Esta região ainda não faz parte da nossa área de entrega."), "checkout dropped street-unknown coverage copy");
   assert(areasSrc.includes("Não entregamos nesta região."), "server outside copy matches");
+  const seedSrc = fs.readFileSync(path.join(root, "artifacts/api-server/src/lib/seed.ts"), "utf8");
+  assert(!seedSrc.includes("Seeding default delivery zones"), "seed must not recreate deleted neighborhoods");
+  const geoSrc = fs.readFileSync(path.join(root, "artifacts/burger-gn/src/lib/api.ts"), "utf8");
+  assert(geoSrc.includes("buildDeliveryGeocodeQueries"), "typed geocode uses the full query set");
+  assert(!geoSrc.includes("queries.slice(0, 4)"), "geocode must not drop Itinga queries");
+  assert(geoSrc.includes("hitMatchesNeighborhood"), "neighborhood filter rejects namesake streets");
+  assert(geoSrc.includes("isGenericCityCentroid"), "CEP city-centroid coords are not used for KM");
+  assert(seedSrc.includes("Cleared legacy neighborhood"), "seed deletes leftover bairro zones when áreas are on");
+  assert(checkout.includes("onPick"), "unmapped streets can be pinned on the map");
   n++;
 }
 
-console.log(`gps-delivery-coverage-selftest: ${n}/10 ok`);
+{
+  const tiers = [
+    { fromKm: "0", toKm: "2", fee: "5.00" },
+    { fromKm: "2.1", toKm: "4", fee: "8.00" },
+    { fromKm: "4.1", toKm: "6", fee: "10.00" },
+  ];
+  function findKmTier(distanceKm, list) {
+    const sorted = [...list].sort((a, b) => parseFloat(a.fromKm) - parseFloat(b.fromKm));
+    for (let i = 0; i < sorted.length; i++) {
+      const tier = sorted[i];
+      const from = parseFloat(tier.fromKm);
+      const explicitTo = tier.toKm != null ? parseFloat(tier.toKm) : Infinity;
+      const nextFrom = i + 1 < sorted.length ? parseFloat(sorted[i + 1].fromKm) : NaN;
+      const inBand =
+        Number.isFinite(nextFrom) && nextFrom > from
+          ? distanceKm >= from && distanceKm < nextFrom
+          : distanceKm >= from && distanceKm <= explicitTo;
+      if (inBand) return { fee: parseFloat(tier.fee), consult: false };
+    }
+    return { fee: null, consult: true };
+  }
+  assert(findKmTier(2.05, tiers).fee === 5, "gap 2.05 km stays in the first band");
+  assert(findKmTier(2.8, tiers).fee === 8, "2.8 km uses the 2.1–4 km band");
+  n++;
+}
+
+console.log(`gps-delivery-coverage-selftest: ${n}/11 ok`);

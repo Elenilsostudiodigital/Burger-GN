@@ -109,6 +109,9 @@ export default function Checkout() {
   const kmEnabled = !!kmConfig?.enabled;
   const areasEnabled = !!kmConfig?.areasEnabled;
   const needsCoordsFee = kmEnabled || areasEnabled;
+  const storeLat = parseFloat(String(kmConfig?.baseLat ?? ''));
+  const storeLng = parseFloat(String(kmConfig?.baseLng ?? ''));
+  const hasStore = Number.isFinite(storeLat) && Number.isFinite(storeLng) && !(storeLat === 0 && storeLng === 0);
   const [customerCoords, setCustomerCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [distanceKm, setDistanceKm] = useState<number | null>(null);
   const [gpsLoading, setGpsLoading] = useState(false);
@@ -298,6 +301,8 @@ export default function Checkout() {
           street: form.endereco.trim(),
           number: form.numero.trim(),
           neighborhood: form.bairro.trim(),
+          nearLat: Number.parseFloat(String(kmConfig?.baseLat ?? "")),
+          nearLng: Number.parseFloat(String(kmConfig?.baseLng ?? "")),
         });
         if (coords) await applyCoordinates(coords.lat, coords.lng);
         else {
@@ -306,18 +311,18 @@ export default function Checkout() {
           setCustomerCoords(null);
           setDistanceKm(null);
           setFeeFound(false);
-          setFeeMessage('Não foi possível localizar este endereço automaticamente. Confira rua, número e bairro.');
+          setFeeMessage('Não encontramos essa rua no mapa. Use Usar minha localização ou toque no mapa no ponto da sua casa.');
           setFeeLoading(false);
         }
       } catch (err) {
         console.error('[BurgerGN] geocode effect failed:', err);
         setFeeFound(false);
-        setFeeMessage('Não foi possível localizar este endereço automaticamente. Consulte a taxa com a loja.');
+        setFeeMessage('Não encontramos essa rua no mapa. Use Usar minha localização ou toque no mapa no ponto da sua casa.');
         setFeeLoading(false);
       }
     }, 900);
     return () => clearTimeout(feeDebounce.current);
-  }, [form.endereco, form.numero, form.bairro, needsCoordsFee, isDelivery, step, applyCoordinates]);
+  }, [form.endereco, form.numero, form.bairro, needsCoordsFee, isDelivery, step, applyCoordinates, kmConfig]);
 
   // If GPS/manual obtained coords before km/áreas config loaded, re-run the same validator.
   useEffect(() => {
@@ -595,58 +600,80 @@ export default function Checkout() {
     }
     setGpsLoading(true);
     setGpsError('');
-    navigator.geolocation.getCurrentPosition(
-      async (pos) => {
+
+    const readGps = (opts: PositionOptions) =>
+      new Promise<GeolocationPosition>((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject, opts);
+      });
+
+    const watchGps = (timeoutMs: number) =>
+      new Promise<GeolocationPosition>((resolve, reject) => {
+        let settled = false;
+        const watchId = navigator.geolocation.watchPosition(
+          (pos) => {
+            if (settled) return;
+            settled = true;
+            navigator.geolocation.clearWatch(watchId);
+            resolve(pos);
+          },
+          (err) => {
+            if (settled) return;
+            settled = true;
+            navigator.geolocation.clearWatch(watchId);
+            reject(err);
+          },
+          { enableHighAccuracy: true, timeout: timeoutMs, maximumAge: 0 },
+        );
+        window.setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          navigator.geolocation.clearWatch(watchId);
+          reject(Object.assign(new Error("timeout"), { code: 3 }));
+        }, timeoutMs + 400);
+      });
+
+    const gpsErrorMessage = (err: unknown) => {
+      const code = err && typeof err === 'object' && 'code' in err ? Number((err as GeolocationPositionError).code) : 0;
+      if (code === 1) return 'Permissão de localização negada. Ative o GPS no navegador, toque no mapa ou digite o endereço.';
+      if (code === 3) return 'O GPS demorou demais. Toque no mapa no ponto da sua casa ou digite o endereço.';
+      if (code === 2) return 'Não foi possível obter o GPS neste aparelho. Toque no mapa ou digite o endereço.';
+      return 'Não foi possível obter sua localização. Toque no mapa ou digite o endereço.';
+    };
+
+    void (async () => {
+      try {
+        let pos: GeolocationPosition;
+        try {
+          pos = await readGps({ enableHighAccuracy: false, timeout: 8000, maximumAge: 30000 });
+        } catch {
+          try {
+            pos = await readGps({ enableHighAccuracy: true, timeout: 20000, maximumAge: 0 });
+          } catch {
+            pos = await watchGps(20000);
+          }
+        }
         const lat = pos.coords.latitude;
         const lng = pos.coords.longitude;
-        try {
-          let coverage = await applyCoordinates(lat, lng);
-          const resolved = await reverseGeocode(lat, lng);
-          if (resolved) {
-            setLocationLabel(resolved.displayName);
-            const nextBairro = resolved.bairro || 'GPS';
-            setForm(prev => ({
-              ...prev,
-              endereco: resolved.endereco || prev.endereco || 'Localização GPS',
-              numero: resolved.numero || prev.numero || 'S/N',
-              bairro: nextBairro,
-            }));
-            if (coverage.status === 'neighborhood') {
-              if (nextBairro && nextBairro !== 'GPS' && nextBairro !== '__outro__') {
-                await resolveNeighborhoodFee(nextBairro);
-              } else {
-                setFeeFound(false);
-                setFeeMessage('Não foi possível identificar o bairro. Digite o endereço ou Consulte a taxa com a loja.');
-              }
-            } else if (
-              !coverage.allowed
-              && coverage.status !== 'pending'
-              && resolved.endereco
-              && resolved.numero
-              && resolved.bairro
-            ) {
-              // Same geocode query + same validator as typing this address.
-              const geo = await geocodeDeliveryAddress({
-                street: resolved.endereco,
-                number: resolved.numero,
-                neighborhood: resolved.bairro,
-              });
-              if (geo) coverage = await applyCoordinates(geo.lat, geo.lng);
-            }
-          } else {
-            setLocationLabel(`${lat.toFixed(5)}, ${lng.toFixed(5)}`);
-            setForm(prev => ({
-              ...prev,
-              endereco: prev.endereco || 'Localização GPS',
-              numero: prev.numero || 'S/N',
-              bairro: prev.bairro || 'GPS',
-            }));
-            if (coverage.status === 'neighborhood') {
+        const coverage = await applyCoordinates(lat, lng);
+        const resolved = await reverseGeocode(lat, lng);
+        if (resolved) {
+          setLocationLabel(resolved.displayName);
+          const nextBairro = resolved.bairro || 'GPS';
+          setForm(prev => ({
+            ...prev,
+            endereco: resolved.endereco || prev.endereco || 'Localização GPS',
+            numero: resolved.numero || prev.numero || 'S/N',
+            bairro: nextBairro,
+          }));
+          if (coverage.status === 'neighborhood') {
+            if (nextBairro && nextBairro !== 'GPS' && nextBairro !== '__outro__') {
+              await resolveNeighborhoodFee(nextBairro);
+            } else {
               setFeeFound(false);
               setFeeMessage('Não foi possível identificar o bairro. Digite o endereço ou Consulte a taxa com a loja.');
             }
           }
-        } catch {
+        } else {
           setLocationLabel(`${lat.toFixed(5)}, ${lng.toFixed(5)}`);
           setForm(prev => ({
             ...prev,
@@ -654,16 +681,17 @@ export default function Checkout() {
             numero: prev.numero || 'S/N',
             bairro: prev.bairro || 'GPS',
           }));
-        } finally {
-          setGpsLoading(false);
+          if (coverage.status === 'neighborhood') {
+            setFeeFound(false);
+            setFeeMessage('Não foi possível identificar o bairro. Digite o endereço ou Consulte a taxa com a loja.');
+          }
         }
-      },
-      () => {
-        setGpsError('Não foi possível obter sua localização. Tente digitar o endereço.');
+      } catch (err) {
+        setGpsError(gpsErrorMessage(err));
+      } finally {
         setGpsLoading(false);
-      },
-      { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 },
-    );
+      }
+    })();
   };
 
   const confirmGpsLocation = () => {
@@ -1177,6 +1205,13 @@ export default function Checkout() {
                 lng={customerCoords?.lng ?? null}
                 loading={gpsLoading}
                 message={gpsError || 'Aguardando sua localização…'}
+                centerLat={hasStore ? storeLat : null}
+                centerLng={hasStore ? storeLng : null}
+                onPick={(lat, lng) => {
+                  setGpsError('');
+                  setLocationLabel('Ponto marcado no mapa');
+                  void applyCoordinates(lat, lng);
+                }}
               />
 
               {gpsError && !gpsLoading && (
@@ -1274,7 +1309,7 @@ export default function Checkout() {
 
                 <div className="space-y-1.5">
                   <Label className="text-zinc-400 text-xs">Bairro *</Label>
-                  {zones.length > 0 && !kmEnabled ? (
+                  {zones.length > 0 && !kmEnabled && !areasEnabled ? (
                     <div className="relative">
                       <select
                         value={form.bairro}
@@ -1320,6 +1355,22 @@ export default function Checkout() {
                 </div>
 
                 {feeBanner}
+
+                {needsCoordsFee ? (
+                  <StreetMapPreview
+                    lat={customerCoords?.lat ?? null}
+                    lng={customerCoords?.lng ?? null}
+                    loading={feeLoading}
+                    message={feeMessage || 'Toque no mapa se o endereço não for localizado automaticamente.'}
+                    address={[form.endereco, form.numero, form.bairro].filter(Boolean).join(', ')}
+                    centerLat={hasStore ? storeLat : null}
+                    centerLng={hasStore ? storeLng : null}
+                    onPick={(lat, lng) => {
+                      setFieldError('');
+                      void applyCoordinates(lat, lng);
+                    }}
+                  />
+                ) : null}
               </div>
 
               {fieldError && (
