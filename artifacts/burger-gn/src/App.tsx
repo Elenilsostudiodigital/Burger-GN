@@ -43,6 +43,7 @@ import AdminNovasRuas from "./pages/admin/NovasRuas";
 import AdminRuasEntrega from "./pages/admin/RuasEntrega";
 import AdminDivulgacao from "./pages/admin/Divulgacao";
 import { MenuPresenceTracker } from "./components/MenuPresenceTracker";
+import { EdgeBlockGuard } from "./components/EdgeBlockGuard";
 
 const queryClient = new QueryClient();
 
@@ -104,6 +105,7 @@ function Router() {
   return (
     <>
       <MenuPresenceTracker />
+      <EdgeBlockGuard />
       <Switch>
         {/* Customer routes */}
         <Route path="/" component={Home} />

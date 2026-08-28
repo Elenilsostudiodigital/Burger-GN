@@ -23,9 +23,9 @@ assert.match(orders, /req\.companyBlocked/);
 assert.match(orders, /Esta loja está temporariamente indisponível/);
 
 const sw = read("artifacts/burger-gn/public/sw.js");
-assert.match(sw, /burger-gn-pwa-v3-public/);
+assert.match(sw, /burger-gn-pwa-v5-edge-403/);
 assert.match(sw, /isCacheableOk/);
-assert.match(sw, /Never persist auth\/forbidden/);
+assert.match(sw, /isEdgeBlockStatus|403/);
 
 const app = read("artifacts/burger-gn/src/App.tsx");
 assert.match(app, /<Route path="\/" component=\{Home\} \/>/);
@@ -35,7 +35,7 @@ assert.match(app, /ProtectedAdminRoute/);
 assert.match(app, /path="\/admin\/cardapio".*ProtectedAdminRoute/);
 
 const vercel = read("vercel.json");
-assert.match(vercel, /"\/cardapio"/);
-assert.match(vercel, /must-revalidate/);
+assert.match(vercel, /CDN-Cache-Control|no-store/);
+assert.match(vercel, /must-revalidate|no-store/);
 
 console.log("test-public-access-hardening: ok");

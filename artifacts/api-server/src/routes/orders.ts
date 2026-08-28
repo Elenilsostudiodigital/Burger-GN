@@ -118,6 +118,10 @@ router.get("/orders/stream", requireCompanyAuth, (req, res) => {
   res.setHeader("Connection", "keep-alive");
   res.setHeader("X-Accel-Buffering", "no");
   res.flushHeaders();
+  // Per-connection retry jitter so a deploy (all SSE drop at once) does not
+  // stampede Vercel WAF → site-wide HTTP 403 for several minutes.
+  const retryMs = 4000 + Math.floor(Math.random() * 8000);
+  res.write(`retry: ${retryMs}\n\n`);
   res.write("event: connected\ndata: {}\n\n");
   addSSEClient(res, req.companyId!);
 
@@ -132,6 +136,7 @@ router.get("/orders/stream", requireCompanyAuth, (req, res) => {
     clearInterval(heartbeat);
     removeSSEClient(res);
     try {
+      res.write(`retry: ${4000 + Math.floor(Math.random() * 8000)}\n\n`);
       res.write("event: reconnect\ndata: {}\n\n");
       res.end();
     } catch { /* already closed */ }

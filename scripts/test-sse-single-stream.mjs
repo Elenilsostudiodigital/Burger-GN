@@ -33,17 +33,18 @@ for (const f of files) {
   );
 }
 
-const orders = read("artifacts/api-server/src/routes/orders.ts");
-assert.match(orders, /SSE_GRACEFUL_MS|gracefulMs/);
-assert.match(orders, /event: reconnect/);
-
 const sw = read("artifacts/burger-gn/public/sw.js");
-assert.match(sw, /burger-gn-pwa-v4-nocache-html/);
-assert.match(sw, /always network|network-only|Never cache/i);
+assert.match(sw, /burger-gn-pwa-v5-edge-403/);
+assert.match(sw, /always network|network-only|Never cache|fetchWithEdgeRetry/i);
 assert.doesNotMatch(sw, /cache\.put\("\/index\.html"/);
 
 const vercel = read("vercel.json");
 assert.match(vercel, /CDN-Cache-Control/);
 assert.match(vercel, /no-store/);
+
+const orders = read("artifacts/api-server/src/routes/orders.ts");
+assert.match(orders, /SSE_GRACEFUL_MS|gracefulMs/);
+assert.match(orders, /event: reconnect/);
+assert.match(orders, /retry:/);
 
 console.log("test-sse-single-stream: ok");

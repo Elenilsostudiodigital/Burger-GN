@@ -1,9 +1,10 @@
 /* Burger GN PWA — network-safe service worker.
  * Never intercepts /api (incl. SSE).
- * Navigations are network-only (never cache HTML) to avoid sticky 403 pages
- * if the edge briefly returns Forbidden (WAF / mitigation).
+ * Navigations are network-only (never cache HTML). On 403/429 (Vercel WAF
+ * after deploys) retry with backoff so a brief edge block is not shown as
+ * a sticky "Forbidden" page.
  */
-const CACHE_VERSION = "burger-gn-pwa-v4-nocache-html";
+const CACHE_VERSION = "burger-gn-pwa-v5-edge-403";
 const PRECACHE_URLS = [
   "/manifest.webmanifest",
   "/favicon.svg",
@@ -45,6 +46,24 @@ function isCacheableOk(response) {
   return !!response && response.ok && response.status >= 200 && response.status < 300;
 }
 
+function isEdgeBlockStatus(status) {
+  return status === 403 || status === 429;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function fetchWithEdgeRetry(request, attempts = 4) {
+  let last = null;
+  for (let i = 0; i < attempts; i++) {
+    last = await fetch(request, { cache: "no-store" });
+    if (!isEdgeBlockStatus(last.status)) return last;
+    await sleep(700 * (i + 1) + Math.floor(Math.random() * 500));
+  }
+  return last;
+}
+
 self.addEventListener("fetch", (event) => {
   const { request } = event;
   if (request.method !== "GET") return;
@@ -60,18 +79,17 @@ self.addEventListener("fetch", (event) => {
   if (isApiRequest(url)) return;
   if (request.headers.get("accept")?.includes("text/event-stream")) return;
 
-  // HTML navigations: always network. Never cache (prevents sticky 403 HTML).
   if (isNavigationRequest(request)) {
-    event.respondWith(fetch(request));
+    event.respondWith(fetchWithEdgeRetry(request));
     return;
   }
 
-  // Static assets: cache-first, only successful responses
   event.respondWith(
     caches.match(request).then((cached) => {
       if (cached) return cached;
       return fetch(request)
         .then((response) => {
+          if (isEdgeBlockStatus(response.status)) return response;
           if (
             isCacheableOk(response) &&
             (url.pathname.startsWith("/assets/") || url.pathname.startsWith("/icons/"))

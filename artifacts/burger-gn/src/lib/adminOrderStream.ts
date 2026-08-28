@@ -5,6 +5,9 @@
  * serverless those connections die at maxDuration and EventSource reconnects,
  * which after ~20–30 minutes can trip WAF / DDoS persistent IP blocks → HTTP 403
  * for the whole site (including public /cardapio) from that network.
+ *
+ * Server sends SSE `retry:` with per-connection jitter so a deploy (all
+ * connections drop at once) does not reconnect in a stampede.
  */
 const STREAM_URL = "/api/orders/stream";
 

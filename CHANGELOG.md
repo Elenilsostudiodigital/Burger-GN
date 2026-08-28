@@ -5,6 +5,25 @@ Toda nova implementação aprovada pelo proprietário gera uma nova versão.
 
 ---
 
+## Burger GN v1.5.13
+
+- 403 pós-deploy (Vercel WAF, não auth/middleware)
+  - Causa: no deploy as conexões SSE caem juntas, o painel e o SW disparam rajada no mesmo IP e o firewall da Vercel devolve 403 em todo o site por alguns minutos; depois a mitigação expira sozinha
+  - SSE envia `retry:` com jitter; CDN não guarda 403 (`no-store` em HTML/API)
+  - SW tenta de novo em 403/429; o painel detecta WAF (`X-BurgerGN-Api` ausente), registra log e avisa
+  - `POST /api/client-telemetry` + `node scripts/probe-edge-403.mjs` para ver o bloqueio na hora
+
+---
+
+## Burger GN v1.5.12
+
+- Agente de impressão sem janela de CMD
+  - Início oculto via `wscript.exe` + `start-hidden.vbs` (não usa cmd.exe/.bat em runtime)
+  - Tarefas do Windows e protocolo `burgergn-print://` relançam o agente em background
+  - Logs só em `agent.log`
+
+---
+
 ## Burger GN v1.5.11
 
 - Agente de impressão definitivo (sem abrir start.bat a cada uso)

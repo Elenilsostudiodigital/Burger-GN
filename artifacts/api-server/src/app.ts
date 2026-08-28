@@ -16,10 +16,34 @@ import { ensureProductMarketingSchema } from "./lib/ensureProductMarketingSchema
 
 const app: Express = express();
 
+const APP_ORIGIN_HEADER = "X-BurgerGN-Api";
+
+/** Fingerprint so clients can tell app 403 (JSON) from Vercel WAF 403 (no header). */
+app.use("/api", (req, res, next) => {
+  res.setHeader(APP_ORIGIN_HEADER, "1");
+  res.setHeader("Cache-Control", "private, no-store, max-age=0, must-revalidate");
+  res.setHeader("CDN-Cache-Control", "no-store");
+  res.setHeader("Vercel-CDN-Cache-Control", "no-store");
+  res.on("finish", () => {
+    if (res.statusCode === 403) {
+      logger.warn(
+        {
+          src: "app",
+          method: req.method,
+          url: (req.originalUrl || req.url || "").split("?")[0],
+          status: 403,
+        },
+        "app_http_403",
+      );
+    }
+  });
+  next();
+});
+
 /** Company tables are required by nearly every authenticated/public commerce route. */
 app.use("/api", async (req, res, next) => {
   const p = req.path || "";
-  if (p === "/healthz" || p.startsWith("/healthz/")) return next();
+  if (p === "/healthz" || p.startsWith("/healthz/") || p === "/client-telemetry") return next();
   try {
     await ensureCompanySchema();
     next();
