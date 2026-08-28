@@ -21,9 +21,12 @@ Isso:
 - Cria tarefa no login do Windows + verificação a cada minuto
 - Cria atalho em Inicializar
 - Registra o protocolo `burgergn-print://` para o botão **Reconectar Impressora** do painel
-- Sobe o watchdog agora (janela pode ser fechada)
+- Sobe o watchdog **oculto** (sem janela de CMD)
+- Logs em `%LOCALAPPDATA%\BurgerGN\print-agent\agent.log`
 
 O watchdog reinicia o agente se o processo cair. O painel detecta a queda, tenta religar e oferece **Reconectar Impressora**.
+
+Nenhuma janela de Prompt de Comando deve aparecer no uso diário. O lançamento em segundo plano é sempre `wscript.exe` + `start-hidden.vbs`.
 
 ## Endpoints
 

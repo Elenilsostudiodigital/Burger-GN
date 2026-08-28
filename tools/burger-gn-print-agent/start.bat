@@ -6,9 +6,9 @@ echo Nao e preciso deixar esta janela aberta.
 echo.
 set "INST=%LOCALAPPDATA%\BurgerGN\print-agent"
 if exist "%INST%\start-hidden.vbs" (
-  wscript //B "%INST%\start-hidden.vbs"
+  wscript.exe //B "%INST%\start-hidden.vbs"
 ) else (
-  wscript //B "%~dp0start-hidden.vbs"
+  wscript.exe //B "%~dp0start-hidden.vbs"
 )
 set "OK=0"
 for /L %%n in (1,1,15) do (

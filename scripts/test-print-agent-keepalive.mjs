@@ -27,16 +27,37 @@ for (const rel of [
   assert.equal(exists(rel), true, `missing ${rel}`);
 }
 
+const startHidden = read("tools/burger-gn-print-agent/start-hidden.vbs");
+assert.match(startHidden, /WScript\.Shell/);
+assert.match(startHidden, /watchdog\.mjs/);
+assert.match(startHidden, /,\s*0,\s*False/);
+assert.doesNotMatch(startHidden, /run-watchdog\.cmd/);
+assert.doesNotMatch(startHidden, /cmd \/c/);
+
+const protocol = read("tools/burger-gn-print-agent/protocol-launch.vbs");
+assert.match(protocol, /start-hidden\.vbs/);
+assert.match(protocol, /,\s*0,\s*False/);
+assert.doesNotMatch(protocol, /run-watchdog\.cmd/);
+
+const ps1 = read("tools/burger-gn-print-agent/create-startup-shortcut.ps1");
+assert.match(ps1, /wscript\.exe/i);
+assert.match(ps1, /start-hidden\.vbs/);
+assert.doesNotMatch(ps1, /launch\.cmd/);
+
+const install = read("tools/burger-gn-print-agent/install-autostart.bat");
+assert.match(install, /burgergn-print/);
+assert.match(install, /LOCALAPPDATA/);
+assert.match(install, /wscript\.exe/);
+assert.match(install, /node-path\.txt/);
+assert.doesNotMatch(install, /set "LAUNCH=/);
+
 const watchdog = read("tools/burger-gn-print-agent/watchdog.mjs");
 assert.match(watchdog, /19191/);
 assert.match(watchdog, /starting print agent/);
 assert.match(watchdog, /already running/);
-
-const install = read("tools/burger-gn-print-agent/install-autostart.bat");
-assert.match(install, /BurgerGN Print Agent/);
-assert.match(install, /ONLOGON/);
-assert.match(install, /burgergn-print/);
-assert.match(install, /LOCALAPPDATA/);
+assert.match(watchdog, /windowsHide:\s*true/);
+assert.match(watchdog, /agent\.log/);
+assert.doesNotMatch(watchdog, /console\.log/);
 
 const start = read("tools/burger-gn-print-agent/start.bat");
 assert.match(start, /start-hidden\.vbs/);
@@ -64,5 +85,6 @@ assert.match(app, /PrintAgentGuard/);
 const rule = read(".cursor/rules/print-agent.mdc");
 assert.match(rule, /install-autostart\.bat/);
 assert.match(rule, /Reconectar Impressora/);
+assert.match(rule, /wscript|headless|windowsHide/);
 
 console.log("test-print-agent-keepalive: ok");

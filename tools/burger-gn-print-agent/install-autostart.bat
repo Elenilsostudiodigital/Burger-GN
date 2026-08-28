@@ -43,30 +43,11 @@ copy /Y "%~dp0server.mjs" "%DST%\server.mjs" >nul
 copy /Y "%~dp0watchdog.mjs" "%DST%\watchdog.mjs" >nul
 copy /Y "%~dp0start-hidden.vbs" "%DST%\start-hidden.vbs" >nul
 copy /Y "%~dp0protocol-launch.vbs" "%DST%\protocol-launch.vbs" >nul
+copy /Y "%~dp0run-watchdog.cmd" "%DST%\run-watchdog.cmd" >nul
+del /f /q "%DST%\launch.cmd" >nul 2>&1
+> "%DST%\node-path.txt" echo %NODE_EXE%
 
-echo @echo off> "%DST%\run-watchdog.cmd"
-echo cd /d "%%~dp0">> "%DST%\run-watchdog.cmd"
-echo "%NODE_EXE%" watchdog.mjs>> "%DST%\run-watchdog.cmd"
-
-echo @echo off> "%DST%\launch.cmd"
-echo wscript.exe //B "%DST%\start-hidden.vbs">> "%DST%\launch.cmd"
-
-set "LAUNCH=%DST%\launch.cmd"
-
-schtasks /Create /TN "BurgerGN Print Agent" /SC ONLOGON /RL LIMITED /F /TR "%LAUNCH%" >nul 2>&1
-if errorlevel 1 (
-  echo Aviso: tarefa ONLOGON nao criada. Usando Startup + minuto.
-) else (
-  echo Tarefa ONLOGON: BurgerGN Print Agent
-)
-
-schtasks /Create /TN "BurgerGN Print Agent Watch" /SC MINUTE /MO 1 /RL LIMITED /F /TR "%LAUNCH%" >nul 2>&1
-if errorlevel 1 (
-  echo Aviso: tarefa MINUTE nao criada.
-) else (
-  echo Tarefa MINUTE: BurgerGN Print Agent Watch
-)
-
+REM Tasks and Startup must launch wscript.exe (GUI), never cmd.exe / .bat
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0create-startup-shortcut.ps1"
 if errorlevel 1 (
   echo Aviso: atalho de Inicializacao nao criado.
@@ -81,8 +62,8 @@ reg add "HKCU\Software\Classes\burgergn-print\shell\open\command" /ve /d "wscrip
 echo Protocolo burgergn-print:// registrado.
 
 echo.
-echo Iniciando o agente agora...
-wscript //B "%DST%\start-hidden.vbs"
+echo Iniciando o agente oculto agora...
+wscript.exe //B "%DST%\start-hidden.vbs"
 
 set "OK=0"
 for /L %%n in (1,1,20) do (

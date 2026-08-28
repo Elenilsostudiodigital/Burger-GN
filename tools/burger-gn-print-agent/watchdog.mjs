@@ -32,7 +32,6 @@ function log(msg) {
   } catch {
     /* ignore */
   }
-  console.log(msg.trim());
 }
 
 function sleep(ms) {
@@ -60,6 +59,7 @@ function startChild() {
     cwd: dir,
     stdio: ["ignore", "pipe", "pipe"],
     windowsHide: true,
+    detached: false,
     env: { ...process.env, BGN_PRINT_PORT: String(PORT) },
   });
   child.stdout?.on("data", (buf) => log(`agent: ${String(buf).trim()}`));
