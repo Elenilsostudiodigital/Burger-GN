@@ -24,6 +24,8 @@ assert.match(tab, /copies|Quantidade de vias/);
 assert.match(tab, /highlightOrderNumber/);
 assert.match(tab, /printTrackingQr/);
 assert.match(tab, /PRINTER_STATUS_LABELS/);
+assert.match(tab, /Reconectar Impressora|PrintAgentReconnectButton/);
+assert.doesNotMatch(tab, /inicie start\.bat/);
 
 const printLib = read("artifacts/burger-gn/src/lib/printReceipt.ts");
 assert.match(printLib, /BURGER GN/);

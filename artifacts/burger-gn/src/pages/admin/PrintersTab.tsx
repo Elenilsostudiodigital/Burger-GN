@@ -8,6 +8,7 @@ import {
 } from '../../lib/api';
 import {
   DEFAULT_PRINTER_SETTINGS,
+  PRINT_AGENT_OFFLINE_HELP,
   PRINTER_STATUS_LABELS,
   PrinterDevice,
   PrinterSettings,
@@ -15,9 +16,11 @@ import {
   loadLastPrintedOrder,
   mergePrinterLists,
   pingPrintAgent,
+  reconnectPrintAgent,
   silentPrintOrder,
   silentPrintTest,
 } from '../../lib/printReceipt';
+import { PrintAgentReconnectButton } from '../../components/PrintAgentGuard';
 
 export function PrintersTab() {
   const [loading, setLoading] = useState(true);
@@ -96,11 +99,17 @@ export function PrintersTab() {
     setScanning(true);
     setError('');
     try {
-      const online = await pingPrintAgent();
-      setAgentOnline(online);
+      let online = await pingPrintAgent();
       if (!online) {
-        setError('Agente offline. Execute tools/burger-gn-print-agent/start.bat neste PC.');
-        return;
+        const wake = await reconnectPrintAgent(10000);
+        online = wake.ok;
+        setAgentOnline(online);
+        if (!online) {
+          setError(PRINT_AGENT_OFFLINE_HELP);
+          return;
+        }
+      } else {
+        setAgentOnline(true);
       }
       const discovered = await fetchAgentPrinters();
       const next: PrinterSettings = {
@@ -180,22 +189,33 @@ export function PrintersTab() {
           <Printer size={16} className="text-amber-500" /> Impressoras
         </h3>
         <p className="text-zinc-400 text-sm leading-relaxed">
-          Impressão silenciosa via agente local (sem janela do navegador). Mantenha o agente
-          rodando neste computador.
+          Impressão silenciosa via agente local (sem janela do navegador). O agente inicia
+          com o Windows após a instalação única neste PC da loja.
         </p>
         <p className={`text-xs font-bold ${agentOnline ? 'text-green-400' : 'text-amber-400'}`}>
-          Agente local: {agentOnline ? 'Conectado (127.0.0.1:19191)' : 'Offline — inicie start.bat'}
+          Agente local: {agentOnline ? 'Conectado (127.0.0.1:19191)' : 'Desconectado'}
         </p>
       </div>
 
       {!agentOnline && (
-        <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-amber-200 text-sm flex gap-2">
-          <AlertTriangle size={16} className="shrink-0 mt-0.5" />
-          <span>
-            Para imprimir automaticamente, execute{' '}
-            <code className="text-amber-300">tools/burger-gn-print-agent/start.bat</code> neste PC
-            da loja.
-          </span>
+        <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-3 text-amber-100 text-sm space-y-2">
+          <p className="flex gap-2">
+            <AlertTriangle size={16} className="shrink-0 mt-0.5" />
+            <span>{PRINT_AGENT_OFFLINE_HELP}</span>
+          </p>
+          <PrintAgentReconnectButton
+            onResult={(ok, message) => {
+              setAgentOnline(ok);
+              if (ok) {
+                setError('');
+                setSuccess(message);
+                setTimeout(() => setSuccess(''), 2500);
+                void load();
+              } else {
+                setError(message);
+              }
+            }}
+          />
         </div>
       )}
 

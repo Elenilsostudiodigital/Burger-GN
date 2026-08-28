@@ -1,0 +1,17 @@
+---
+description: Print agent must auto-start, auto-reconnect, and never depend on opening start.bat each time
+alwaysApply: true
+---
+
+# Agente de impressão (fonte oficial)
+
+This is the official local print-agent architecture. Deploys, refactors, and new features must not replace it.
+
+1. Coverage of printing = local agent on the **store PC** at `http://127.0.0.1:19191`. The Vercel site cannot print silently by itself.
+2. Autostart = Windows watchdog via `tools/burger-gn-print-agent/install-autostart.bat` (copy under `%LOCALAPPDATA%\BurgerGN\print-agent`, ONLOGON task, Startup shortcut, protocol `burgergn-print://`). Seed/migration/deploy of the website must not remove this. The installer is the only one-time setup on the store PC.
+3. If the agent process dies, `watchdog.mjs` restarts it. The admin UI polls `/health`, auto-wakes via `burgergn-print://start`, and exposes **Reconectar Impressora** (`reconnectPrintAgent`). Do not ship an offline state that only says "Agente offline".
+4. User-facing copy when the agent is really down must tell them to click **Reconectar Impressora**, then run `install-autostart.bat` **once** on the store PC if it still fails. Do not tell staff to open `start.bat` on every use.
+5. `silentPrintOrder` / `silentPrintTest` must call `ensurePrintAgent` before giving up. `PrintAgentGuard` stays on every protected admin route.
+6. Do not delete the installer, watchdog, protocol handler, or reconnect button in future deploys.
+
+Keep `scripts/test-print-agent-keepalive.mjs` and `scripts/test-silent-print-agent.mjs` passing.

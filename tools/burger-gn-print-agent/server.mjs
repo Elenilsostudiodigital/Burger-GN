@@ -2,8 +2,8 @@
  * Burger GN — local silent print agent (Windows).
  * Listens on http://127.0.0.1:19191 — no browser print dialog.
  *
- * Start: node tools/burger-gn-print-agent/server.mjs
- * Or:    tools/burger-gn-print-agent/start.bat
+ * Keep-alive: watchdog.mjs (install-autostart.bat — Windows logon + protocol).
+ * Start: tools/burger-gn-print-agent/install-autostart.bat (once)
  */
 import http from "node:http";
 import { execFile } from "node:child_process";
@@ -187,9 +187,10 @@ const server = http.createServer(async (req, res) => {
       sendJson(res, 200, {
         ok: true,
         service: "burger-gn-print-agent",
-        version: "1.0.0",
+        version: "1.1.0",
         host: HOST,
         port: PORT,
+        keepalive: true,
       });
       return;
     }
@@ -225,6 +226,15 @@ const server = http.createServer(async (req, res) => {
       error: err instanceof Error ? err.message : String(err),
     });
   }
+});
+
+server.on("error", (err) => {
+  if (err && err.code === "EADDRINUSE") {
+    console.log(`[burger-gn-print-agent] already running on ${HOST}:${PORT}`);
+    process.exit(0);
+  }
+  console.error(err);
+  process.exit(1);
 });
 
 server.listen(PORT, HOST, () => {

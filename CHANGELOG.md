@@ -5,6 +5,15 @@ Toda nova implementação aprovada pelo proprietário gera uma nova versão.
 
 ---
 
+## Burger GN v1.5.11
+
+- Agente de impressão definitivo (sem abrir start.bat a cada uso)
+  - Watchdog local + `install-autostart.bat` (inicia com o Windows, religa se cair)
+  - Painel detecta queda, tenta reconectar e oferece **Reconectar Impressora**
+  - Se o agente estiver fechado, a mensagem explica o instalador único neste PC da loja
+
+---
+
 ## Burger GN v1.5.10
 
 - Mapa da solicitação de região

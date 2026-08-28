@@ -7,6 +7,18 @@ import { ORDER_TYPE_LABELS, formatPaymentMethod, buildOrderTrackingUrl } from '.
 
 export const PRINT_AGENT_BASE = 'http://127.0.0.1:19191';
 
+/** Custom protocol registered by tools/burger-gn-print-agent/install-autostart.bat */
+export const PRINT_AGENT_PROTOCOL = 'burgergn-print://start';
+
+export const PRINT_AGENT_OFFLINE_HELP =
+  'O agente de impressão não está rodando neste computador da loja. Clique em “Reconectar Impressora” e aceite abrir o Burger GN Print Agent se o Windows perguntar. Se continuar offline, execute UMA VEZ neste PC: tools/burger-gn-print-agent/install-autostart.bat (botão direito → Executar). Depois disso o agente inicia sozinho com o Windows — não é preciso abrir start.bat a cada uso.';
+
+function sleep(ms: number) {
+  return new Promise<void>((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+}
+
 export type PrinterConnection = 'system' | 'usb' | 'bluetooth';
 export type PrinterStatus = 'connected' | 'disconnected' | 'offline' | 'error';
 
@@ -55,15 +67,77 @@ function fmtMoney(v: string | number) {
   return `R$ ${(Number.isFinite(n) ? n : 0).toFixed(2).replace('.', ',')}`;
 }
 
-export async function pingPrintAgent(): Promise<boolean> {
+export async function pingPrintAgent(timeoutMs = 2500): Promise<boolean> {
+  const ctrl = new AbortController();
+  const timer = window.setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    const res = await fetch(`${PRINT_AGENT_BASE}/health`, { method: 'GET' });
+    const res = await fetch(`${PRINT_AGENT_BASE}/health`, {
+      method: 'GET',
+      cache: 'no-store',
+      signal: ctrl.signal,
+    });
     if (!res.ok) return false;
     const data = (await res.json()) as { ok?: boolean };
     return !!data.ok;
   } catch {
     return false;
+  } finally {
+    window.clearTimeout(timer);
   }
+}
+
+/** Hidden iframe so a failed protocol does not navigate the admin SPA away. */
+export function launchPrintAgentProtocol() {
+  if (typeof document === 'undefined') return;
+  try {
+    const iframe = document.createElement('iframe');
+    iframe.setAttribute('aria-hidden', 'true');
+    iframe.style.cssText = 'display:none;width:0;height:0;border:0';
+    iframe.src = PRINT_AGENT_PROTOCOL;
+    document.body.appendChild(iframe);
+    window.setTimeout(() => {
+      try {
+        iframe.remove();
+      } catch {
+        /* ignore */
+      }
+    }, 4000);
+  } catch {
+    /* ignore */
+  }
+}
+
+export async function waitForPrintAgent(timeoutMs = 10000): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await pingPrintAgent(1500)) return true;
+    await sleep(400);
+  }
+  return false;
+}
+
+/**
+ * Ping; if down, ask Windows to start the local watchdog via burgergn-print://
+ * then wait until /health answers.
+ */
+export async function reconnectPrintAgent(
+  timeoutMs = 12000,
+): Promise<{ ok: boolean; message: string }> {
+  if (await pingPrintAgent()) {
+    return { ok: true, message: 'Impressora reconectada.' };
+  }
+  launchPrintAgentProtocol();
+  if (await waitForPrintAgent(timeoutMs)) {
+    return { ok: true, message: 'Impressora reconectada.' };
+  }
+  return { ok: false, message: PRINT_AGENT_OFFLINE_HELP };
+}
+
+/** Used before every silent print: short retries + protocol wake. */
+export async function ensurePrintAgent(timeoutMs = 8000): Promise<boolean> {
+  if (await pingPrintAgent()) return true;
+  launchPrintAgentProtocol();
+  return waitForPrintAgent(timeoutMs);
 }
 
 export async function fetchAgentPrinters(): Promise<PrinterDevice[]> {
@@ -213,13 +287,12 @@ export async function silentPrintOrder(
   order: Order,
   settings: PrinterSettings,
 ): Promise<SilentPrintResult> {
-  const alive = await pingPrintAgent();
+  const alive = await ensurePrintAgent();
   if (!alive) {
     return {
       ok: false,
       reason: 'no_agent',
-      message:
-        'Agente de impressão offline. Abra tools/burger-gn-print-agent/start.bat neste computador.',
+      message: PRINT_AGENT_OFFLINE_HELP,
     };
   }
   const printer = resolveDefaultPrinter(settings);
@@ -251,13 +324,12 @@ export async function silentPrintOrder(
 export async function silentPrintTest(
   settings: PrinterSettings,
 ): Promise<SilentPrintResult> {
-  const alive = await pingPrintAgent();
+  const alive = await ensurePrintAgent();
   if (!alive) {
     return {
       ok: false,
       reason: 'no_agent',
-      message:
-        'Agente de impressão offline. Abra tools/burger-gn-print-agent/start.bat neste computador.',
+      message: PRINT_AGENT_OFFLINE_HELP,
     };
   }
   const printer = resolveDefaultPrinter(settings);
