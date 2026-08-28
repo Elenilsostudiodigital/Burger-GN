@@ -94,7 +94,8 @@ export async function validateDeliveryCoverage(
       const result = await resolveDeliveryArea(lat, lng);
       if (result.status === "disabled") {
         if (kmConfig.enabled) return fromKmConfig(lat, lng, kmConfig);
-        return neighborhoodCoverage();
+        if (kmConfig.neighborhoodsEnabled) return neighborhoodCoverage();
+        return fromKmConfig(lat, lng, kmConfig);
       }
       return fromAreaApi(result);
     } catch {
@@ -102,7 +103,7 @@ export async function validateDeliveryCoverage(
     }
   }
 
-  if (kmConfig.enabled) {
+  if (kmConfig.enabled || !kmConfig.neighborhoodsEnabled) {
     return fromKmConfig(lat, lng, kmConfig);
   }
 

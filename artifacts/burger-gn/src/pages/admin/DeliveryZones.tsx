@@ -3,6 +3,7 @@ import { Link, useLocation } from 'wouter';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   getAdminDeliveryZones, createDeliveryZone, updateDeliveryZone, deleteDeliveryZone, DeliveryZone,
+  getNeighborhoodsSettings, updateNeighborhoodsSettings,
 } from '../../lib/api';
 import { useAdmin } from '../../context/AdminContext';
 import {
@@ -46,6 +47,8 @@ export default function DeliveryZones() {
   const { logout } = useAdmin();
   const [, setLocation] = useLocation();
   const [zones, setZones] = useState<DeliveryZone[]>([]);
+  const [neighborhoodsEnabled, setNeighborhoodsEnabled] = useState(false);
+  const [toggleSaving, setToggleSaving] = useState(false);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editZone, setEditZone] = useState<DeliveryZone | null>(null);
@@ -56,9 +59,28 @@ export default function DeliveryZones() {
 
   const load = async () => {
     setLoading(true);
-    const data = await getAdminDeliveryZones();
-    setZones(data);
-    setLoading(false);
+    try {
+      const [data, settings] = await Promise.all([
+        getAdminDeliveryZones(),
+        getNeighborhoodsSettings().catch(() => ({ neighborhoodsEnabled: false })),
+      ]);
+      setZones(Array.isArray(data) ? data : []);
+      setNeighborhoodsEnabled(Boolean(settings.neighborhoodsEnabled));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSystemToggle = async () => {
+    setToggleSaving(true);
+    try {
+      const res = await updateNeighborhoodsSettings(!neighborhoodsEnabled);
+      setNeighborhoodsEnabled(Boolean(res.neighborhoodsEnabled));
+    } catch {
+      setFormError('Não foi possível salvar o status dos bairros.');
+    } finally {
+      setToggleSaving(false);
+    }
   };
 
   useEffect(() => { load(); }, []);
@@ -117,7 +139,7 @@ export default function DeliveryZones() {
             <MapPin size={20} className="text-amber-500" />
             <div>
               <h1 className="text-white font-black uppercase text-base leading-none">Taxas de Entrega</h1>
-              <p className="text-zinc-600 text-xs">Bairros atendidos • The Burger GN</p>
+              <p className="text-zinc-600 text-xs">Bairros • The Burger GN</p>
             </div>
           </div>
           <button onClick={handleLogout} className="p-2 text-zinc-400 hover:text-red-400 transition-colors">
@@ -127,6 +149,36 @@ export default function DeliveryZones() {
       </header>
 
       <main className="admin-shell px-4 py-5 space-y-5">
+        <div
+          className={`rounded-2xl p-4 border transition-all ${
+            neighborhoodsEnabled ? 'bg-emerald-500/10 border-emerald-500/30' : 'bg-zinc-900 border-zinc-800'
+          }`}
+        >
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-zinc-500 text-[10px] font-black uppercase tracking-widest">Sistema de bairros</p>
+              <h2 className="text-white font-black uppercase tracking-wide text-sm mt-0.5">
+                {neighborhoodsEnabled ? 'Ativado' : 'Desativado'}
+              </h2>
+              <p className="text-zinc-500 text-xs mt-1 leading-relaxed">
+                {neighborhoodsEnabled
+                  ? 'Os bairros cadastrados podem definir a taxa quando o polígono e o KM não estiverem no comando.'
+                  : 'Bairros cadastrados são ignorados. A entrega usa só a loja, o polígono verde e a tabela de KM.'}
+              </p>
+            </div>
+            <button
+              type="button"
+              disabled={toggleSaving}
+              onClick={() => { void handleSystemToggle(); }}
+              className={`shrink-0 disabled:opacity-50 ${neighborhoodsEnabled ? 'text-emerald-400' : 'text-zinc-600'}`}
+              aria-pressed={neighborhoodsEnabled}
+              title={neighborhoodsEnabled ? 'Desativar bairros' : 'Ativar bairros'}
+            >
+              {toggleSaving ? <Loader2 size={32} className="animate-spin" /> : neighborhoodsEnabled ? <ToggleRight size={40} /> : <ToggleLeft size={40} />}
+            </button>
+          </div>
+        </div>
+
         {/* Stats */}
         <div className="grid grid-cols-3 gap-3">
           <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 text-center">
@@ -147,8 +199,9 @@ export default function DeliveryZones() {
         <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 flex items-start gap-3">
           <Navigation size={18} className="text-zinc-500 mt-0.5 shrink-0" />
           <p className="text-zinc-500 text-xs leading-relaxed">
-            <span className="text-zinc-400 font-bold">Cálculo por distância (em breve):</span>{' '}
-            O sistema está preparado para calcular taxas automaticamente por geolocalização via Google Maps API ou similar. Por enquanto, as taxas são por bairro.
+            {neighborhoodsEnabled
+              ? 'Cadastro de bairros ativo. O polígono verde e a quilometragem continuam mandando quando as áreas de entrega ou o KM estão ligados.'
+              : 'Desativado: nenhum bairro influencia o checkout. Polígono verde + KM são a única regra de entrega.'}
           </p>
         </div>
 

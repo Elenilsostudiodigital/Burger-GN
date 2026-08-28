@@ -7,7 +7,6 @@ import {
   kmDeliveryTiersTable,
   paymentSettingsTable,
   whatsappSettingsTable,
-  deliveryZonesTable,
 } from "@workspace/db";
 import { count, eq, or } from "drizzle-orm";
 import { logger } from "./logger";
@@ -100,6 +99,7 @@ export async function runSeed() {
       .where(eq(kmDeliveryConfigTable.companyId, companyId));
     if (Number(kmCount) === 0) {
       logger.info("Seeding KM delivery config...");
+      // neighborhoodsEnabled is set only on first insert. Later deploys must not UPDATE it.
       await db.insert(kmDeliveryConfigTable).values({
         companyId,
         enabled: false,
@@ -109,22 +109,11 @@ export async function runSeed() {
         minFee: "5.00",
         feePerKm: "2.00",
         maxDistanceKm: "10.00",
+        neighborhoodsEnabled: false,
       });
       await db.insert(kmDeliveryTiersTable).values(
         DEFAULT_KM_TIERS.map((t) => ({ ...t, companyId })),
       );
-    }
-
-    // Official delivery rule: never re-insert neighborhood zones.
-    // If áreas are on, leftover bairros are removed so a deploy cannot restore them.
-    const [kmCfg] = await db
-      .select({ areasEnabled: kmDeliveryConfigTable.areasEnabled })
-      .from(kmDeliveryConfigTable)
-      .where(eq(kmDeliveryConfigTable.companyId, companyId))
-      .limit(1);
-    if (kmCfg?.areasEnabled) {
-      await db.delete(deliveryZonesTable).where(eq(deliveryZonesTable.companyId, companyId));
-      logger.info("Cleared legacy neighborhood delivery zones (coverage is polygon + KM)");
     }
 
     const [{ value: paySettingsCount }] = await db

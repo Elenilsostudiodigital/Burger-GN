@@ -49,7 +49,7 @@ export function findKmTier(
 router.get("/delivery/km-config", resolvePublicCompany, async (req, res) => {
   try {
     const [config] = await db.select().from(kmDeliveryConfigTable).where(eq(kmDeliveryConfigTable.companyId, req.companyId!));
-    if (!config) { res.json({ enabled: false, tiers: [] }); return; }
+    if (!config) { res.json({ enabled: false, areasEnabled: false, neighborhoodsEnabled: false, tiers: [] }); return; }
     const tiers = await db.select().from(kmDeliveryTiersTable)
       .where(eq(kmDeliveryTiersTable.companyId, req.companyId!))
       .orderBy(asc(kmDeliveryTiersTable.displayOrder));
@@ -131,13 +131,33 @@ router.put("/admin/km-delivery", requireCompanyAuth, async (req, res) => {
     };
     const [existing] = await db.select().from(kmDeliveryConfigTable).where(eq(kmDeliveryConfigTable.companyId, req.companyId!));
     if (existing) {
+      const patch: Record<string, unknown> = { updatedAt: new Date() };
+      if (body.enabled !== undefined) patch["enabled"] = Boolean(body.enabled);
+      if (body.baseAddress !== undefined) patch["baseAddress"] = String(body.baseAddress);
+      if (body.baseLat !== undefined) patch["baseLat"] = String(body.baseLat);
+      if (body.baseLng !== undefined) patch["baseLng"] = String(body.baseLng);
+      if (body.minFee !== undefined) patch["minFee"] = String(body.minFee);
+      if (body.feePerKm !== undefined) patch["feePerKm"] = String(body.feePerKm);
+      if (body.maxDistanceKm !== undefined) patch["maxDistanceKm"] = String(body.maxDistanceKm);
+      if (body.areasEnabled !== undefined) patch["areasEnabled"] = Boolean(body.areasEnabled);
       const [updated] = await db.update(kmDeliveryConfigTable)
-        .set({ ...body, updatedAt: new Date() })
+        .set(patch)
         .where(and(eq(kmDeliveryConfigTable.id, existing.id), eq(kmDeliveryConfigTable.companyId, req.companyId!)))
         .returning();
       res.json(updated);
     } else {
-      const [created] = await db.insert(kmDeliveryConfigTable).values({ ...body, companyId: req.companyId! }).returning();
+      const [created] = await db.insert(kmDeliveryConfigTable).values({
+        companyId: req.companyId!,
+        enabled: Boolean(body.enabled),
+        baseAddress: String(body.baseAddress ?? ""),
+        baseLat: String(body.baseLat ?? "0"),
+        baseLng: String(body.baseLng ?? "0"),
+        minFee: String(body.minFee ?? "5.00"),
+        feePerKm: String(body.feePerKm ?? "2.00"),
+        maxDistanceKm: String(body.maxDistanceKm ?? "10.00"),
+        areasEnabled: Boolean(body.areasEnabled),
+        neighborhoodsEnabled: false,
+      }).returning();
       res.json(created);
     }
   } catch (err) {

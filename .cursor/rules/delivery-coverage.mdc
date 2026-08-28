@@ -1,5 +1,5 @@
 ---
-description: Official delivery source of truth — polygon coverage, KM fee; new work must adapt to this
+description: Official delivery source of truth — polygon coverage, KM fee, Bairros master switch
 alwaysApply: true
 ---
 
@@ -8,10 +8,11 @@ alwaysApply: true
 This is the official delivery architecture. Seeds, migrations, refactors, deploys, and new features must not replace it. If a new feature conflicts, the feature adapts to this rule.
 
 1. Coverage = point inside the green polygon. Outside = "Não entregamos nesta região."
-2. Fee = KM tier table from store to that point. Never area `minFee`/`feePerKm` when tiers exist. Never neighborhood zone fees while áreas or KM are on.
+2. Fee = KM tier table from store to that point. Never area `minFee`/`feePerKm` when tiers exist.
 3. Typed address, GPS, and map pin all call `applyCoordinates` → `validateDeliveryCoverage(lat, lng)`. Same point, same result.
-4. `seed.ts` must never insert `DEFAULT_DELIVERY_ZONES` or any bairro list. If `areasEnabled`, leftover `delivery_zones` are deleted on boot so they cannot return after deploy.
-5. Do not geocode to a namesake in another neighborhood (Portão vs Itinga) or to Lauro city centroid. Unmapped real streets: GPS or map pin, never invented coordinates.
-6. Street registry and old bairro fees cannot overwrite an allowed polygon/KM result.
+4. Bairros has a persisted master switch `km_delivery_config.neighborhoods_enabled`. Off = ignore every neighborhood fee; delivery is store + green polygon + KM only. On = neighborhood fees may run only when áreas and KM are not the coverage owner. Seed/migration/deploy must never UPDATE this flag (ADD COLUMN IF NOT EXISTS only; first insert default false). The only writer is PUT `/admin/delivery-zones/settings`.
+5. Do not re-insert `DEFAULT_DELIVERY_ZONES`. Do not delete saved neighborhoods on boot. Cadastro stays; the switch decides if it is used.
+6. Do not geocode to a namesake in another neighborhood (Portão vs Itinga) or to Lauro city centroid. Unmapped real streets: GPS or map pin.
+7. Street registry cannot overwrite an allowed polygon/KM result.
 
-Keep `scripts/gps-delivery-coverage-selftest.mjs` and `scripts/delivery-areas-resolve-selftest.mjs` passing.
+Keep `scripts/gps-delivery-coverage-selftest.mjs`, `scripts/delivery-areas-resolve-selftest.mjs`, and `scripts/neighborhoods-toggle-selftest.mjs` passing.

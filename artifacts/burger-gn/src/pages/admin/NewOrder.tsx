@@ -148,11 +148,9 @@ export default function AdminNewOrder() {
   const total = Math.max(0, subtotal + (isDelivery ? deliveryFee : 0));
 
   const needsCoordsFee = !!(
-    kmConfig?.enabled
-    && (
-      (parseFloat(String(kmConfig.baseLat)) || 0) !== 0
-      || (parseFloat(String(kmConfig.baseLng)) || 0) !== 0
-    )
+    kmConfig?.areasEnabled
+    || kmConfig?.enabled
+    || !kmConfig?.neighborhoodsEnabled
   );
 
   useEffect(() => {

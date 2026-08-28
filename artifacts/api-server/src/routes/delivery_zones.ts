@@ -4,12 +4,20 @@ import { deliveryZonesTable } from "@workspace/db";
 import { eq, sql, asc, and } from "drizzle-orm";
 import { requireCompanyAuth } from "../middlewares/auth";
 import { resolvePublicCompany } from "../middlewares/company";
+import { getNeighborhoodsEnabled, setNeighborhoodsEnabled } from "../lib/neighborhoodsSettings";
 
 const router = Router();
+
+const NEIGHBORHOODS_OFF_MSG =
+  "Entrega por bairro está desativada. A taxa é calculada pelo mapa e pela quilometragem.";
 
 // List active zones (public — for checkout dropdown)
 router.get("/delivery-zones", resolvePublicCompany, async (req, res) => {
   try {
+    if (!(await getNeighborhoodsEnabled(req.companyId!))) {
+      res.json([]);
+      return;
+    }
     const zones = await db
       .select()
       .from(deliveryZonesTable)
@@ -23,11 +31,15 @@ router.get("/delivery-zones", resolvePublicCompany, async (req, res) => {
 });
 
 // Get fee by neighborhood (public)
-// Query: GET /api/delivery-zones/fee?neighborhood=Itinga
 router.get("/delivery-zones/fee", resolvePublicCompany, async (req, res) => {
   try {
     const { neighborhood } = req.query as { neighborhood?: string };
     if (!neighborhood) { res.status(400).json({ error: "neighborhood query param required" }); return; }
+
+    if (!(await getNeighborhoodsEnabled(req.companyId!))) {
+      res.json({ found: false, neighborhood, fee: null, message: NEIGHBORHOODS_OFF_MSG });
+      return;
+    }
 
     const [zone] = await db
       .select()
@@ -49,7 +61,30 @@ router.get("/delivery-zones/fee", resolvePublicCompany, async (req, res) => {
   }
 });
 
-// Admin: list all zones
+router.get("/admin/delivery-zones/settings", requireCompanyAuth, async (req, res) => {
+  try {
+    const neighborhoodsEnabled = await getNeighborhoodsEnabled(req.companyId!);
+    res.json({ neighborhoodsEnabled });
+  } catch (err) {
+    req.log.error({ err }, "Failed to get neighborhood settings");
+    res.status(500).json({ error: "Não foi possível carregar o status dos bairros." });
+  }
+});
+
+router.put("/admin/delivery-zones/settings", requireCompanyAuth, async (req, res) => {
+  try {
+    const neighborhoodsEnabled = await setNeighborhoodsEnabled(
+      req.companyId!,
+      Boolean((req.body as { neighborhoodsEnabled?: boolean }).neighborhoodsEnabled),
+    );
+    res.json({ neighborhoodsEnabled });
+  } catch (err) {
+    req.log.error({ err }, "Failed to save neighborhood settings");
+    res.status(500).json({ error: "Não foi possível salvar o status dos bairros." });
+  }
+});
+
+// Admin: list all zones (always, so the tab can manage cadastro while the system is off)
 router.get("/admin/delivery-zones", requireCompanyAuth, async (req, res) => {
   try {
     const zones = await db.select().from(deliveryZonesTable)
@@ -62,7 +97,6 @@ router.get("/admin/delivery-zones", requireCompanyAuth, async (req, res) => {
   }
 });
 
-// Admin: create zone
 router.post("/admin/delivery-zones", requireCompanyAuth, async (req, res) => {
   try {
     const { neighborhood, fee, active } = req.body as { neighborhood: string; fee: string; active?: boolean };
@@ -83,7 +117,6 @@ router.post("/admin/delivery-zones", requireCompanyAuth, async (req, res) => {
   }
 });
 
-// Admin: update zone
 router.put("/admin/delivery-zones/:id", requireCompanyAuth, async (req, res) => {
   try {
     const id = Number(req.params["id"]);
@@ -103,7 +136,6 @@ router.put("/admin/delivery-zones/:id", requireCompanyAuth, async (req, res) => 
   }
 });
 
-// Admin: delete zone
 router.delete("/admin/delivery-zones/:id", requireCompanyAuth, async (req, res) => {
   try {
     const id = Number(req.params["id"]);

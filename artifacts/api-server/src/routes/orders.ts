@@ -428,7 +428,7 @@ router.post("/orders", resolvePublicCompany, async (req, res) => {
           .from(kmDeliveryConfigTable)
           .where(eq(kmDeliveryConfigTable.companyId, companyId))
           .limit(1);
-        if (!kmCfg?.areasEnabled && !kmCfg?.enabled) {
+        if (!kmCfg?.areasEnabled && !kmCfg?.enabled && kmCfg?.neighborhoodsEnabled) {
           const [zone] = await db
             .select()
             .from(deliveryZonesTable)

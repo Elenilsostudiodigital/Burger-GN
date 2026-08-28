@@ -108,7 +108,8 @@ export default function Checkout() {
   const [kmConfig, setKmConfig] = useState<KmDeliveryConfig | null>(null);
   const kmEnabled = !!kmConfig?.enabled;
   const areasEnabled = !!kmConfig?.areasEnabled;
-  const needsCoordsFee = kmEnabled || areasEnabled;
+  const neighborhoodsEnabled = !!kmConfig?.neighborhoodsEnabled;
+  const needsCoordsFee = kmEnabled || areasEnabled || !neighborhoodsEnabled;
   const storeLat = parseFloat(String(kmConfig?.baseLat ?? ''));
   const storeLng = parseFloat(String(kmConfig?.baseLng ?? ''));
   const hasStore = Number.isFinite(storeLat) && Number.isFinite(storeLng) && !(storeLat === 0 && storeLng === 0);
@@ -571,6 +572,7 @@ export default function Checkout() {
   };
 
   const resolveNeighborhoodFee = async (bairro: string) => {
+    if (!neighborhoodsEnabled) return;
     if (!bairro?.trim() || bairro === '__outro__' || bairro === 'GPS') return;
     try {
       setFeeLoading(true);
@@ -1309,7 +1311,7 @@ export default function Checkout() {
 
                 <div className="space-y-1.5">
                   <Label className="text-zinc-400 text-xs">Bairro *</Label>
-                  {zones.length > 0 && !kmEnabled && !areasEnabled ? (
+                  {zones.length > 0 && neighborhoodsEnabled && !kmEnabled && !areasEnabled ? (
                     <div className="relative">
                       <select
                         value={form.bairro}

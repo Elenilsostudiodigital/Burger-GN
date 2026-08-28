@@ -9,6 +9,9 @@ const DELIVERY_AREAS_SQL = `
 ALTER TABLE km_delivery_config
   ADD COLUMN IF NOT EXISTS areas_enabled BOOLEAN NOT NULL DEFAULT false;
 
+ALTER TABLE km_delivery_config
+  ADD COLUMN IF NOT EXISTS neighborhoods_enabled BOOLEAN NOT NULL DEFAULT false;
+
 CREATE TABLE IF NOT EXISTS delivery_areas (
   id SERIAL PRIMARY KEY,
   company_id INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,

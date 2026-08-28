@@ -164,6 +164,10 @@ export const getAdminDeliveryZones = () => api.get("/admin/delivery-zones") as P
 export const createDeliveryZone = (d: { neighborhood: string; fee: string; active?: boolean }) => api.post("/admin/delivery-zones", d) as Promise<DeliveryZone>;
 export const updateDeliveryZone = (id: number, d: Partial<DeliveryZone>) => api.put(`/admin/delivery-zones/${id}`, d) as Promise<DeliveryZone>;
 export const deleteDeliveryZone = (id: number) => api.delete(`/admin/delivery-zones/${id}`);
+export const getNeighborhoodsSettings = () =>
+  api.get("/admin/delivery-zones/settings") as Promise<{ neighborhoodsEnabled: boolean }>;
+export const updateNeighborhoodsSettings = (neighborhoodsEnabled: boolean) =>
+  api.put("/admin/delivery-zones/settings", { neighborhoodsEnabled }) as Promise<{ neighborhoodsEnabled: boolean }>;
 
 // ── Delivery Streets (learned / approved streets) ─────────────────────────────
 export type DeliveryStreetOrigin = "manual" | "pedido" | "importada";
@@ -310,6 +314,7 @@ export interface KmDeliveryConfig {
   feePerKm: string;
   maxDistanceKm: string;
   areasEnabled?: boolean;
+  neighborhoodsEnabled?: boolean;
   updatedAt: string;
   tiers: KmDeliveryTier[];
 }
@@ -320,6 +325,7 @@ export const getKmDeliveryConfig = () =>
     ...cfg,
     enabled: !!cfg?.enabled,
     areasEnabled: !!cfg?.areasEnabled,
+    neighborhoodsEnabled: !!cfg?.neighborhoodsEnabled,
     baseLat: cfg?.baseLat ?? "0",
     baseLng: cfg?.baseLng ?? "0",
     maxDistanceKm: cfg?.maxDistanceKm ?? "0",

@@ -218,16 +218,23 @@ let n = 0;
   assert(areasSrc.includes("Não entregamos nesta região."), "server outside copy matches");
   const seedSrc = fs.readFileSync(path.join(root, "artifacts/api-server/src/lib/seed.ts"), "utf8");
   assert(!seedSrc.includes("Seeding default delivery zones"), "seed must not recreate deleted neighborhoods");
+  assert(!seedSrc.includes("Cleared legacy neighborhood"), "seed must not delete saved neighborhoods");
+  assert(!seedSrc.includes("db.delete(deliveryZonesTable)"), "seed must not wipe bairros on deploy");
   const geoSrc = fs.readFileSync(path.join(root, "artifacts/burger-gn/src/lib/api.ts"), "utf8");
   assert(geoSrc.includes("buildDeliveryGeocodeQueries"), "typed geocode uses the full query set");
   assert(!geoSrc.includes("queries.slice(0, 4)"), "geocode must not drop Itinga queries");
   assert(geoSrc.includes("hitMatchesNeighborhood"), "neighborhood filter rejects namesake streets");
   assert(geoSrc.includes("isGenericCityCentroid"), "CEP city-centroid coords are not used for KM");
-  assert(seedSrc.includes("Cleared legacy neighborhood"), "seed deletes leftover bairro zones when áreas are on");
   assert(checkout.includes("onPick"), "unmapped streets can be pinned on the map");
+  assert(checkout.includes("neighborhoodsEnabled"), "checkout reads the Bairros master switch");
   const ruleSrc = fs.readFileSync(path.join(root, ".cursor/rules/delivery-coverage.mdc"), "utf8");
   assert(ruleSrc.includes("fonte oficial"), "delivery rule is recorded as the official source of truth");
-  assert(ruleSrc.includes("never insert DEFAULT_DELIVERY_ZONES") || ruleSrc.includes("must never insert"), "rule forbids neighborhood reseed");
+  assert(
+    ruleSrc.includes("never insert DEFAULT_DELIVERY_ZONES")
+      || ruleSrc.includes("must never insert")
+      || ruleSrc.includes("Do not re-insert"),
+    "rule forbids neighborhood reseed",
+  );
   n++;
 }
 
