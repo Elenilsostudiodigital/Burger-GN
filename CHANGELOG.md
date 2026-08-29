@@ -5,6 +5,25 @@ Toda nova implementação aprovada pelo proprietário gera uma nova versão.
 
 ---
 
+## Burger GN v1.5.15
+
+- Agente de impressão sem PowerShell no autostart
+  - Remove `create-startup-shortcut.ps1` (falso positivo Avast IDP.ALEXA.54)
+  - Registro de início automático com cópia de `startup-logon.vbs` + `schtasks.exe` (sem `.ps1` e sem `CreateShortcut`)
+  - Runtime continua oculto: `wscript.exe` + `start-hidden.vbs` (sem CMD visível)
+
+---
+
+## Burger GN v1.5.14
+
+- Reimprimir comprovante em Pedidos Finalizados
+  - Botão com ícone de impressora e tooltip **Reimprimir comprovante**
+  - Busca o pedido completo e envia o mesmo cupom térmico 58 mm ao Print Agent (POS-58)
+  - Sem `window.print()` e sem janela de impressão do navegador ou do Windows
+  - Cupom com número, cliente, produtos, observações, pagamento, taxa, total, data e hora do pedido
+
+---
+
 ## Burger GN v1.5.13
 
 - 403 pós-deploy (Vercel WAF, não auth/middleware)

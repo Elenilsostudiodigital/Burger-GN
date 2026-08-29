@@ -19,6 +19,8 @@ assert.doesNotMatch(agent, /window\.print/);
 
 const printLib = read("artifacts/burger-gn/src/lib/printReceipt.ts");
 assert.match(printLib, /silentPrintOrder/);
+assert.match(printLib, /buildOrderPrintText/);
+assert.match(printLib, /Data:/);
 assert.match(printLib, /127\.0\.0\.1:19191/);
 assert.match(printLib, /buildTestPrintText/);
 assert.match(printLib, /reconnectPrintAgent/);
@@ -46,6 +48,21 @@ assert.match(dash, /silentPrintOrder/);
 assert.doesNotMatch(dash, /window\.print/);
 assert.doesNotMatch(dash, /buildReceiptHTML/);
 assert.doesNotMatch(dash, /document\.write\(buildReceipt/);
+
+const finalized = read("artifacts/burger-gn/src/pages/admin/FinalizedOrders.tsx");
+assert.match(finalized, /silentPrintOrder/);
+assert.match(finalized, /Reimprimir comprovante/);
+assert.match(finalized, /🖨️ Reimprimir/);
+assert.match(finalized, /getOrder/);
+assert.match(finalized, /getAdminPrinterSettings/);
+assert.doesNotMatch(finalized, /window\.print/);
+
+const ordersApi = read("artifacts/api-server/src/routes/orders.ts");
+assert.match(ordersApi, /router\.get\("\/orders\/:id"/);
+assert.match(printLib, /Cliente:/);
+assert.match(printLib, /TOTAL/);
+assert.match(printLib, /Entrega/);
+assert.match(printLib, /Pag:/);
 
 const app = read("artifacts/burger-gn/src/App.tsx");
 assert.match(app, /PrintAgentGuard/);

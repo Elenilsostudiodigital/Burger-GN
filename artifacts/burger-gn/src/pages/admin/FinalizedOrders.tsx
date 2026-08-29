@@ -3,15 +3,18 @@ import { Link, useLocation } from 'wouter';
 import { useAdmin } from '../../context/AdminContext';
 import {
   getOrders,
+  getOrder,
+  getAdminPrinterSettings,
   Order,
   ORDER_TYPE_LABELS,
   WORKFLOW_LABELS,
   formatPaymentMethod,
 } from '../../lib/api';
+import { silentPrintOrder } from '../../lib/printReceipt';
 import { formatPrepDuration } from '../../lib/prepTimer';
 import {
   LayoutDashboard, PackageCheck, Search, LogOut, ArrowLeft,
-  TrendingUp, Receipt, Calculator,
+  TrendingUp, Receipt, Calculator, Printer, Loader2,
 } from 'lucide-react';
 import { AdminTab, AdminTabBar } from '../../components/AdminTabs';
 
@@ -111,6 +114,8 @@ export default function FinalizedOrders() {
   const [query, setQuery] = useState('');
   const [period, setPeriod] = useState<PeriodFilter>('today');
   const [sort, setSort] = useState<SortKey>('newest');
+  const [printingId, setPrintingId] = useState<number | null>(null);
+  const [printNotice, setPrintNotice] = useState('');
 
   useEffect(() => {
     let alive = true;
@@ -129,6 +134,39 @@ export default function FinalizedOrders() {
     })();
     return () => { alive = false; };
   }, []);
+
+  const reprintReceipt = async (order: Order) => {
+    setPrintingId(order.id);
+    setPrintNotice('');
+    try {
+      let full = order;
+      try {
+        full = await getOrder(order.id);
+      } catch {
+        /* use list payload — already includes items */
+      }
+      if (!full.items?.length && order.items?.length) {
+        full = { ...full, items: order.items };
+      }
+      const { config } = await getAdminPrinterSettings();
+      const pos = (config.printers || []).find((p) => /pos-?58/i.test(String(p.name || '')));
+      const result = await silentPrintOrder(full, {
+        ...config,
+        defaultPrinterId: pos?.id || config.defaultPrinterId,
+        copies: Math.max(1, Math.min(4, Number(config.copies) || 1)),
+      } as Parameters<typeof silentPrintOrder>[1]);
+      if (!result.ok) {
+        setPrintNotice(result.message);
+      } else {
+        setPrintNotice(`Comprovante #${full.orderNumber} enviado para ${result.printerName}.`);
+        window.setTimeout(() => setPrintNotice(''), 3500);
+      }
+    } catch {
+      setPrintNotice('Falha ao reimprimir. Clique em Reconectar Impressora.');
+    } finally {
+      setPrintingId(null);
+    }
+  };
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -188,6 +226,15 @@ export default function FinalizedOrders() {
       </header>
 
       <main className="admin-shell px-4 py-5 space-y-4">
+        {printNotice ? (
+          <p className={`text-sm rounded-xl px-3 py-2 ${
+            printNotice.startsWith('Comprovante')
+              ? 'text-green-400 bg-green-950/20 border border-green-900/30'
+              : 'text-amber-200 bg-amber-500/10 border border-amber-500/30'
+          }`}>
+            {printNotice}
+          </p>
+        ) : null}
         <div className="grid grid-cols-3 gap-2">
           <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-3">
             <p className="text-zinc-500 text-[10px] uppercase font-bold flex items-center gap-1">
@@ -321,6 +368,20 @@ export default function FinalizedOrders() {
                       <p className="text-zinc-400 text-sm">{o.notes}</p>
                     </div>
                   ) : null}
+
+                  <button
+                    type="button"
+                    title="Reimprimir comprovante"
+                    aria-label="Reimprimir comprovante"
+                    disabled={printingId === o.id}
+                    onClick={() => void reprintReceipt(o)}
+                    className="w-full h-10 rounded-xl border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 text-zinc-100 text-xs font-black uppercase tracking-wide flex items-center justify-center gap-1.5 disabled:opacity-50"
+                  >
+                    {printingId === o.id
+                      ? <Loader2 size={14} className="animate-spin" />
+                      : <Printer size={14} />}
+                    🖨️ Reimprimir
+                  </button>
 
                   <p className="text-[11px] text-zinc-600">
                     Status: Finalizado — processo encerrado (sem retorno ao fluxo operacional).

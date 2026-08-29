@@ -43,6 +43,11 @@ assert.match(dash, /updateOrderWorkflow\(order\.id, 'preparing'\)/);
 assert.doesNotMatch(dash, /window\.print\(/);
 assert.doesNotMatch(dash, /buildReceiptHTML/);
 
+const finalized = read("artifacts/burger-gn/src/pages/admin/FinalizedOrders.tsx");
+assert.match(finalized, /silentPrintOrder/);
+assert.match(finalized, /Reimprimir comprovante/);
+assert.doesNotMatch(finalized, /window\.print\(/);
+
 const apiRoute = read("artifacts/api-server/src/routes/printerSettings.ts");
 assert.match(apiRoute, /\/admin\/printer-settings/);
 assert.match(apiRoute, /normalizePrinterSettings/);

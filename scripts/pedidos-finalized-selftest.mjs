@@ -2,10 +2,24 @@
  * Pedidos finalized workflow contract.
  * Run: node scripts/pedidos-finalized-selftest.mjs
  */
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 function assert(cond, msg) {
   if (!cond) throw new Error(msg);
 }
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const finalizedPage = fs.readFileSync(
+  path.join(root, "artifacts/burger-gn/src/pages/admin/FinalizedOrders.tsx"),
+  "utf8",
+);
+assert(finalizedPage.includes("Reimprimir comprovante"), "reprint tooltip on finalized list");
+assert(finalizedPage.includes("🖨️ Reimprimir"), "labeled reprint button");
+assert(finalizedPage.includes("silentPrintOrder"), "reprint uses print agent, not browser print");
+assert(finalizedPage.includes("getOrder(") || finalizedPage.includes("getOrder"), "reprint fetches full order");
+assert(!finalizedPage.includes("window.print"), "no window.print on finalized orders");
 
 const WORKFLOW_TO_STATUS = {
   awaiting_payment: "new",

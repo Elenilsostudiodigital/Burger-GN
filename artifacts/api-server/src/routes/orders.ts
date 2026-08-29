@@ -970,6 +970,26 @@ router.get("/orders", requireCompanyAuth, async (req, res) => {
   }
 });
 
+/** Full order + items for reprint / admin detail. */
+router.get("/orders/:id", requireCompanyAuth, async (req, res) => {
+  try {
+    const id = Number((req.params as { id: string }).id);
+    if (!Number.isFinite(id) || id <= 0) {
+      res.status(400).json({ error: "Pedido inválido" });
+      return;
+    }
+    const order = await getOrderWithItems(id);
+    if (!order || (order as { companyId?: number }).companyId !== req.companyId) {
+      res.status(404).json({ error: "Pedido não encontrado" });
+      return;
+    }
+    res.json(order);
+  } catch (err) {
+    req.log.error({ err }, "Failed to get order");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 /** Daily prep-timer stats for the kitchen dashboard (additive). */
 router.get("/admin/prep-stats", requireCompanyAuth, async (req, res) => {
   try {

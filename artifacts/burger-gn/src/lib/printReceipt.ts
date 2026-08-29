@@ -189,6 +189,17 @@ export function buildOrderPrintText(
     rows.push(center(`Pedido #${order.orderNumber}`));
   }
   rows.push(line());
+  const created = order.createdAt ? new Date(order.createdAt) : null;
+  if (created && Number.isFinite(created.getTime())) {
+    rows.push(`Data: ${created.toLocaleDateString('pt-BR')}`);
+    rows.push(
+      `Hora: ${created.toLocaleTimeString('pt-BR', {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+      })}`,
+    );
+  }
   rows.push(`Cliente: ${order.customerName}`);
   rows.push(`Tel: ${order.phone}`);
   rows.push(`Tipo: ${ORDER_TYPE_LABELS[order.orderType as OrderType] || order.orderType}`);
@@ -205,6 +216,7 @@ export function buildOrderPrintText(
     if (i.addons?.length) {
       rows.push(`   + ${i.addons.map((a) => a.name).join(', ')}`);
     }
+    if (i.notes) rows.push(`   Obs: ${i.notes}`);
   }
   rows.push(line());
   rows.push(`Subtotal ${fmtMoney(order.subtotal)}`);
