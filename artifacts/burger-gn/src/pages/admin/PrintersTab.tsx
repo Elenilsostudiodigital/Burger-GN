@@ -15,6 +15,7 @@ import {
   fetchAgentPrinters,
   loadLastPrintedOrder,
   mergePrinterLists,
+  isPrintAgentSupported,
   pingPrintAgent,
   reconnectPrintAgent,
   silentPrintOrder,
@@ -37,7 +38,7 @@ export function PrintersTab() {
     setLoading(true);
     setError('');
     try {
-      const online = await pingPrintAgent();
+      const online = isPrintAgentSupported() ? await pingPrintAgent() : false;
       setAgentOnline(online);
       const res = await getAdminPrinterSettings();
       let next = res.config as PrinterSettings;
@@ -66,6 +67,7 @@ export function PrintersTab() {
 
   useEffect(() => {
     void load();
+    if (!isPrintAgentSupported()) return;
     const id = window.setInterval(() => {
       void pingPrintAgent().then(setAgentOnline);
     }, 8000);
@@ -192,12 +194,18 @@ export function PrintersTab() {
           Impressão silenciosa via agente local (sem janela do navegador). O agente inicia
           com o Windows após a instalação única neste PC da loja.
         </p>
-        <p className={`text-xs font-bold ${agentOnline ? 'text-green-400' : 'text-amber-400'}`}>
-          Agente local: {agentOnline ? 'Conectado (127.0.0.1:19191)' : 'Desconectado'}
+        <p className={`text-xs font-bold ${
+          !isPrintAgentSupported()
+            ? 'text-zinc-500'
+            : agentOnline ? 'text-green-400' : 'text-amber-400'
+        }`}>
+          {isPrintAgentSupported()
+            ? `Agente local: ${agentOnline ? 'Conectado (127.0.0.1:19191)' : 'Desconectado'}`
+            : 'Agente de impressão: disponível apenas no PC da loja'}
         </p>
       </div>
 
-      {!agentOnline && (
+      {isPrintAgentSupported() && !agentOnline && (
         <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-3 text-amber-100 text-sm space-y-2">
           <p className="flex gap-2">
             <AlertTriangle size={16} className="shrink-0 mt-0.5" />

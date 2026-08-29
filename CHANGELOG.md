@@ -5,6 +5,14 @@ Toda nova implementação aprovada pelo proprietário gera uma nova versão.
 
 ---
 
+## Burger GN v1.5.16
+
+- Aviso do Print Agent só no PC da loja
+  - Celular e dispositivos sem suporte ocultam “Agente de impressão desconectado” e **Reconectar Impressora**
+  - O painel admin no celular continua igual; impressão silenciosa permanece no Windows da loja
+
+---
+
 ## Burger GN v1.5.15
 
 - Agente de impressão sem PowerShell no autostart

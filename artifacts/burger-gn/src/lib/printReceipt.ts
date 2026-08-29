@@ -13,6 +13,25 @@ export const PRINT_AGENT_PROTOCOL = 'burgergn-print://start';
 export const PRINT_AGENT_OFFLINE_HELP =
   'O agente de impressão não está rodando neste computador da loja. Clique em “Reconectar Impressora” e aceite abrir o Burger GN Print Agent se o Windows perguntar. Se continuar offline, execute UMA VEZ neste PC: tools/burger-gn-print-agent/install-autostart.bat (botão direito → Executar). Depois disso o agente inicia sozinho com o Windows — não é preciso abrir start.bat a cada uso.';
 
+/**
+ * Local print agent exists only on the Windows store PC (127.0.0.1:19191).
+ * Phones, tablets, and non-Windows browsers must not show reconnect UI.
+ */
+export function isPrintAgentSupported(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  const nav = navigator as Navigator & {
+    userAgentData?: { mobile?: boolean; platform?: string };
+  };
+  if (nav.userAgentData?.mobile === true) return false;
+  const ua = nav.userAgent || '';
+  if (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|Mobile/i.test(ua)) {
+    return false;
+  }
+  if (/Macintosh/i.test(ua) && (nav.maxTouchPoints || 0) > 1) return false;
+  const platform = nav.userAgentData?.platform || nav.platform || '';
+  return /Win/i.test(platform) || /Windows/i.test(ua);
+}
+
 function sleep(ms: number) {
   return new Promise<void>((resolve) => {
     window.setTimeout(resolve, ms);
@@ -88,7 +107,7 @@ export async function pingPrintAgent(timeoutMs = 2500): Promise<boolean> {
 
 /** Hidden iframe so a failed protocol does not navigate the admin SPA away. */
 export function launchPrintAgentProtocol() {
-  if (typeof document === 'undefined') return;
+  if (typeof document === 'undefined' || !isPrintAgentSupported()) return;
   try {
     const iframe = document.createElement('iframe');
     iframe.setAttribute('aria-hidden', 'true');
@@ -123,6 +142,9 @@ export async function waitForPrintAgent(timeoutMs = 10000): Promise<boolean> {
 export async function reconnectPrintAgent(
   timeoutMs = 12000,
 ): Promise<{ ok: boolean; message: string }> {
+  if (!isPrintAgentSupported()) {
+    return { ok: false, message: '' };
+  }
   if (await pingPrintAgent()) {
     return { ok: true, message: 'Impressora reconectada.' };
   }
@@ -135,6 +157,7 @@ export async function reconnectPrintAgent(
 
 /** Used before every silent print: short retries + protocol wake. */
 export async function ensurePrintAgent(timeoutMs = 8000): Promise<boolean> {
+  if (!isPrintAgentSupported()) return false;
   if (await pingPrintAgent()) return true;
   launchPrintAgentProtocol();
   return waitForPrintAgent(timeoutMs);

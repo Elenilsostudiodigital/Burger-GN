@@ -68,6 +68,7 @@ const app = read("artifacts/burger-gn/src/App.tsx");
 assert.match(app, /PrintAgentGuard/);
 
 const guard = read("artifacts/burger-gn/src/components/PrintAgentGuard.tsx");
+assert.match(guard, /isPrintAgentSupported/);
 assert.match(guard, /Reconectar Impressora/);
 assert.match(guard, /reconnectPrintAgent/);
 assert.match(guard, /PRINT_AGENT_PROTOCOL|burgergn-print:/);

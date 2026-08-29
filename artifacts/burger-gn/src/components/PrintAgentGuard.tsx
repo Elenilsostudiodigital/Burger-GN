@@ -4,6 +4,7 @@ import { Loader2, RefreshCw, AlertTriangle } from 'lucide-react';
 import {
   PRINT_AGENT_OFFLINE_HELP,
   PRINT_AGENT_PROTOCOL,
+  isPrintAgentSupported,
   pingPrintAgent,
   launchPrintAgentProtocol,
   reconnectPrintAgent,
@@ -20,6 +21,7 @@ export function PrintAgentReconnectButton({
   onResult?: (ok: boolean, message: string) => void;
 }) {
   const [busy, setBusy] = useState(false);
+  if (!isPrintAgentSupported()) return null;
 
   const run = async () => {
     setBusy(true);
@@ -54,6 +56,7 @@ export function PrintAgentReconnectButton({
 export function PrintAgentGuard() {
   const [online, setOnline] = useState<boolean | null>(null);
   const [hint, setHint] = useState('');
+  const supported = typeof window !== 'undefined' && isPrintAgentSupported();
 
   const wakeOnce = useCallback(async () => {
     try {
@@ -73,6 +76,7 @@ export function PrintAgentGuard() {
   }, []);
 
   useEffect(() => {
+    if (!supported) return;
     let cancelled = false;
     const tick = async () => {
       const ok = await pingPrintAgent();
@@ -92,9 +96,9 @@ export function PrintAgentGuard() {
       cancelled = true;
       window.clearInterval(id);
     };
-  }, [wakeOnce]);
+  }, [wakeOnce, supported]);
 
-  if (online !== false) return null;
+  if (!supported || online !== false) return null;
 
   return (
     <div className="fixed bottom-20 sm:bottom-4 left-3 right-3 sm:left-auto sm:right-4 sm:max-w-md z-[70] rounded-2xl border border-amber-500/40 bg-zinc-950/95 px-3 py-3 shadow-xl shadow-black/40">

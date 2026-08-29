@@ -91,6 +91,8 @@ assert.match(server, /EADDRINUSE/);
 assert.match(server, /keepalive/);
 
 const printLib = read("artifacts/burger-gn/src/lib/printReceipt.ts");
+assert.match(printLib, /isPrintAgentSupported/);
+assert.match(printLib, /userAgentData|Android|iPhone/);
 assert.match(printLib, /reconnectPrintAgent/);
 assert.match(printLib, /ensurePrintAgent/);
 assert.match(printLib, /PRINT_AGENT_OFFLINE_HELP/);
@@ -100,6 +102,7 @@ assert.doesNotMatch(printLib, /Abra tools\/burger-gn-print-agent\/start\.bat/);
 const guard = read("artifacts/burger-gn/src/components/PrintAgentGuard.tsx");
 assert.match(guard, /Reconectar Impressora/);
 assert.match(guard, /PrintAgentGuard/);
+assert.match(guard, /isPrintAgentSupported/);
 assert.match(guard, /PRINT_AGENT_PROTOCOL|reconnectPrintAgent/);
 
 const app = read("artifacts/burger-gn/src/App.tsx");
