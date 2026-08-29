@@ -1,5 +1,7 @@
-import { useEffect, useRef } from 'react';
-import { getOrders, type Order } from '../lib/api';
+import { useEffect, useRef, useState } from 'react';
+import { type Order } from '../lib/api';
+import { fetchSharedAdminOrders, sharedAdminOrdersHavePreparing } from '../lib/adminOrdersCache';
+import { useSmartPoll } from '../lib/useSmartPoll';
 import {
   LEGACY_SOUND_KEY,
   getRepeatCount,
@@ -193,15 +195,18 @@ export function AdminNotificationEngine() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => {
-    const tick = async () => {
+  const [prepWatchMs, setPrepWatchMs] = useState(60_000);
+
+  useSmartPoll(
+    async () => {
       const s = settingsRef.current;
       if (!s.masterEnabled || (!s.delay.enabled && !s.events.overdue.enabled && !s.delay.overdueEnabled)) {
+        setPrepWatchMs(120_000);
         return;
       }
       let orders: Order[] = [];
       try {
-        orders = await getOrders();
+        orders = await fetchSharedAdminOrders(false);
       } catch {
         return;
       }
@@ -273,13 +278,10 @@ export function AdminNotificationEngine() {
           }
         }
       }
-    };
-
-    void tick();
-    const id = setInterval(() => void tick(), 20000);
-    return () => clearInterval(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+      setPrepWatchMs(sharedAdminOrdersHavePreparing() ? 60_000 : 120_000);
+    },
+    { intervalMs: prepWatchMs },
+  );
 
   return null;
 }

@@ -10,6 +10,7 @@ import {
   WeekdayKey,
   WeeklySchedule,
 } from '../../lib/api';
+import { isSystemSleeping } from '../../lib/systemModeClient';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -21,7 +22,7 @@ const WEEK_ORDER: WeekdayKey[] = [
   'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday',
 ];
 
-const STATUS_POLL_MS = 10_000;
+const STATUS_POLL_MS = 30_000;
 
 function cloneSchedule(s: WeeklySchedule): WeeklySchedule {
   return JSON.parse(JSON.stringify(s)) as WeeklySchedule;
@@ -132,8 +133,14 @@ export function BusinessHoursTab() {
       }
     };
 
-    const pollId = window.setInterval(() => { void tick(); }, STATUS_POLL_MS);
-    const onFocus = () => { void tick(); };
+    const pollId = window.setInterval(() => {
+      if (document.visibilityState === 'hidden' || isSystemSleeping()) return;
+      void tick();
+    }, STATUS_POLL_MS);
+    const onFocus = () => {
+      if (document.visibilityState === 'hidden') return;
+      void tick();
+    };
     window.addEventListener('focus', onFocus);
     document.addEventListener('visibilitychange', onFocus);
     void tick();

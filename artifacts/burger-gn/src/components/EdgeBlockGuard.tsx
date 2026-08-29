@@ -1,9 +1,10 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useRef, useState } from "react";
 import {
   appendEdgeBlockLog,
   probeApiHealth,
   reportClientTelemetry,
 } from "../lib/edgeBlock";
+import { useSmartPoll } from "../lib/useSmartPoll";
 
 /**
  * Detects Vercel WAF/firewall 403 (whole site blocked after deploy stampede)
@@ -14,54 +15,44 @@ export function EdgeBlockGuard() {
   const wasBlocked = useRef(false);
   const startedAt = useRef<string | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    const tick = async () => {
-      const result = await probeApiHealth();
-      if (cancelled) return;
-      if (result.edgeBlocked) {
-        if (!wasBlocked.current) {
-          startedAt.current = new Date().toISOString();
-          console.error("[bgn-edge-403]", result);
-          appendEdgeBlockLog({ kind: "edge_403_start", ...result, path: window.location.pathname });
-          reportClientTelemetry({
-            kind: "edge_403_start",
-            status: result.status,
-            path: window.location.pathname,
-            vercelMitigated: result.vercelMitigated,
-            hasApiHeader: result.hasApiHeader,
-          });
-        }
-        wasBlocked.current = true;
-        setBlocked(true);
-        return;
-      }
-      if (wasBlocked.current && result.ok) {
-        console.info("[bgn-edge-403] recovered");
-        appendEdgeBlockLog({ kind: "edge_403_recovered", path: window.location.pathname });
+  const tick = async () => {
+    const result = await probeApiHealth();
+    if (result.edgeBlocked) {
+      if (!wasBlocked.current) {
+        startedAt.current = new Date().toISOString();
+        console.error("[bgn-edge-403]", result);
+        appendEdgeBlockLog({ kind: "edge_403_start", ...result, path: window.location.pathname });
         reportClientTelemetry({
-          kind: "edge_403_recovered",
+          kind: "edge_403_start",
           status: result.status,
           path: window.location.pathname,
-          startedAt: startedAt.current,
+          vercelMitigated: result.vercelMitigated,
+          hasApiHeader: result.hasApiHeader,
         });
-        wasBlocked.current = false;
-        startedAt.current = null;
       }
-      setBlocked(false);
-    };
-    void tick();
-    const id = window.setInterval(() => void tick(), blocked ? 5000 + Math.floor(Math.random() * 4000) : 20000);
-    const onVis = () => {
-      if (document.visibilityState === "visible") void tick();
-    };
-    document.addEventListener("visibilitychange", onVis);
-    return () => {
-      cancelled = true;
-      window.clearInterval(id);
-      document.removeEventListener("visibilitychange", onVis);
-    };
-  }, [blocked]);
+      wasBlocked.current = true;
+      setBlocked(true);
+      return;
+    }
+    if (wasBlocked.current && result.ok) {
+      console.info("[bgn-edge-403] recovered");
+      appendEdgeBlockLog({ kind: "edge_403_recovered", path: window.location.pathname });
+      reportClientTelemetry({
+        kind: "edge_403_recovered",
+        status: result.status,
+        path: window.location.pathname,
+        startedAt: startedAt.current,
+      });
+      wasBlocked.current = false;
+      startedAt.current = null;
+    }
+    setBlocked(false);
+  };
+
+  useSmartPoll(tick, {
+    intervalMs: blocked ? 8_000 : 90_000,
+    hiddenIntervalMs: blocked ? 15_000 : 0,
+  });
 
   if (!blocked) return null;
 

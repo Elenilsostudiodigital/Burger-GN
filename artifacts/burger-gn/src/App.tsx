@@ -44,6 +44,7 @@ import AdminRuasEntrega from "./pages/admin/RuasEntrega";
 import AdminDivulgacao from "./pages/admin/Divulgacao";
 import { MenuPresenceTracker } from "./components/MenuPresenceTracker";
 import { EdgeBlockGuard } from "./components/EdgeBlockGuard";
+import { SystemModeBoot } from "./components/SystemModeBoot";
 
 const queryClient = new QueryClient();
 
@@ -104,6 +105,7 @@ function AdminSecurityRoute() {
 function Router() {
   return (
     <>
+      <SystemModeBoot />
       <MenuPresenceTracker />
       <EdgeBlockGuard />
       <Switch>

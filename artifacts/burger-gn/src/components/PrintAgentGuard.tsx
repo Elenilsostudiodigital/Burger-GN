@@ -91,10 +91,18 @@ export function PrintAgentGuard() {
       await wakeOnce();
     };
     void tick();
-    const id = window.setInterval(() => void tick(), 5000);
+    const id = window.setInterval(() => {
+      if (document.visibilityState === 'hidden') return;
+      void tick();
+    }, 5000);
+    const onVis = () => {
+      if (document.visibilityState === 'visible') void tick();
+    };
+    document.addEventListener('visibilitychange', onVis);
     return () => {
       cancelled = true;
       window.clearInterval(id);
+      document.removeEventListener('visibilitychange', onVis);
     };
   }, [wakeOnce, supported]);
 

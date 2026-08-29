@@ -13,13 +13,15 @@ const read = (rel) => fs.readFileSync(path.join(root, rel), "utf8");
 const streamLib = read("artifacts/burger-gn/src/lib/adminOrderStream.ts");
 assert.match(streamLib, /acquireAdminOrderStream/);
 assert.match(streamLib, /releaseAdminOrderStream/);
-assert.match(streamLib, /refs \+= 1|refs \+= 1/);
+assert.match(streamLib, /refs \+= 1/);
+assert.match(streamLib, /isSystemSleeping/);
 
 const files = [
   "artifacts/burger-gn/src/pages/admin/Dashboard.tsx",
   "artifacts/burger-gn/src/components/AdminNotificationEngine.tsx",
   "artifacts/burger-gn/src/components/AdminBottomNav.tsx",
   "artifacts/burger-gn/src/pages/admin/NovasRuas.tsx",
+  "artifacts/burger-gn/src/components/PedidosPresenceBar.tsx",
 ];
 
 for (const f of files) {

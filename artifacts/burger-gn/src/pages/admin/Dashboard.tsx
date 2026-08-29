@@ -6,7 +6,7 @@ import {
 } from '@dnd-kit/core';
 import { useAdmin } from '../../context/AdminContext';
 import {
-  getOrders, updateOrderWorkflow, updateOrderPaymentStatus, getPrepStats,
+  updateOrderWorkflow, updateOrderPaymentStatus, getPrepStats,
   openCustomerWhatsapp, buildCustomerNotifyMessage, WHATSAPP_EXTERNAL_ENABLED,
   openWhatsappCompose, buildPreparingUpdateWhatsappMessage,
   getAdminMessageTemplate, buildOrderTemplateVars, interpolateMessageTemplate,
@@ -40,6 +40,8 @@ import {
   isOutStageAllowed,
 } from '../../lib/orderWorkflow';
 import { acquireAdminOrderStream, releaseAdminOrderStream } from '../../lib/adminOrderStream';
+import { fetchSharedAdminOrders, mergeSharedAdminOrder } from '../../lib/adminOrdersCache';
+import { useSmartPoll } from '../../lib/useSmartPoll';
 
 /** Board columns — pending orders never auto-advance. */
 type ColumnKey = 'new' | 'preparing' | 'ready' | 'out' | 'done';
@@ -651,8 +653,8 @@ export default function AdminDashboard() {
 
   useEffect(() => { soundEnabledRef.current = soundEnabled; }, [soundEnabled]);
 
-  const fetchOrders = useCallback(async () => {
-    try { setOrders(await getOrders()); } catch { /* ignore */ }
+  const fetchOrders = useCallback(async (force = false) => {
+    try { setOrders(await fetchSharedAdminOrders(force)); } catch { /* ignore */ }
     finally { setLoading(false); }
   }, []);
 
@@ -668,16 +670,18 @@ export default function AdminDashboard() {
   }, []);
 
   useEffect(() => {
-    fetchOrders();
-    fetchPrepStats();
-    fetchStreetRequests();
-    const interval = setInterval(() => {
-      fetchOrders();
-      fetchPrepStats();
-      fetchStreetRequests();
-    }, 30000);
-    return () => clearInterval(interval);
+    void fetchOrders(false);
+    void fetchPrepStats();
+    void fetchStreetRequests();
   }, [fetchOrders, fetchPrepStats, fetchStreetRequests]);
+
+  useSmartPoll(
+    () => {
+      void fetchPrepStats();
+      void fetchStreetRequests();
+    },
+    { intervalMs: 90_000 },
+  );
 
   useEffect(() => {
     fetchOrders();
@@ -685,6 +689,7 @@ export default function AdminDashboard() {
 
     const onNewOrder = (e: Event) => {
       const order = JSON.parse((e as MessageEvent).data) as Order;
+      mergeSharedAdminOrder(order);
       if (soundEnabledRef.current) playBeep();
       setOrders(prev => [order, ...prev.filter(o => o.id !== order.id)]);
       setNewOrderIds(prev => new Set([...prev, order.id]));
@@ -699,7 +704,7 @@ export default function AdminDashboard() {
     };
 
     const onOrderStatus = (e: Event) => {
-      fetchOrders();
+      void fetchOrders(true);
       try {
         const data = JSON.parse((e as MessageEvent).data) as {
           workflow?: string; id?: number; orderNumber?: number;
@@ -716,13 +721,13 @@ export default function AdminDashboard() {
     };
 
     const onOrderReceipt = () => {
-      fetchOrders();
+      void fetchOrders(true);
       setNotification('🔔 Novo comprovante enviado');
       setTimeout(() => setNotification(null), 5000);
     };
 
     const onOrderPayment = () => {
-      fetchOrders();
+      void fetchOrders(true);
       setNotification('🔔 Status de pagamento atualizado');
       setTimeout(() => setNotification(null), 4000);
     };

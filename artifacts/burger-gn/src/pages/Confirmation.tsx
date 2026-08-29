@@ -127,8 +127,26 @@ export default function Confirmation() {
       } catch { /* ignore */ }
     };
     poll();
-    const id = setInterval(poll, isPixOnline ? 4000 : 6000);
-    return () => { alive = false; clearInterval(id); };
+    const visibleMs = isPixOnline ? 6000 : 8000;
+    const hiddenMs = 15_000;
+    const id = setInterval(() => {
+      if (document.visibilityState === 'hidden') return;
+      void poll();
+    }, visibleMs);
+    const hiddenId = setInterval(() => {
+      if (document.visibilityState !== 'hidden') return;
+      void poll();
+    }, hiddenMs);
+    const onVis = () => {
+      if (document.visibilityState === 'visible') void poll();
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => {
+      alive = false;
+      clearInterval(id);
+      clearInterval(hiddenId);
+      document.removeEventListener('visibilitychange', onVis);
+    };
   }, [order?.trackingId, order?.paymentMethod, order?.pixMode, pixStep, isPixOnline]);
 
   const handleCopyPix = async () => {

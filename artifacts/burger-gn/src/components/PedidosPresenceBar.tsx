@@ -7,8 +7,10 @@ import {
   resolveSoundGate,
   type NotifEventKey,
 } from "../lib/adminNotifications";
+import { acquireAdminOrderStream, releaseAdminOrderStream } from "../lib/adminOrderStream";
+import { useSmartPoll } from "../lib/useSmartPoll";
 
-const POLL_MS = 5_000;
+const FALLBACK_POLL_MS = 60_000;
 
 type SessionSnap = { status: string; cartItems: number };
 
@@ -34,6 +36,7 @@ function firePresenceAlert(
 
 /**
  * Live presence strip for Pedidos board — counters + discreet alerts with optional sound.
+ * Live updates come from SSE; a slow poll is only a fallback when the tab is visible.
  */
 export function PedidosPresenceBar({ onAlert }: PedidosPresenceBarProps) {
   const [summary, setSummary] = useState({ online: 0, cart: 0, checkout: 0 });
@@ -42,69 +45,79 @@ export function PedidosPresenceBar({ onAlert }: PedidosPresenceBarProps) {
   const onAlertRef = useRef(onAlert);
   onAlertRef.current = onAlert;
 
+  const applySnapshot = (data: { summary?: { online: number; cart: number; checkout: number }; sessions?: PresenceSession[] }) => {
+    setSummary({
+      online: data.summary?.online || 0,
+      cart: data.summary?.cart || 0,
+      checkout: data.summary?.checkout || 0,
+    });
+
+    const sessions: PresenceSession[] = data.sessions || [];
+    const next = new Map<string, SessionSnap>();
+    for (const s of sessions) {
+      next.set(s.sessionId, { status: s.status, cartItems: s.cartItems });
+    }
+
+    if (!primedRef.current) {
+      prevRef.current = next;
+      primedRef.current = true;
+      return;
+    }
+
+    const prev = prevRef.current;
+    for (const [id, snap] of next) {
+      const was = prev.get(id);
+      if (!was) {
+        firePresenceAlert(
+          "presenceOnline",
+          "👀 Novo cliente entrou no cardápio.",
+          onAlertRef.current,
+        );
+      } else {
+        const enteredCart =
+          (was.status !== "cart" && was.status !== "checkout" && snap.status === "cart")
+          || (was.cartItems === 0 && snap.cartItems > 0 && snap.status !== "checkout");
+        if (enteredCart) {
+          firePresenceAlert(
+            "presenceCart",
+            "🛒 Um cliente iniciou um pedido.",
+            onAlertRef.current,
+          );
+        }
+        if (was.status !== "checkout" && snap.status === "checkout") {
+          firePresenceAlert(
+            "presenceCheckout",
+            "💳 Um cliente está finalizando um pedido.",
+            onAlertRef.current,
+          );
+        }
+      }
+    }
+    prevRef.current = next;
+  };
+
+  const poll = async () => {
+    try {
+      applySnapshot(await getAdminPresence());
+    } catch { /* ignore */ }
+  };
+
+  useSmartPoll(poll, { intervalMs: FALLBACK_POLL_MS });
+
   useEffect(() => {
-    let cancelled = false;
-
-    const poll = async () => {
+    const es = acquireAdminOrderStream();
+    const onPresence = (event: Event) => {
       try {
-        const data = await getAdminPresence();
-        if (cancelled) return;
-        setSummary({
-          online: data.summary.online,
-          cart: data.summary.cart,
-          checkout: data.summary.checkout,
+        applySnapshot(JSON.parse((event as MessageEvent).data) as {
+          summary?: { online: number; cart: number; checkout: number };
+          sessions?: PresenceSession[];
         });
-
-        const sessions: PresenceSession[] = data.sessions || [];
-        const next = new Map<string, SessionSnap>();
-        for (const s of sessions) {
-          next.set(s.sessionId, { status: s.status, cartItems: s.cartItems });
-        }
-
-        if (!primedRef.current) {
-          prevRef.current = next;
-          primedRef.current = true;
-          return;
-        }
-
-        const prev = prevRef.current;
-        for (const [id, snap] of next) {
-          const was = prev.get(id);
-          if (!was) {
-            firePresenceAlert(
-              "presenceOnline",
-              "👀 Novo cliente entrou no cardápio.",
-              onAlertRef.current,
-            );
-          } else {
-            const enteredCart =
-              (was.status !== "cart" && was.status !== "checkout" && snap.status === "cart")
-              || (was.cartItems === 0 && snap.cartItems > 0 && snap.status !== "checkout");
-            if (enteredCart) {
-              firePresenceAlert(
-                "presenceCart",
-                "🛒 Um cliente iniciou um pedido.",
-                onAlertRef.current,
-              );
-            }
-            if (was.status !== "checkout" && snap.status === "checkout") {
-              firePresenceAlert(
-                "presenceCheckout",
-                "💳 Um cliente está finalizando um pedido.",
-                onAlertRef.current,
-              );
-            }
-          }
-        }
-        prevRef.current = next;
       } catch { /* ignore */ }
     };
-
-    poll();
-    const id = setInterval(poll, POLL_MS);
+    es.addEventListener("presence_update", onPresence);
     return () => {
-      cancelled = true;
-      clearInterval(id);
+      es.removeEventListener("presence_update", onPresence);
+      releaseAdminOrderStream(es);
     };
   }, []);
 

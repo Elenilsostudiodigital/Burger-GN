@@ -186,8 +186,19 @@ function OrderTimelineView({ trackingId }: { trackingId: string }) {
       }
     };
     fetchOrder();
-    const interval = setInterval(fetchOrder, 8000);
-    return () => { alive = false; clearInterval(interval); };
+    const interval = setInterval(() => {
+      if (document.visibilityState === 'hidden') return;
+      void fetchOrder();
+    }, 12_000);
+    const onVis = () => {
+      if (document.visibilityState === 'visible') void fetchOrder();
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => {
+      alive = false;
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVis);
+    };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [trackingId]);
 

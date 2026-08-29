@@ -5,6 +5,24 @@ Toda nova implementação aprovada pelo proprietário gera uma nova versão.
 
 ---
 
+## Burger GN v1.5.18
+
+- Modo Operação / Modo Sono
+  - Agenda: liga sexta 17:30 e dorme segunda 23:30 (horário de Brasília)
+  - Em **Configurações** (`/admin/config`): **Ligar Sistema** / **Colocar Sistema para Dormir**, com próximo despertar e descanso
+  - No sono: para polling, heartbeat, presença e SSE; cadastro e testes voltam ao clicar em Ligar
+
+---
+
+## Burger GN v1.5.17
+
+- Redução de consumo Vercel (polling)
+  - Presence do cardápio e da cozinha passam a usar SSE + intervalos longos
+  - `GET /orders` compartilhado em cache; aba oculta pausa os loops
+  - Horário da loja, healthz e acompanhamento de pedido polam menos e não duplicam
+
+---
+
 ## Burger GN v1.5.16
 
 - Aviso do Print Agent só no PC da loja

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { useCart } from "../context/CartContext";
 import { getSavedClubePhone, getClubeSessionProfile } from "../lib/clubeCliente";
@@ -9,8 +9,11 @@ import {
   resolvePresenceStatus,
   setPresenceIdentity,
 } from "../lib/menuPresence";
+import { refreshStoreStatus, subscribeStoreStatus } from "../lib/storeStatusCache";
+import { useSmartPoll } from "../lib/useSmartPoll";
+import { isSystemSleeping } from "../lib/systemModeClient";
 
-const HEARTBEAT_MS = 20_000;
+const HEARTBEAT_MS = 45_000;
 
 async function postPresence(path: string, body: Record<string, unknown>, keepalive = false) {
   try {
@@ -42,53 +45,59 @@ function resolveIdentity(): { name: string; phone: string } {
 
 /**
  * Sends lightweight heartbeats while the customer browses the digital menu.
- * Mounted inside the storefront router; no-ops on admin routes.
+ * Mounted inside the storefront router; no-ops on admin routes, hidden tabs,
+ * and when the store is closed.
  */
 export function MenuPresenceTracker() {
   const [location] = useLocation();
   const { totalItems } = useCart();
   const sessionIdRef = useRef(getOrCreatePresenceSessionId());
+  const [storeOpen, setStoreOpen] = useState(true);
+  const onStorefront = isStorefrontPresencePath(location);
+
+  useEffect(() => subscribeStoreStatus((status) => {
+    if (status) setStoreOpen(status.isOpen !== false);
+  }), []);
 
   useEffect(() => {
-    if (!isStorefrontPresencePath(location)) return;
+    if (onStorefront) void refreshStoreStatus(false);
+  }, [onStorefront]);
 
+  const send = (keepalive = false) => {
+    if (!onStorefront || !storeOpen || isSystemSleeping()) return;
     const sessionId = sessionIdRef.current;
-    let cancelled = false;
+    const { name, phone } = resolveIdentity();
+    const status = resolvePresenceStatus(location, totalItems);
+    void postPresence(
+      "/presence/heartbeat",
+      { sessionId, status, name, phone, cartItems: totalItems },
+      keepalive,
+    );
+  };
 
-    const send = (keepalive = false) => {
-      if (cancelled) return;
-      const { name, phone } = resolveIdentity();
-      const status = resolvePresenceStatus(location, totalItems);
-      void postPresence(
-        "/presence/heartbeat",
-        { sessionId, status, name, phone, cartItems: totalItems },
-        keepalive,
-      );
-    };
+  useSmartPoll(() => send(), {
+    intervalMs: HEARTBEAT_MS,
+    enabled: onStorefront && storeOpen,
+  });
 
-    send();
-    const interval = setInterval(() => send(), HEARTBEAT_MS);
+  useEffect(() => {
+    if (onStorefront && storeOpen) send();
+  }, [onStorefront, storeOpen, location, totalItems]);
 
-    const onVisibility = () => {
-      if (document.visibilityState === "visible") send();
-    };
+  useEffect(() => {
+    if (!onStorefront) return;
+    const sessionId = sessionIdRef.current;
     const onIdentity = () => send();
     const onLeave = () => {
       void postPresence("/presence/leave", { sessionId }, true);
     };
-
-    document.addEventListener("visibilitychange", onVisibility);
     window.addEventListener("bgn:presence-identity", onIdentity);
     window.addEventListener("pagehide", onLeave);
-
     return () => {
-      cancelled = true;
-      clearInterval(interval);
-      document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("bgn:presence-identity", onIdentity);
       window.removeEventListener("pagehide", onLeave);
     };
-  }, [location, totalItems]);
+  }, [onStorefront, storeOpen, location, totalItems]);
 
   return null;
 }

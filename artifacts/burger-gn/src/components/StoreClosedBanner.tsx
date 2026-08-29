@@ -1,60 +1,40 @@
 import React, { useEffect, useState } from 'react';
-import { getStoreStatus, StoreStatusPublic } from '../lib/api';
+import { StoreStatusPublic } from '../lib/api';
 import { AlertCircle } from 'lucide-react';
+import { refreshStoreStatus, subscribeStoreStatus } from '../lib/storeStatusCache';
+import { useSmartPoll } from '../lib/useSmartPoll';
 
-const POLL_MS = 15_000;
+const POLL_MS = 60_000;
 
 export function useStoreStatus(poll = true) {
   const [status, setStatus] = useState<StoreStatusPublic | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    let alive = true;
+    return subscribeStoreStatus((next) => {
+      if (next) setStatus(next);
+      setLoading(false);
+    });
+  }, []);
+
+  useEffect(() => {
     let transitionTimer: number | undefined;
-    let pollId: number | undefined;
-
-    const load = async () => {
-      try {
-        const s = await getStoreStatus();
-        if (!alive) return;
-        setStatus(s);
-
-        if (poll && s.nextTransitionAt) {
-          const at = Date.parse(s.nextTransitionAt);
-          if (Number.isFinite(at)) {
-            const wait = Math.max(500, Math.min(at - Date.now() + 250, 60 * 60 * 1000));
-            window.clearTimeout(transitionTimer);
-            transitionTimer = window.setTimeout(() => { void load(); }, wait);
-          }
-        }
-      } catch {
-        /* fail-closed for ordering UX once we know the endpoint exists;
-           while unknown, leave last status. API still guards POST /orders. */
-      } finally {
-        if (alive) setLoading(false);
-      }
-    };
-
-    void load();
-    if (poll) {
-      pollId = window.setInterval(() => { void load(); }, POLL_MS);
-      const onFocus = () => { void load(); };
-      window.addEventListener('focus', onFocus);
-      document.addEventListener('visibilitychange', onFocus);
-      return () => {
-        alive = false;
-        window.clearInterval(pollId);
-        window.clearTimeout(transitionTimer);
-        window.removeEventListener('focus', onFocus);
-        document.removeEventListener('visibilitychange', onFocus);
-      };
-    }
-
-    return () => {
-      alive = false;
+    const armTransition = (iso: string | null | undefined) => {
       window.clearTimeout(transitionTimer);
+      if (!poll || !iso) return;
+      const at = Date.parse(iso);
+      if (!Number.isFinite(at)) return;
+      const wait = Math.max(500, Math.min(at - Date.now() + 250, 60 * 60 * 1000));
+      transitionTimer = window.setTimeout(() => { void refreshStoreStatus(true); }, wait);
     };
-  }, [poll]);
+    armTransition(status?.nextTransitionAt);
+    return () => window.clearTimeout(transitionTimer);
+  }, [poll, status?.nextTransitionAt]);
+
+  useSmartPoll(
+    async () => { await refreshStoreStatus(false); },
+    { intervalMs: POLL_MS, enabled: poll },
+  );
 
   // Fail closed once status is known; before first load, do not block browsing.
   const isClosed = status?.isOpen === false;

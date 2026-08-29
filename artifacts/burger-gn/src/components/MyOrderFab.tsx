@@ -9,6 +9,7 @@ import {
 } from '../lib/myOrder';
 import { useVisibleMyOrder } from '../hooks/useMyOrder';
 import { trackOrder } from '../lib/api';
+import { useSmartPoll } from '../lib/useSmartPoll';
 
 /**
  * Floating "Meu Pedido" — visible only for in-progress kitchen/delivery statuses.
@@ -18,34 +19,33 @@ export function MyOrderFab() {
   const [location] = useLocation();
   const myOrder = useVisibleMyOrder();
 
-  useEffect(() => {
-    let cancelled = false;
-
-    const check = async () => {
-      const stored = getMyOrder();
-      if (!stored?.trackingId) return;
-      try {
-        const order = await trackOrder(stored.trackingId);
-        if (cancelled) return;
-        applyServerOrderToMyOrder(order);
-      } catch (err) {
-        if (cancelled) return;
-        const message = err instanceof Error ? err.message : '';
-        if (/not found|não encontrado|404/i.test(message)) {
-          purgeCustomerOrderTracking(stored.trackingId);
-        }
+  const check = async () => {
+    const stored = getMyOrder();
+    if (!stored?.trackingId) return;
+    try {
+      const order = await trackOrder(stored.trackingId);
+      applyServerOrderToMyOrder(order);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '';
+      if (/not found|não encontrado|404/i.test(message)) {
+        purgeCustomerOrderTracking(stored.trackingId);
       }
-    };
+    }
+  };
 
-    check();
-    const id = setInterval(check, 8000);
+  const skipFabPoll =
+    location.startsWith('/admin')
+    || location.startsWith('/checkout')
+    || location === '/confirmacao'
+    || location === '/meu-pedido'
+    || location.startsWith('/pedido/');
+
+  useSmartPoll(check, { intervalMs: 15_000, enabled: !skipFabPoll });
+
+  useEffect(() => {
     const onRefresh = () => { void check(); };
     window.addEventListener(MY_ORDER_REFRESH_EVENT, onRefresh);
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-      window.removeEventListener(MY_ORDER_REFRESH_EVENT, onRefresh);
-    };
+    return () => window.removeEventListener(MY_ORDER_REFRESH_EVENT, onRefresh);
   }, [location]);
 
   if (!myOrder) return null;

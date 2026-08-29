@@ -23,6 +23,7 @@ import { MessageTemplatesTab } from './MessageTemplatesTab';
 import { PrintersTab } from './PrintersTab';
 import { AdminBottomNav } from '../../components/AdminBottomNav';
 import { AdminTab, AdminTabBar } from '../../components/AdminTabs';
+import { SystemModeBar } from '../../components/SystemModeBar';
 
 type Tab =
   | 'perfil'
@@ -582,6 +583,7 @@ export default function SettingsHub() {
       </header>
 
       <main className="admin-shell px-4 py-5 space-y-5">
+        <SystemModeBar />
         <AdminTabBar>
           {tabs.map((t) => (
             <AdminTab

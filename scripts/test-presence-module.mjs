@@ -32,6 +32,9 @@ const checkout = read("artifacts/burger-gn/src/pages/Checkout.tsx");
 
 assert("ephemeral presence table", /menu_presence_sessions/.test(ensure));
 assert("presence API routes", /\/presence\/heartbeat/.test(route) && /\/admin\/presence/.test(route));
+assert("presence broadcasts to admin SSE", /presence_update/.test(route) && /broadcastSSE/.test(route));
+assert("presence bar uses SSE + slow fallback", /presence_update/.test(bar) && /60_000|60000/.test(bar));
+assert("heartbeat pauses when store closed", /storeOpen/.test(tracker));
 assert("presence router mounted", /presenceRouter/.test(index));
 assert("storefront tracker", /MenuPresenceTracker/.test(tracker));
 assert("PedidosPresenceBar on Pedidos board", /PedidosPresenceBar/.test(dash) && /PedidosPresenceBar/.test(bar));

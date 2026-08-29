@@ -8,31 +8,86 @@
  *
  * Server sends SSE `retry:` with per-connection jitter so a deploy (all
  * connections drop at once) does not reconnect in a stampede.
+ *
+ * Sleep mode closes the real socket and keeps the same hub so listeners survive
+ * Ligar / Dormir without remounting the kitchen pages.
  */
-const STREAM_URL = "/api/orders/stream";
+import { isSystemSleeping, subscribeSystemMode } from "./systemModeClient";
 
-let shared: EventSource | null = null;
+const STREAM_URL = "/api/orders/stream";
+const STREAM_EVENTS = [
+  "new_order",
+  "order_status",
+  "order_receipt",
+  "order_payment",
+  "street_request",
+  "street_request_resolved",
+  "presence_update",
+  "connected",
+  "reconnect",
+] as const;
+
+let hub: EventSource | null = null;
+let real: EventSource | null = null;
 let refs = 0;
 
-export function acquireAdminOrderStream(): EventSource {
-  if (
-    !shared
-    || shared.readyState === EventSource.CLOSED
-  ) {
-    shared = new EventSource(STREAM_URL, { withCredentials: true });
+function forward(event: Event) {
+  if (!hub) return;
+  const message = event as MessageEvent;
+  hub.dispatchEvent(new MessageEvent(message.type, { data: message.data }));
+}
+
+function detachReal() {
+  if (!real) return;
+  for (const name of STREAM_EVENTS) {
+    real.removeEventListener(name, forward);
   }
+  try { real.close(); } catch { /* ignore */ }
+  real = null;
+}
+
+function attachReal() {
+  if (refs <= 0 || isSystemSleeping()) {
+    detachReal();
+    return;
+  }
+  if (real && real.readyState !== EventSource.CLOSED) return;
+  detachReal();
+  real = new EventSource(STREAM_URL, { withCredentials: true });
+  for (const name of STREAM_EVENTS) {
+    real.addEventListener(name, forward);
+  }
+}
+
+function getHub(): EventSource {
+  if (hub) return hub;
+  const target = new EventTarget() as EventSource;
+  Object.defineProperty(target, "readyState", {
+    get() {
+      return real ? real.readyState : EventSource.CLOSED;
+    },
+  });
+  hub = target;
+  return target;
+}
+
+subscribeSystemMode(() => {
+  if (refs <= 0) return;
+  attachReal();
+});
+
+export function acquireAdminOrderStream(): EventSource {
   refs += 1;
-  return shared;
+  const next = getHub();
+  attachReal();
+  return next;
 }
 
 export function releaseAdminOrderStream(es: EventSource): void {
-  if (!shared || es !== shared) return;
+  if (!hub || es !== hub) return;
   refs = Math.max(0, refs - 1);
   if (refs === 0) {
-    try {
-      shared.close();
-    } catch { /* ignore */ }
-    shared = null;
+    detachReal();
   }
 }
 

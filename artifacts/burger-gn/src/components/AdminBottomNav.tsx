@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { getAdminStreetRequests } from '../lib/api';
 import { acquireAdminOrderStream, releaseAdminOrderStream } from '../lib/adminOrderStream';
+import { useSmartPoll } from '../lib/useSmartPoll';
 
 const ITEMS = [
   { href: '/admin', icon: BarChart3, label: 'Início' },
@@ -28,23 +29,21 @@ const ITEMS = [
 export function AdminBottomNav({ active }: { active: string }) {
   const [pedidosBadge, setPedidosBadge] = useState(0);
 
+  const load = () => {
+    getAdminStreetRequests('pending')
+      .then((list) => {
+        setPedidosBadge(Array.isArray(list) ? list.length : 0);
+      })
+      .catch(() => { /* ignore */ });
+  };
+
+  useSmartPoll(load, { intervalMs: 60_000 });
+
   useEffect(() => {
-    let cancelled = false;
-    const load = () => {
-      getAdminStreetRequests('pending')
-        .then((list) => {
-          if (!cancelled) setPedidosBadge(Array.isArray(list) ? list.length : 0);
-        })
-        .catch(() => { /* ignore */ });
-    };
-    load();
-    const interval = setInterval(load, 15000);
     const es = acquireAdminOrderStream();
     es.addEventListener('street_request', load);
     es.addEventListener('street_request_resolved', load);
     return () => {
-      cancelled = true;
-      clearInterval(interval);
       es.removeEventListener('street_request', load);
       es.removeEventListener('street_request_resolved', load);
       releaseAdminOrderStream(es);

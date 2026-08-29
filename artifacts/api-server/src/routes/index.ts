@@ -23,6 +23,7 @@ import clubeRouter from "./clube";
 import clientesRouter from "./clientes";
 import presenceRouter from "./presence";
 import uploadsRouter from "./uploads";
+import systemModeRouter from "./systemMode";
 
 const router: IRouter = Router();
 
@@ -50,5 +51,6 @@ router.use(clubeRouter);
 router.use(clientesRouter);
 router.use(presenceRouter);
 router.use(uploadsRouter);
+router.use(systemModeRouter);
 
 export default router;

@@ -402,11 +402,19 @@ export default function AdminNewOrder() {
         }
       } catch { /* ignore */ }
     };
-    const id = setInterval(() => { void tick(); }, 3500);
+    const id = setInterval(() => {
+      if (document.visibilityState === 'hidden') return;
+      void tick();
+    }, 6000);
+    const hiddenId = setInterval(() => {
+      if (document.visibilityState !== 'hidden') return;
+      void tick();
+    }, 12_000);
     void tick();
     return () => {
       cancelled = true;
       clearInterval(id);
+      clearInterval(hiddenId);
     };
   }, [created, pixPaid]);
 
