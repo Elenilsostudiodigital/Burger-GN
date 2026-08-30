@@ -11,10 +11,11 @@ const router = Router();
 // payment is created/updated. We re-fetch the payment from MP's API (never trust
 // the webhook body itself) and reconcile the matching order by external_reference.
 router.post("/payments/mercadopago/webhook", async (req, res) => {
-  try {
-    // Always ack quickly so Mercado Pago doesn't retry; do the work best-effort.
-    res.status(200).json({ received: true });
+  // Ack before any DB/schema work so Mercado Pago gets HTTP 200 within 22s
+  // even on Neon cold start. Middleware also skips this path (see app.ts).
+  res.status(200).json({ received: true });
 
+  try {
     await ensurePaymentSettingsSchema();
 
     const query = req.query as Record<string, string>;

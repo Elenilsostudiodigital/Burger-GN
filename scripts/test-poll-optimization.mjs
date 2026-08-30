@@ -52,6 +52,8 @@ assert.doesNotMatch(notif, /setInterval\(\(\) => void tick\(\), 20000\)/);
 
 const dash = read("artifacts/burger-gn/src/pages/admin/Dashboard.tsx");
 assert.match(dash, /fetchSharedAdminOrders/);
+assert.match(dash, /subscribeSharedAdminOrders/);
+assert.match(dash, /BOARD_POLL_MS|18_000|18000/);
 assert.match(dash, /90_000|90000/);
 assert.doesNotMatch(dash, /setInterval\([\s\S]{0,80}30000/);
 

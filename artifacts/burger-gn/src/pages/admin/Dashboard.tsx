@@ -14,7 +14,7 @@ import {
   REJECT_REASON_SUGGESTIONS, RECEIPT_REJECT_SUGGESTIONS,
   Order, WorkflowStage, PrepDayStats,
   ORDER_TYPE_LABELS, PAYMENT_STATUS_LABELS, WORKFLOW_LABELS,
-  formatPaymentMethod, orderHasReceipt,
+  formatPaymentMethod, orderHasReceipt, getOrder,
   getAdminStreetRequests, DeliveryStreetRequest,
 } from '../../lib/api';
 import {
@@ -40,8 +40,10 @@ import {
   isOutStageAllowed,
 } from '../../lib/orderWorkflow';
 import { acquireAdminOrderStream, releaseAdminOrderStream } from '../../lib/adminOrderStream';
-import { fetchSharedAdminOrders, mergeSharedAdminOrder } from '../../lib/adminOrdersCache';
+import { fetchSharedAdminOrders, mergeSharedAdminOrder, subscribeSharedAdminOrders } from '../../lib/adminOrdersCache';
 import { useSmartPoll } from '../../lib/useSmartPoll';
+
+const BOARD_POLL_MS = 18_000;
 
 /** Board columns — pending orders never auto-advance. */
 type ColumnKey = 'new' | 'preparing' | 'ready' | 'out' | 'done';
@@ -168,6 +170,8 @@ function OrderCard({ order, highlight, dragging, onAccept, onRefuse, onAdvance, 
   const [updating, setUpdating] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [showReceipt, setShowReceipt] = useState(false);
+  const [receiptBytes, setReceiptBytes] = useState<string | null>(order.receiptDataUrl ?? null);
+  const [receiptLoadFailed, setReceiptLoadFailed] = useState(false);
   const [tick, setTick] = useState(() => Date.now());
   const column = getBoardColumn(order);
   const prevStatus = getPrevBoardColumn(order.orderType, column);
@@ -185,6 +189,23 @@ function OrderCard({ order, highlight, dragging, onAccept, onRefuse, onAdvance, 
     !awaitingPay
     && !isPending
     && (column === 'preparing' || column === 'ready' || column === 'out');
+
+  useEffect(() => {
+    setReceiptBytes(order.receiptDataUrl ?? null);
+    setReceiptLoadFailed(false);
+  }, [order.id, order.receiptDataUrl]);
+
+  const openReceipt = async () => {
+    setShowReceipt(true);
+    if (receiptBytes) return;
+    try {
+      const full = await getOrder(order.id);
+      if (full.receiptDataUrl) setReceiptBytes(full.receiptDataUrl);
+      else setReceiptLoadFailed(true);
+    } catch {
+      setReceiptLoadFailed(true);
+    }
+  };
 
   useEffect(() => {
     if (!order.prepStartedAt || order.prepFinishedAt || column !== 'preparing') return;
@@ -282,8 +303,8 @@ function OrderCard({ order, highlight, dragging, onAccept, onRefuse, onAdvance, 
         >
           {PAYMENT_STATUS_LABELS[order.paymentStatus]}
         </span>
-        {order.receiptDataUrl && (
-          <button type="button" onClick={() => setShowReceipt(true)}
+        {orderHasReceipt(order) && (
+          <button type="button" onClick={() => void openReceipt()}
             className="font-bold uppercase px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 flex items-center gap-1">
             <ImageIcon size={10} /> Comprovante
           </button>
@@ -359,10 +380,12 @@ function OrderCard({ order, highlight, dragging, onAccept, onRefuse, onAdvance, 
       {/* Pix: Confirm / Refuse receipt */}
       {awaitingPay && (
         <div className="p-3 pt-2 space-y-2">
-          {order.receiptDataUrl && (
-            <button type="button" onClick={() => setShowReceipt(true)}
+          {(receiptBytes || orderHasReceipt(order)) && (
+            <button type="button" onClick={() => void openReceipt()}
               className="w-full rounded-xl overflow-hidden border border-amber-500/30 bg-zinc-950">
-              <img src={order.receiptDataUrl} alt="Comprovante" className="w-full max-h-36 object-contain" />
+              {receiptBytes ? (
+                <img src={receiptBytes} alt="Comprovante" className="w-full max-h-36 object-contain" />
+              ) : null}
               <p className="text-[10px] text-amber-400 font-bold uppercase py-1.5">Ver comprovante</p>
             </button>
           )}
@@ -543,18 +566,22 @@ function OrderCard({ order, highlight, dragging, onAccept, onRefuse, onAdvance, 
       )}
 
       <div
-        className={`fixed inset-0 z-[80] bg-black/80 flex items-center justify-center p-4 ${showReceipt && order.receiptDataUrl ? '' : 'hidden'}`}
+        className={`fixed inset-0 z-[80] bg-black/80 flex items-center justify-center p-4 ${showReceipt ? '' : 'hidden'}`}
         onClick={() => setShowReceipt(false)}
-        aria-hidden={!(showReceipt && order.receiptDataUrl)}
+        aria-hidden={!showReceipt}
       >
         <div className="bg-zinc-950 border border-zinc-800 rounded-2xl p-3 max-w-md w-full" onClick={e => e.stopPropagation()}>
           <div className="flex items-center justify-between mb-2">
             <p className="text-white font-bold text-sm">Comprovante #{order.orderNumber}</p>
             <button type="button" onClick={() => setShowReceipt(false)} className="text-zinc-500 hover:text-white"><X size={18} /></button>
           </div>
-          {order.receiptDataUrl ? (
-            <img src={order.receiptDataUrl} alt="Comprovante" className="w-full rounded-xl max-h-[70vh] object-contain bg-zinc-900" />
-          ) : null}
+          {receiptBytes ? (
+            <img src={receiptBytes} alt="Comprovante" className="w-full rounded-xl max-h-[70vh] object-contain bg-zinc-900" />
+          ) : (
+            <p className="text-zinc-500 text-sm py-8 text-center">
+              {receiptLoadFailed ? "Não foi possível carregar o comprovante." : "Carregando comprovante…"}
+            </p>
+          )}
           <p className="text-zinc-500 text-[11px] mt-2 text-center">
             Confirme o pagamento para enviar o pedido à fila Pendente. Depois a loja poderá aceitar.
           </p>
@@ -675,6 +702,18 @@ export default function AdminDashboard() {
     void fetchStreetRequests();
   }, [fetchOrders, fetchPrepStats, fetchStreetRequests]);
 
+  useEffect(() => {
+    return subscribeSharedAdminOrders((list) => {
+      setOrders(list);
+      setLoading(false);
+    });
+  }, []);
+
+  useSmartPoll(
+    () => { void fetchOrders(false); },
+    { intervalMs: BOARD_POLL_MS },
+  );
+
   useSmartPoll(
     () => {
       void fetchPrepStats();
@@ -757,6 +796,12 @@ export default function AdminDashboard() {
       }
     };
 
+    const onStreamReady = () => {
+      void fetchOrders(true);
+    };
+
+    es.addEventListener('connected', onStreamReady);
+    es.addEventListener('reconnect', onStreamReady);
     es.addEventListener('new_order', onNewOrder);
     es.addEventListener('order_status', onOrderStatus);
     es.addEventListener('order_receipt', onOrderReceipt);
@@ -765,6 +810,8 @@ export default function AdminDashboard() {
     es.addEventListener('street_request_resolved', onStreetResolved);
 
     return () => {
+      es.removeEventListener('connected', onStreamReady);
+      es.removeEventListener('reconnect', onStreamReady);
       es.removeEventListener('new_order', onNewOrder);
       es.removeEventListener('order_status', onOrderStatus);
       es.removeEventListener('order_receipt', onOrderReceipt);

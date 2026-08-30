@@ -5,6 +5,16 @@ Toda nova implementação aprovada pelo proprietário gera uma nova versão.
 
 ---
 
+## Burger GN v1.5.19
+
+- Painel de pedidos sem atraso de ~40 min (5xx / webhook / SSE)
+  - Kanban faz poll de `GET /orders` (~18 s) e assina o cache compartilhado; refetch no SSE `connected` / `reconnect`
+  - Webhook Mercado Pago responde 200 antes de schema/banco (não dispara retry de 15/30 min)
+  - Listagem da cozinha sem bytes de comprovante e sem pedidos finalizados
+  - Pool Neon: hostname pooler, `max: 1`, timeouts; SSE fecha pelo tempo restante da função e não espera DDL
+
+---
+
 ## Burger GN v1.5.18
 
 - Modo Operação / Modo Sono

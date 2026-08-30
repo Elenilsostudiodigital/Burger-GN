@@ -10,7 +10,30 @@ if (!process.env.DATABASE_URL) {
   );
 }
 
-export const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+/**
+ * Neon serverless: use the connection pooler hostname when given a direct
+ * compute endpoint. Local Postgres URLs are left unchanged.
+ */
+export function resolvePostgresConnectionString(raw: string): string {
+  try {
+    const url = new URL(raw);
+    const host = url.hostname;
+    if (!host.endsWith(".neon.tech") || host.includes("-pooler.")) return raw;
+    url.hostname = host.replace(/^([^.]+)\./, "$1-pooler.");
+    return url.toString();
+  } catch {
+    return raw;
+  }
+}
+
+export const pool = new Pool({
+  connectionString: resolvePostgresConnectionString(process.env.DATABASE_URL),
+  max: 1,
+  min: 0,
+  connectionTimeoutMillis: 12_000,
+  idleTimeoutMillis: 10_000,
+  allowExitOnIdle: true,
+});
 export const db = drizzle(pool, { schema });
 
 export * from "./schema";

@@ -4,7 +4,7 @@ import { ordersTable, orderItemsTable, couponsTable, deliveryZonesTable, kmDeliv
 import { eq, and, desc, sql, asc, inArray, ne } from "drizzle-orm";
 import { requireCompanyAuth, tryGetCompanySession } from "../middlewares/auth";
 import { resolvePublicCompany } from "../middlewares/company";
-import { addSSEClient, removeSSEClient, broadcastSSE } from "../lib/sse";
+import { addSSEClient, removeSSEClient, broadcastSSE, sseGracefulCloseMs } from "../lib/sse";
 import { calcDiscount } from "./coupons";
 import { haversineKm, findKmTier } from "./km_delivery";
 import { normalizeStreetKey } from "../lib/deliveryStreets";
@@ -130,8 +130,8 @@ router.get("/orders/stream", requireCompanyAuth, (req, res) => {
   }, 25000);
 
   // Close cleanly before Vercel maxDuration kills the invocation.
-  // EventSource will reconnect once — avoids error/reconnect storms that trip WAF 403.
-  const gracefulMs = Math.max(15_000, Math.min(50_000, Number(process.env["SSE_GRACEFUL_MS"] || 45_000)));
+  // Budget is remaining time from invocation start, not a fixed 45s after schema.
+  const gracefulMs = sseGracefulCloseMs(req.invocationStartedAt ?? Date.now());
   const gracefulTimer = setTimeout(() => {
     clearInterval(heartbeat);
     removeSSEClient(res);
@@ -951,18 +951,26 @@ router.post("/orders", resolvePublicCompany, async (req, res) => {
   }
 });
 
-// Get all orders (admin)
+// Get orders (admin). Default scope=board: open kitchen queue, no receipt bytes.
 router.get("/orders", requireCompanyAuth, async (req, res) => {
   try {
+    const scopeRaw = String((req.query as { scope?: string }).scope || "board");
+    const scope = scopeRaw === "finalized" || scopeRaw === "all" ? scopeRaw : "board";
     const orders = await db.select().from(ordersTable)
       .where(eq(ordersTable.companyId, req.companyId!))
       .orderBy(desc(ordersTable.createdAt));
-    const ids = orders.map(o => o.id);
+    const enriched = orders.map((o) => enrichOrder(o, { includeReceiptBytes: false }));
+    const filtered = enriched.filter((o) => {
+      if (scope === "all") return true;
+      if (scope === "finalized") return o.workflow === "finalized";
+      return o.workflow !== "finalized";
+    });
+    const ids = filtered.map((o) => o.id);
     if (ids.length === 0) { res.json([]); return; }
     const items = await db.select().from(orderItemsTable).where(inArray(orderItemsTable.orderId, ids));
-    res.json(orders.map(o => ({
-      ...enrichOrder(o),
-      items: items.filter(i => i.orderId === o.id),
+    res.json(filtered.map((o) => ({
+      ...o,
+      items: items.filter((i) => i.orderId === o.id),
     })));
   } catch (err) {
     req.log.error({ err }, "Failed to list orders");

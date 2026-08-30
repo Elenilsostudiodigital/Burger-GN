@@ -18,6 +18,7 @@ const finalizedPage = fs.readFileSync(
 assert(finalizedPage.includes("Reimprimir comprovante"), "reprint tooltip on finalized list");
 assert(finalizedPage.includes("🖨️ Reimprimir"), "labeled reprint button");
 assert(finalizedPage.includes("silentPrintOrder"), "reprint uses print agent, not browser print");
+assert(finalizedPage.includes('getOrders("finalized")'), "finalized list uses scope=finalized");
 assert(finalizedPage.includes("getOrder(") || finalizedPage.includes("getOrder"), "reprint fetches full order");
 assert(!finalizedPage.includes("window.print"), "no window.print on finalized orders");
 

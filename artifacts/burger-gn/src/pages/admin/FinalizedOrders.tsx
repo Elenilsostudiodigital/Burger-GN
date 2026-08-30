@@ -123,7 +123,7 @@ export default function FinalizedOrders() {
       setLoading(true);
       setError('');
       try {
-        const list = await getOrders();
+        const list = await getOrders("finalized");
         if (!alive) return;
         setOrders(Array.isArray(list) ? list.filter(isFinalized) : []);
       } catch {

@@ -29,7 +29,7 @@ export function MessageTemplatesTab() {
     try {
       const [res, orders] = await Promise.all([
         getAdminMessageTemplates(),
-        getOrders().catch(() => [] as Order[]),
+        getOrders("all").catch(() => [] as Order[]),
       ]);
       setTemplates(res.templates);
       setVariables(res.variables || []);

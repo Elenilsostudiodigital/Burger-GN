@@ -14,6 +14,8 @@ declare global {
       companySlug?: string;
       /** True when company.status is blocked — catalog stays public; orders must refuse. */
       companyBlocked?: boolean;
+      /** Date.now() at the start of this /api invocation (SSE remaining-time budget). */
+      invocationStartedAt?: number;
     }
   }
 }

@@ -18,8 +18,21 @@ const app: Express = express();
 
 const APP_ORIGIN_HEADER = "X-BurgerGN-Api";
 
+/** Paths that must not wait on schema/DDL — webhook 22s ack, SSE remaining-time budget. */
+function isFastAckApiPath(p: string): boolean {
+  return (
+    p === "/healthz" ||
+    p.startsWith("/healthz/") ||
+    p === "/client-telemetry" ||
+    p === "/orders/stream" ||
+    p === "/payments/mercadopago/webhook" ||
+    p.startsWith("/payments/mercadopago/webhook/")
+  );
+}
+
 /** Fingerprint so clients can tell app 403 (JSON) from Vercel WAF 403 (no header). */
 app.use("/api", (req, res, next) => {
+  req.invocationStartedAt = Date.now();
   res.setHeader(APP_ORIGIN_HEADER, "1");
   res.setHeader("Cache-Control", "private, no-store, max-age=0, must-revalidate");
   res.setHeader("CDN-Cache-Control", "no-store");
@@ -43,7 +56,7 @@ app.use("/api", (req, res, next) => {
 /** Company tables are required by nearly every authenticated/public commerce route. */
 app.use("/api", async (req, res, next) => {
   const p = req.path || "";
-  if (p === "/healthz" || p.startsWith("/healthz/") || p === "/client-telemetry") return next();
+  if (isFastAckApiPath(p)) return next();
   try {
     await ensureCompanySchema();
     next();
@@ -65,6 +78,7 @@ app.use("/api", async (req, res, next) => {
 /** Ensures additive Clube/CRM schema before handlers that touch those tables. */
 app.use("/api", async (req, res, next) => {
   const p = req.path || "";
+  if (isFastAckApiPath(p)) return next();
   const needsClubeSchema =
     p.startsWith("/admin/clientes") ||
     p.startsWith("/admin/clube") ||
@@ -83,6 +97,7 @@ app.use("/api", async (req, res, next) => {
 /** Ensures delivery streets tables before street/fee handlers. */
 app.use("/api", async (req, res, next) => {
   const p = req.path || "";
+  if (isFastAckApiPath(p)) return next();
   const needsStreets =
     p.startsWith("/delivery/streets") ||
     p.startsWith("/admin/delivery-street") ||
@@ -102,6 +117,7 @@ app.use("/api", async (req, res, next) => {
 /** Ensures delivery areas tables before area/fee handlers. */
 app.use("/api", async (req, res, next) => {
   const p = req.path || "";
+  if (isFastAckApiPath(p)) return next();
   const needsAreas =
     p.startsWith("/delivery/resolve-area") ||
     p.startsWith("/admin/delivery-areas") ||
@@ -123,6 +139,7 @@ app.use("/api", async (req, res, next) => {
 /** Ensures payment settings columns (PIX Online / PIX Manual) before payment handlers. */
 app.use("/api", async (req, res, next) => {
   const p = req.path || "";
+  if (isFastAckApiPath(p)) return next();
   const needsPayment =
     p.startsWith("/payment-settings") ||
     p.startsWith("/admin/payment-settings") ||
@@ -142,6 +159,7 @@ app.use("/api", async (req, res, next) => {
 /** Ensures business-hours table before store-status / order creation. */
 app.use("/api", async (req, res, next) => {
   const p = req.path || "";
+  if (isFastAckApiPath(p)) return next();
   const needsHours =
     p.startsWith("/store-status") ||
     p.startsWith("/business-hours") ||
@@ -160,6 +178,7 @@ app.use("/api", async (req, res, next) => {
 /** Ensures product marketing / promotion columns before product handlers. */
 app.use("/api", async (req, res, next) => {
   const p = req.path || "";
+  if (isFastAckApiPath(p)) return next();
   const needsMarketing =
     p.startsWith("/products") ||
     p.startsWith("/admin/products") ||

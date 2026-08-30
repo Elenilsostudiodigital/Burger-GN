@@ -45,7 +45,7 @@ assert.match(vercel, /CDN-Cache-Control/);
 assert.match(vercel, /no-store/);
 
 const orders = read("artifacts/api-server/src/routes/orders.ts");
-assert.match(orders, /SSE_GRACEFUL_MS|gracefulMs/);
+assert.match(orders, /SSE_GRACEFUL_MS|sseGracefulCloseMs|gracefulMs/);
 assert.match(orders, /event: reconnect/);
 assert.match(orders, /retry:/);
 

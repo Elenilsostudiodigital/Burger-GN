@@ -1183,7 +1183,9 @@ export const createOrder = (d: CreateOrderPayload) => api.post("/orders", d) as 
   pixMode?: PixMode | null;
   cardCheckoutUrl: string | null; paymentStatus?: PaymentStatus; workflow?: WorkflowStage;
 }>;
-export const getOrders = () => api.get("/orders") as Promise<Order[]>;
+export type OrdersScope = "board" | "finalized" | "all";
+export const getOrders = (scope: OrdersScope = "board") =>
+  api.get(scope === "board" ? "/orders" : `/orders?scope=${scope}`) as Promise<Order[]>;
 export const getOrder = (id: number) => api.get(`/orders/${id}`) as Promise<Order>;
 export const trackOrder = (trackingId: string) => api.get(`/orders/track/${trackingId}`) as Promise<Order>;
 
